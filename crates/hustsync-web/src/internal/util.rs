@@ -117,18 +117,23 @@ pub fn find_all_submatch_in_file(
 }
 
 pub fn extract_size_from_log(log_file: &str, re: &Regex) -> String {
-    match find_all_submatch_in_file(log_file, re) {
-        Ok(matches) if !matches.is_empty() => {
-            if let Some(last) = matches.last()
-                && !last.is_empty()
-                && let Ok(s) = String::from_utf8(last[0].clone())
-            {
-                return s;
-            }
-            String::new()
-        }
-        _ => String::new(),
+    let matches = match find_all_submatch_in_file(log_file, re) {
+        Ok(m) => m,
+        Err(_) => return String::new(),
+    };
+
+    if matches.is_empty() {
+        return String::new();
     }
+
+    if let Some(last) = matches.last()
+        && !last.is_empty()
+        && let Ok(s) = String::from_utf8(last[0].clone())
+    {
+        return s;
+    }
+    
+    String::new()
 }
 
 pub fn extract_size_from_rsync_log(log_file: &str) -> String {
