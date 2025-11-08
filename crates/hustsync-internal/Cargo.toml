@@ -1,10 +1,9 @@
 [package]
-name = "hustsync-web"
+name = "hustsync-internal"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-actix-web = "4.0"
 chrono = { version = "0.4.42", features = ["serde"] }
 regex = "1.12.2"
 reqwest = { version = "0.12.24", features = ["blocking", "json"] }
@@ -13,8 +12,8 @@ serde_json = "1.0.145"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["chrono", "env-filter", "local-time", "time"] }
 
-[lints]
-workspace = true
-
 [dev-dependencies]
 tempfile = "3.23.0"
+
+[lints]
+workspace = true
