@@ -14,6 +14,7 @@ pub struct MirrorStatus {
     pub(super) worker: String,
     pub(super) upstream: String,
     pub(super) size: String,
+    // TODO 错误不一定存在，考虑改成 Option<String>
     pub(super) error_msg: String,
     pub(super) last_update: DateTime<Utc>,
     pub(super) last_started: DateTime<Utc>,
