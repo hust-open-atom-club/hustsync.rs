@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/hustsync-cli", "crates/hustsync-config-parser", "crates/hustsync-web"]
+members = ["crates/hustsync-cli", "crates/hustsync-config-parser", "crates/hustsync-internal"]
 
 # TODO，开发中暂时禁用
 [workspace.lints.clippy]
