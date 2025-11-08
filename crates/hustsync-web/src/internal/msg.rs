@@ -50,12 +50,12 @@ struct MirrorSchedule {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum CmdVerb {
-    CmdStart,
-    CmdStop,
-    CmdDisable,
-    CmdRestart,
-    CmdPing,
-    CmdReload,
+    Start,
+    Stop,
+    Disable,
+    Restart,
+    Ping,
+    Reload,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
