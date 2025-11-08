@@ -136,9 +136,9 @@ pub fn extract_size_from_log(log_file: &str, re: &Regex) -> String {
     String::new()
 }
 
-pub fn extract_size_from_rsync_log(log_file: &str) -> String {
-    let re = Regex::new(r"(?m)^Total file size: ([0-9\.]+[KMGTP]?) bytes").unwrap();
-    extract_size_from_log(log_file, &re)
+pub fn extract_size_from_rsync_log(log_file: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let re = Regex::new(r"(?m)^Total file size: ([0-9\.]+[KMGTP]?) bytes")?;
+    Ok(extract_size_from_log(log_file, &re))
 }
 
 pub fn translate_rsync_exit_status(status: &ExitStatus) -> (Option<i32>, Option<String>) {
@@ -195,7 +195,7 @@ sent 7.55M bytes  received 823.25M bytes  5.11M bytes/sec
 total size is 1.33T  speedup is 1,604.11
 "#;
         let path = write_temp_file(real_log);
-        let res = extract_size_from_rsync_log(path.to_str().unwrap());
+        let res = extract_size_from_rsync_log(path.to_str().unwrap()).unwrap();
         let _ = fs::remove_file(&path);
         assert_eq!(res, "1.33T");
     }
@@ -208,7 +208,7 @@ some other lines
 Total file size: 2.5G bytes
 "#;
         let path = write_temp_file(log);
-        let res = extract_size_from_rsync_log(path.to_str().unwrap());
+        let res = extract_size_from_rsync_log(path.to_str().unwrap()).unwrap();
         let _ = fs::remove_file(&path);
         assert_eq!(res, "2.5G");
     }
@@ -220,14 +220,14 @@ This log does not contain the expected line.
 Total transferred file size: 99M bytes
 "#;
         let path = write_temp_file(log);
-        let res = extract_size_from_rsync_log(path.to_str().unwrap());
+        let res = extract_size_from_rsync_log(path.to_str().unwrap()).unwrap();
         let _ = fs::remove_file(&path);
         assert_eq!(res, "");
     }
 
     #[test]
     fn test_extract_size_from_rsync_log_dev_null_returns_empty() {
-        let res = extract_size_from_rsync_log("/dev/null");
+        let res = extract_size_from_rsync_log("/dev/null").unwrap();
         assert_eq!(res, "");
     }
 }
