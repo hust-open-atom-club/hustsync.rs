@@ -9,18 +9,18 @@ use crate::internal::status::SyncStatus;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-struct MirrorStatus {
-    name: String,
-    worker: String,
-    upstream: String,
-    size: String,
-    error_msg: String,
-    last_update: DateTime<Utc>,
-    last_started: DateTime<Utc>,
-    lastt_ended: DateTime<Utc>,
-    next_scheduled: DateTime<Utc>,
-    status: SyncStatus,
-    is_master: bool,
+pub struct MirrorStatus {
+    pub(super) name: String,
+    pub(super) worker: String,
+    pub(super) upstream: String,
+    pub(super) size: String,
+    pub(super) error_msg: String,
+    pub(super) last_update: DateTime<Utc>,
+    pub(super) last_started: DateTime<Utc>,
+    pub(super) lastt_ended: DateTime<Utc>,
+    pub(super) next_scheduled: DateTime<Utc>,
+    pub(super) status: SyncStatus,
+    pub(super) is_master: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
