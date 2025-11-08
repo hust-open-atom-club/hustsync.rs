@@ -2,8 +2,8 @@ use chrono::DateTime;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::internal::msg::MirrorStatus;
-use crate::internal::status::SyncStatus;
+use crate::msg::MirrorStatus;
+use crate::status::SyncStatus;
 
 type TextTime = DateTime<chrono::Utc>;
 type StampTime = DateTime<chrono::Utc>;
@@ -67,7 +67,7 @@ mod tests {
             last_ended_ts: t,
             next_scheduled: t,
             next_scheduled_ts: t,
-            status: crate::internal::status::SyncStatus::Success,
+            status: SyncStatus::Success,
             is_master: false,
         };
 
@@ -135,11 +135,11 @@ mod tests {
     #[test]
     fn build_web_mirror_status_should_work() {
         let now = Utc::now();
-        let m = crate::internal::msg::MirrorStatus {
+        let m = MirrorStatus {
             name: "arch-sync3".to_string(),
             worker: "testWorker".to_string(),
             is_master: true,
-            status: crate::internal::status::SyncStatus::Failed,
+            status: SyncStatus::Failed,
             last_update: now - Duration::minutes(30),
             last_started: now - Duration::minutes(1),
             lastt_ended: now,
@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(m2.name, "arch-sync3");
         assert_eq!(m2.upstream, "mirrors.tuna.tsinghua.edu.cn");
         assert_eq!(m2.size, "4GB");
-        assert_eq!(m2.status, crate::internal::status::SyncStatus::Failed);
+        assert_eq!(m2.status, SyncStatus::Failed);
 
         let lu = m2.laste_update.timestamp();
         let lu_ts = m2.last_update_ts.timestamp();
