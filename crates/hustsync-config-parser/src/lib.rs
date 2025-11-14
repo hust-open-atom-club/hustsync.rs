@@ -1,7 +1,8 @@
 use serde::{Deserialize, de::DeserializeOwned};
-use std::{error::Error, fs, path::Path};
+use std::{collections::HashMap, error::Error, fs, path::Path};
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ManagerConfig {
     pub server: Option<ManagerServerConfig>,
     pub files: Option<ManagerFileConfig>,
@@ -19,6 +20,7 @@ impl Default for ManagerConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ManagerServerConfig {
     pub addr: Option<String>,
     pub port: Option<u16>,
@@ -38,6 +40,7 @@ impl Default for ManagerServerConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ManagerFileConfig {
     pub db_type: Option<String>,
     pub db_file: Option<String>,
@@ -55,6 +58,7 @@ impl Default for ManagerFileConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WorkerConfig {
     pub global: Option<WorkerGlobalConfig>,
     pub manager: Option<WorkerManagerConfig>,
@@ -76,12 +80,19 @@ impl Default for WorkerConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WorkerGlobalConfig {
     pub name: Option<String>,
     pub log_dir: Option<String>,
     pub mirror_dir: Option<String>,
     pub concurrent: Option<u32>,
     pub interval: Option<u32>,
+    pub retry: Option<u32>,
+    pub timeout: Option<u32>,
+    pub rsync_options: Option<Vec<String>>,
+    pub exec_on_success: Option<Vec<String>>,
+    pub exec_on_failure: Option<Vec<String>>,
+    pub dangerous_global_success_exit_codes: Option<Vec<i32>>,
 }
 
 impl Default for WorkerGlobalConfig {
@@ -92,11 +103,18 @@ impl Default for WorkerGlobalConfig {
             mirror_dir: Some("/tmp/tunasync".into()),
             concurrent: Some(10),
             interval: Some(120),
+            retry: Some(3),
+            timeout: Some(60),
+            rsync_options: None,
+            exec_on_success: None,
+            exec_on_failure: None,
+            dangerous_global_success_exit_codes: None,
         }
     }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WorkerManagerConfig {
     pub api_base: Option<String>,
     pub token: Option<String>,
@@ -114,6 +132,7 @@ impl Default for WorkerManagerConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WorkerCgroupConfig {
     pub enable: Option<bool>,
     pub base_path: Option<String>,
@@ -131,6 +150,7 @@ impl Default for WorkerCgroupConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct WorkerServerConfig {
     pub hostname: Option<String>,
     pub listen_addr: Option<String>,
@@ -152,11 +172,28 @@ impl Default for WorkerServerConfig {
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct MirrorConfig {
     pub name: Option<String>,
     pub provider: Option<String>,
     pub upstream: Option<String>,
     pub use_ipv6: Option<bool>,
+    pub interval: Option<u32>,
+    pub retry: Option<u32>,
+    pub timeout: Option<u32>,
+    pub mirror_dir: Option<String>,
+    pub mirror_type: Option<String>,
+    pub log_dir: Option<String>,
+    pub env: Option<HashMap<String, String>>,
+    pub role: Option<String>,
+    pub exec_on_success: Option<Vec<String>>,
+    pub exec_on_failure: Option<Vec<String>>,
+    pub command: Option<String>,
+    pub fail_on_match: Option<String>,
+    pub size_pattern: Option<String>,
+    pub rsync_options: Option<Vec<String>>,
+    pub stage1_profile: Option<String>,
+    pub memory_limit: Option<String>
 }
 
 impl Default for MirrorConfig {
@@ -166,13 +203,28 @@ impl Default for MirrorConfig {
             provider: Some("rsync".into()),
             upstream: Some("rsync://rsync.elv.sh/elvish/".into()),
             use_ipv6: Some(false),
+            interval: Some(120),
+            retry: Some(3),
+            timeout: Some(60),
+            mirror_dir: Some("/tmp/tunasync/mirrors/{{.Name}}".into()),
+            mirror_type: Some("full".into()),
+            log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
+            env: None,
+            role: Some("default".into()),
+            exec_on_success: None,
+            exec_on_failure: None,
+            command: None,
+            fail_on_match: None,
+            size_pattern: None,
+            rsync_options: None,
+            stage1_profile: None,
+            memory_limit: None,
         }
     }
 }
 
-pub fn parse_config<P, T>(path: P) -> Result<T, Box<dyn Error>>
+pub fn parse_config<T>(path: impl AsRef<Path>) -> Result<T, Box<dyn Error>>
 where
-    P: AsRef<Path>,
     T: DeserializeOwned,
 {
     let rel_path = fs::canonicalize(path.as_ref())?;
