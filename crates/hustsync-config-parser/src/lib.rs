@@ -84,27 +84,26 @@ impl Default for WorkerConfig {
 pub struct WorkerGlobalConfig {
     #[serde(flatten)]
     pub retry: Option<RetryStrategy>,
+    #[serde(flatten)]
+    pub exec_on_status: Option<ExecOnStatus>,
     pub name: Option<String>,
     pub log_dir: Option<String>,
     pub mirror_dir: Option<String>,
     pub concurrent: Option<u32>,
     pub rsync_options: Option<Vec<String>>,
-    pub exec_on_success: Option<Vec<String>>,
-    pub exec_on_failure: Option<Vec<String>>,
     pub dangerous_global_success_exit_codes: Option<Vec<i32>>,
 }
 
 impl Default for WorkerGlobalConfig {
     fn default() -> Self {
         WorkerGlobalConfig {
+            retry: None,
+            exec_on_status: None,
             name: Some("test_worker".into()),
             log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
             mirror_dir: Some("/tmp/tunasync".into()),
             concurrent: Some(10),
-            retry: None,
             rsync_options: None,
-            exec_on_success: None,
-            exec_on_failure: None,
             dangerous_global_success_exit_codes: None,
         }
     }
@@ -173,6 +172,10 @@ impl Default for WorkerServerConfig {
 pub struct MirrorConfig {
     #[serde(flatten)]
     pub retry: Option<RetryStrategy>,
+    #[serde(flatten)]
+    pub exec_on_status: Option<ExecOnStatus>,
+    #[serde(flatten)]
+    pub exec_on_status_extra: Option<ExecOnStatusExtra>,
     pub name: Option<String>,
     pub provider: Option<String>,
     pub upstream: Option<String>,
@@ -182,8 +185,6 @@ pub struct MirrorConfig {
     pub log_dir: Option<String>,
     pub env: Option<HashMap<String, String>>,
     pub role: Option<String>,
-    pub exec_on_success: Option<Vec<String>>,
-    pub exec_on_failure: Option<Vec<String>>,
     pub command: Option<String>,
     pub fail_on_match: Option<String>,
     pub size_pattern: Option<String>,
@@ -196,6 +197,8 @@ impl Default for MirrorConfig {
     fn default() -> Self {
         MirrorConfig {
             retry: None,
+            exec_on_status: None,
+            exec_on_status_extra: None,
             name: Some("elvish".into()),
             provider: Some("rsync".into()),
             upstream: Some("rsync://rsync.elv.sh/elvish/".into()),
@@ -205,8 +208,6 @@ impl Default for MirrorConfig {
             log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
             env: None,
             role: Some("default".into()),
-            exec_on_success: None,
-            exec_on_failure: None,
             command: None,
             fail_on_match: None,
             size_pattern: None,
@@ -222,6 +223,18 @@ pub struct RetryStrategy {
     pub retry: Option<u32>,
     pub timeout: Option<u32>,
     pub interval: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct ExecOnStatus {
+    pub exec_on_success: Option<Vec<String>>,
+    pub exec_on_failure: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct ExecOnStatusExtra {
+    pub exec_on_success_extra: Option<Vec<String>>,
+    pub exec_on_failure_extra: Option<Vec<String>>,
 }
 
 pub fn parse_config<T>(path: impl AsRef<Path>) -> Result<T, Box<dyn Error>>
