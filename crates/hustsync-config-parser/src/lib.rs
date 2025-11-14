@@ -82,13 +82,12 @@ impl Default for WorkerConfig {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerGlobalConfig {
+    #[serde(flatten)]
+    pub retry: Option<RetryStrategy>,
     pub name: Option<String>,
     pub log_dir: Option<String>,
     pub mirror_dir: Option<String>,
     pub concurrent: Option<u32>,
-    pub interval: Option<u32>,
-    pub retry: Option<u32>,
-    pub timeout: Option<u32>,
     pub rsync_options: Option<Vec<String>>,
     pub exec_on_success: Option<Vec<String>>,
     pub exec_on_failure: Option<Vec<String>>,
@@ -102,9 +101,7 @@ impl Default for WorkerGlobalConfig {
             log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
             mirror_dir: Some("/tmp/tunasync".into()),
             concurrent: Some(10),
-            interval: Some(120),
-            retry: Some(3),
-            timeout: Some(60),
+            retry: None,
             rsync_options: None,
             exec_on_success: None,
             exec_on_failure: None,
@@ -174,13 +171,12 @@ impl Default for WorkerServerConfig {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MirrorConfig {
+    #[serde(flatten)]
+    pub retry: Option<RetryStrategy>,
     pub name: Option<String>,
     pub provider: Option<String>,
     pub upstream: Option<String>,
     pub use_ipv6: Option<bool>,
-    pub interval: Option<u32>,
-    pub retry: Option<u32>,
-    pub timeout: Option<u32>,
     pub mirror_dir: Option<String>,
     pub mirror_type: Option<String>,
     pub log_dir: Option<String>,
@@ -193,19 +189,17 @@ pub struct MirrorConfig {
     pub size_pattern: Option<String>,
     pub rsync_options: Option<Vec<String>>,
     pub stage1_profile: Option<String>,
-    pub memory_limit: Option<String>
+    pub memory_limit: Option<String>,
 }
 
 impl Default for MirrorConfig {
     fn default() -> Self {
         MirrorConfig {
+            retry: None,
             name: Some("elvish".into()),
             provider: Some("rsync".into()),
             upstream: Some("rsync://rsync.elv.sh/elvish/".into()),
             use_ipv6: Some(false),
-            interval: Some(120),
-            retry: Some(3),
-            timeout: Some(60),
             mirror_dir: Some("/tmp/tunasync/mirrors/{{.Name}}".into()),
             mirror_type: Some("full".into()),
             log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
@@ -221,6 +215,13 @@ impl Default for MirrorConfig {
             memory_limit: None,
         }
     }
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct RetryStrategy {
+    pub retry: Option<u32>,
+    pub timeout: Option<u32>,
+    pub interval: Option<u32>,
 }
 
 pub fn parse_config<T>(path: impl AsRef<Path>) -> Result<T, Box<dyn Error>>
