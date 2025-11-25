@@ -1,0 +1,15 @@
+[package]
+name = "hustsync-manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hustsync-config-parser = { path = "../hustsync-config-parser" }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+
+[dev-dependencies]
+toml = "0.9"
+
+[lints]
+workspace = true
