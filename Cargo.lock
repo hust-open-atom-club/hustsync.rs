@@ -440,6 +440,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hustsync-manager"
+version = "0.1.0"
+dependencies = [
+ "hustsync-config-parser",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hyper"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

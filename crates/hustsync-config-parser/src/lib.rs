@@ -42,6 +42,7 @@ impl Default for ManagerServerConfig {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagerFileConfig {
+    pub status_file: Option<String>,
     pub db_type: Option<String>,
     pub db_file: Option<String>,
     pub ca_cert: Option<String>,
@@ -50,6 +51,7 @@ pub struct ManagerFileConfig {
 impl Default for ManagerFileConfig {
     fn default() -> Self {
         ManagerFileConfig {
+            status_file: Some("/tmp/tunasync.json".into()),
             db_type: Some("bolt".into()),
             db_file: Some("/tmp/tunasync/manager.db".into()),
             ca_cert: Some("".into()),
