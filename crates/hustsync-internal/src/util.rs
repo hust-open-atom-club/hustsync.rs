@@ -132,7 +132,7 @@ pub fn extract_size_from_log(log_file: &str, re: &Regex) -> String {
     {
         return s;
     }
-    
+
     String::new()
 }
 
