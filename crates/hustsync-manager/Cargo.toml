@@ -10,6 +10,7 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 [dev-dependencies]
 toml = "0.9"
+tempfile = "3.23.0"
 
 [lints]
 workspace = true
