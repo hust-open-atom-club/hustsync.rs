@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = "4.5.51"
+# log = "0.4.28"
+clap = { version = "4.5.53", features = ["derive"] }
+tracing = "0.1.41"  
+hustsync-internal = { path = "../hustsync-internal" }
+hustsync-manager = { path = "../hustsync-manager" }
 
 [lints]
 workspace = true
