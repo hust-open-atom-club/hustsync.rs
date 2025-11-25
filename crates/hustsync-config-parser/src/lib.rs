@@ -97,8 +97,15 @@ pub struct WorkerGlobalConfig {
 impl Default for WorkerGlobalConfig {
     fn default() -> Self {
         WorkerGlobalConfig {
-            retry: None,
-            exec_on_status: None,
+            retry: Some(RetryStrategy {
+                retry: None,
+                timeout: None,
+                interval: Some(120),
+            }),
+            exec_on_status: Some(ExecOnStatus {
+                exec_on_success: None,
+                exec_on_failure: None,
+            }),
             name: Some("test_worker".into()),
             log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
             mirror_dir: Some("/tmp/tunasync".into()),
@@ -196,18 +203,28 @@ pub struct MirrorConfig {
 impl Default for MirrorConfig {
     fn default() -> Self {
         MirrorConfig {
-            retry: None,
-            exec_on_status: None,
-            exec_on_status_extra: None,
+            retry: Some(RetryStrategy {
+                retry: None,
+                timeout: None,
+                interval: None,
+            }),
+            exec_on_status: Some(ExecOnStatus {
+                exec_on_success: None,
+                exec_on_failure: None,
+            }),
+            exec_on_status_extra: Some(ExecOnStatusExtra {
+                exec_on_success_extra: None,
+                exec_on_failure_extra: None,
+            }),
             name: Some("elvish".into()),
             provider: Some("rsync".into()),
             upstream: Some("rsync://rsync.elv.sh/elvish/".into()),
             use_ipv6: Some(false),
-            mirror_dir: Some("/tmp/tunasync/mirrors/{{.Name}}".into()),
-            mirror_type: Some("full".into()),
-            log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
+            mirror_dir: None,
+            mirror_type: None,
+            log_dir: None,
             env: None,
-            role: Some("default".into()),
+            role: None,
             command: None,
             fail_on_match: None,
             size_pattern: None,
