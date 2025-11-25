@@ -51,7 +51,7 @@ pub struct ManagerFileConfig {
 impl Default for ManagerFileConfig {
     fn default() -> Self {
         ManagerFileConfig {
-            status_file: Some("/tmp/tunasync.json".into()),
+            status_file: None,
             db_type: Some("bolt".into()),
             db_file: Some("/tmp/tunasync/manager.db".into()),
             ca_cert: Some("".into()),

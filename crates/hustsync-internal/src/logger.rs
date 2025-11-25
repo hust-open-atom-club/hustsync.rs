@@ -1,5 +1,5 @@
-use tracing_subscriber::{fmt, EnvFilter};
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{EnvFilter, fmt};
 
 pub fn init_logger(verbose: bool, debug: bool, with_systemd: bool) {
     let level = match (debug, verbose) {
