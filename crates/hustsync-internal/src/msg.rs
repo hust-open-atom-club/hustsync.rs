@@ -26,7 +26,7 @@ pub struct MirrorStatus {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct WorkerStatus {
+pub struct WorkerStatus {
     id: String,
     url: String,
     token: String,

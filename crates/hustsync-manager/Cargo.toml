@@ -5,6 +5,10 @@ edition = "2024"
 
 [dependencies]
 hustsync-config-parser = { path = "../hustsync-config-parser" }
+hustsync-internal = { path = "../hustsync-internal" }
+redb = "3.1.0"
+serde_json = "1.0.145"
+thiserror = "2.0.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
