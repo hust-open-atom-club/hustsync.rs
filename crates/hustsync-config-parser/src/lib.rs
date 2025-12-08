@@ -52,7 +52,7 @@ impl Default for ManagerFileConfig {
     fn default() -> Self {
         ManagerFileConfig {
             status_file: None,
-            db_type: Some("bolt".into()),
+            db_type: Some("redb".into()),
             db_file: Some("/tmp/tunasync/manager.db".into()),
             ca_cert: Some("".into()),
         }
