@@ -1,3 +1,8 @@
+## 2025-12-09
+
+- 数据库：完成适配器 trait 使用
+- 数据库：参照 API 迁移 redb 适配器
+
 ## 2025-11-26
 
 - 数据库：Rust 无 bolt，相似 embedded key-value store 采用 redb

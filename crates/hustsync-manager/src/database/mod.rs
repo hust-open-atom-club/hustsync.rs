@@ -3,6 +3,9 @@ use std::{collections::HashMap, fmt, str::FromStr};
 use hustsync_internal::msg::{MirrorStatus, WorkerStatus};
 use thiserror::Error;
 
+use crate::database::db_redb::RedbAdapter;
+use redb;
+
 mod db_redb;
 
 const WORKER_BUCKETKEY: &str = "workers";
@@ -36,7 +39,6 @@ impl FromStr for DbType {
         }
     }
 }
-
 #[derive(Error, Debug)]
 enum AdapterError {
     #[error("unsupported db type: {0}")]
@@ -45,6 +47,21 @@ enum AdapterError {
     InitError(String),
     #[error("create bucket: {0}, error: {1}")]
     CreateBucketError(String, String),
+    // This should be more specific in real implementation
+    #[error("anyhow error: {0}")]
+    Anyhow(String),
+    #[error(transparent)]
+    RdbError(#[from] redb::Error),
+    #[error(transparent)]
+    RdbDatabaseError(#[from] redb::DatabaseError),
+    #[error(transparent)]
+    RdbTransactionError(#[from] redb::TransactionError),
+    #[error(transparent)]
+    RdbTableError(#[from] redb::TableError),
+    #[error(transparent)]
+    RdbCommitError(#[from] redb::CommitError),
+    #[error(transparent)]
+    RdbStorageError(#[from] redb::StorageError),
     // TODO: more error variants
 }
 
@@ -146,11 +163,75 @@ impl KvDBAdapter {
     }
 }
 
-// TODO: implement a real Redb adapter and return it here.
+impl DbAdapterTrait for KvDBAdapter {
+    fn init(&self) -> Result<(), AdapterError> {
+        KvDBAdapter::init(self)
+    }
+
+    fn list_workers(&self) -> Result<Vec<WorkerStatus>, AdapterError> {
+        KvDBAdapter::list_workers(self)
+    }
+
+    fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
+        KvDBAdapter::get_worker(self, worker_id)
+    }
+
+    fn delete_worker(&self, worker_id: &str) -> Result<(), AdapterError> {
+        KvDBAdapter::delete_worker(self, worker_id)
+    }
+
+    fn create_worker(&self, w: WorkerStatus) -> Result<WorkerStatus, AdapterError> {
+        KvDBAdapter::create_worker(self, w)
+    }
+
+    fn refresh_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
+        KvDBAdapter::refresh_worker(self, worker_id)
+    }
+
+    fn update_mirror_status(
+        &self,
+        worker_id: &str,
+        mirror_id: &str,
+        status: MirrorStatus,
+    ) -> Result<MirrorStatus, AdapterError> {
+        KvDBAdapter::update_mirror_status(self, worker_id, mirror_id, status)
+    }
+
+    fn get_mirror_status(
+        &self,
+        worker_id: &str,
+        mirror_id: &str,
+    ) -> Result<MirrorStatus, AdapterError> {
+        KvDBAdapter::get_mirror_status(self, worker_id, mirror_id)
+    }
+
+    fn list_mirror_status(&self, worker_id: &str) -> Result<Vec<MirrorStatus>, AdapterError> {
+        KvDBAdapter::list_mirror_status(self, worker_id)
+    }
+
+    fn list_all_mirror_status(&self) -> Result<Vec<MirrorStatus>, AdapterError> {
+        KvDBAdapter::list_all_mirror_status(self)
+    }
+
+    fn flush_disabled_jobs(&self) -> Result<(), AdapterError> {
+        KvDBAdapter::flush_disabled_jobs(self)
+    }
+}
+
 fn make_db_adapter(
     db_type: impl AsRef<str>,
     db_file: impl AsRef<str>,
 ) -> Result<Box<dyn DbAdapterTrait>, AdapterError> {
     let db_type = DbType::from_str(db_type.as_ref())?;
-    todo!()
+    let adapter: Box<dyn DbAdapterTrait> = match db_type {
+        DbType::Redb => {
+            let inner_db = redb::Database::open(db_file.as_ref())?;
+            let db = RedbAdapter { db: inner_db };
+            let kv = KvDBAdapter {
+                inner: Box::new(db),
+            };
+            Box::new(kv)
+        }
+    };
+    Ok(adapter)
 }
