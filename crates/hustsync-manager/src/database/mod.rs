@@ -3,6 +3,11 @@ use std::{collections::HashMap, fmt, str::FromStr};
 use hustsync_internal::msg::{MirrorStatus, WorkerStatus};
 use thiserror::Error;
 
+mod db_redb;
+
+const WORKER_BUCKETKEY: &str = "workers";
+const STATUS_BUCKETKEY: &str = "mirror_status";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbType {
     // TODO current only redb is supported
@@ -38,10 +43,12 @@ enum AdapterError {
     UnsupportedDbType(String),
     #[error("adapter initialization error: {0}")]
     InitError(String),
+    #[error("create bucket: {0}, error: {1}")]
+    CreateBucketError(String, String),
     // TODO: more error variants
 }
 
-trait DbAdapter: Send + Sync {
+trait DbAdapterTrait: Send + Sync {
     fn init(&self) -> Result<(), AdapterError>;
     fn list_workers(&self) -> Result<Vec<WorkerStatus>, AdapterError>;
     fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError>;
@@ -63,7 +70,7 @@ trait DbAdapter: Send + Sync {
     fn list_all_mirror_status(&self) -> Result<Vec<MirrorStatus>, AdapterError>;
     fn flush_disabled_jobs(&self) -> Result<(), AdapterError>;
 }
-trait KvAdapter: Send + Sync {
+trait KvAdapterTrait: Send + Sync {
     fn init_bucket(&self, bucket: &str) -> Result<(), AdapterError>;
     // TODO should be bytes return
     fn get(&self, bucket: &str, key: &str) -> Result<Option<Vec<u8>>, AdapterError>;
@@ -75,14 +82,75 @@ trait KvAdapter: Send + Sync {
 }
 
 struct KvDBAdapter {
-    inner: Box<dyn KvAdapter>,
+    inner: Box<dyn KvAdapterTrait>,
+}
+
+impl KvDBAdapter {
+    fn init(&self) -> Result<(), AdapterError> {
+        self.inner.init_bucket(WORKER_BUCKETKEY)?;
+        self.inner.init_bucket(STATUS_BUCKETKEY)?;
+        Ok(())
+    }
+
+    fn list_workers(&self) -> Result<Vec<WorkerStatus>, AdapterError> {
+        todo!()
+    }
+
+    fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
+        todo!()
+    }
+
+    fn delete_worker(&self, worker_id: &str) -> Result<(), AdapterError> {
+        todo!()
+    }
+
+    fn create_worker(&self, w: WorkerStatus) -> Result<WorkerStatus, AdapterError> {
+        todo!()
+    }
+
+    fn refresh_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
+        todo!()
+    }
+
+    fn update_mirror_status(
+        &self,
+        worker_id: &str,
+        mirror_id: &str,
+        status: MirrorStatus,
+    ) -> Result<MirrorStatus, AdapterError> {
+        todo!()
+    }
+
+    fn get_mirror_status(
+        &self,
+        worker_id: &str,
+        mirror_id: &str,
+    ) -> Result<MirrorStatus, AdapterError> {
+        todo!()
+    }
+
+    fn list_mirror_status(&self, worker_id: &str) -> Result<Vec<MirrorStatus>, AdapterError> {
+        todo!()
+    }
+
+    fn list_all_mirror_status(&self) -> Result<Vec<MirrorStatus>, AdapterError> {
+        todo!()
+    }
+
+    fn flush_disabled_jobs(&self) -> Result<(), AdapterError> {
+        todo!()
+    }
+
+    fn close(&self) -> Result<(), AdapterError> {
+        self.inner.close()
+    }
 }
 
 // TODO: implement a real Redb adapter and return it here.
 fn make_db_adapter(
     db_type: impl AsRef<str>,
     db_file: impl AsRef<str>,
-) -> Result<Box<dyn DbAdapter>, AdapterError> {
+) -> Result<Box<dyn DbAdapterTrait>, AdapterError> {
     let db_type = DbType::from_str(db_type.as_ref())?;
     todo!()
 }
