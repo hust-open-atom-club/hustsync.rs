@@ -60,9 +60,23 @@ struct ManagerArgs {
     pidfile: PathBuf,
 }
 
-// TODO
 #[derive(Args, Debug)]
-struct WorkerArgs {}
+struct WorkerArgs {
+    /// Load worker configurations from `FILE`
+    #[arg(short, long, value_name = "config", value_hint = FilePath)]
+    config: Option<PathBuf>,
+    /// Run worker in verbose mode
+    #[arg(long)]
+    verbose: bool,
+    /// Run worker in debug mode
+    #[arg(long)]
+    debug: bool,
+    /// Enable systemd-compactiable logging
+    #[arg(long)]
+    with_systemd: bool,
+    #[arg(long, value_name = "pid-file", value_hint = FilePath)]
+    pid_file: PathBuf,
+}
 
 // TODO
 fn start_manager(manager_args: ManagerArgs) -> () {
