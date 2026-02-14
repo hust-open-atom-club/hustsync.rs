@@ -40,7 +40,7 @@ impl FromStr for DbType {
     }
 }
 #[derive(Error, Debug)]
-enum AdapterError {
+pub enum AdapterError {
     #[error("unsupported db type: {0}")]
     UnsupportedDbType(String),
     #[error("adapter initialization error: {0}")]
@@ -65,7 +65,7 @@ enum AdapterError {
     // TODO: more error variants
 }
 
-trait DbAdapterTrait: Send + Sync {
+pub trait DbAdapterTrait: Send + Sync {
     fn init(&self) -> Result<(), AdapterError>;
     fn list_workers(&self) -> Result<Vec<WorkerStatus>, AdapterError>;
     fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError>;
@@ -86,6 +86,7 @@ trait DbAdapterTrait: Send + Sync {
     fn list_mirror_status(&self, worker_id: &str) -> Result<Vec<MirrorStatus>, AdapterError>;
     fn list_all_mirror_status(&self) -> Result<Vec<MirrorStatus>, AdapterError>;
     fn flush_disabled_jobs(&self) -> Result<(), AdapterError>;
+    fn close(&self) -> Result<(), AdapterError>;
 }
 trait KvAdapterTrait: Send + Sync {
     fn init_bucket(&self, bucket: &str) -> Result<(), AdapterError>;
@@ -110,23 +111,55 @@ impl KvDBAdapter {
     }
 
     fn list_workers(&self) -> Result<Vec<WorkerStatus>, AdapterError> {
-        todo!()
+        let workers_map = self.inner.get_all(WORKER_BUCKETKEY)?;
+        let mut workers = Vec::new();
+
+        for (_, v) in workers_map {
+            let w: WorkerStatus = serde_json::from_slice(&v)
+                .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+            workers.push(w);
+        }
+        Ok(workers)
     }
 
     fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
-        todo!()
+        let v = self.inner.get(WORKER_BUCKETKEY, worker_id)?;
+        match v {
+            Some(bytes) => {
+                let w: WorkerStatus = serde_json::from_slice(&bytes)
+                    .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+                Ok(w)
+            }
+            None => Err(AdapterError::Anyhow(format!(
+                "invalid workerID {}",
+                worker_id
+            ))),
+        }
     }
 
     fn delete_worker(&self, worker_id: &str) -> Result<(), AdapterError> {
-        todo!()
+        // Check existence first to match Go behavior (optional but good for error reporting)
+        let v = self.inner.get(WORKER_BUCKETKEY, worker_id)?;
+        if v.is_none() {
+            return Err(AdapterError::Anyhow(format!(
+                "invalid workerID {}",
+                worker_id
+            )));
+        }
+        self.inner.delete(WORKER_BUCKETKEY, worker_id)
     }
 
     fn create_worker(&self, w: WorkerStatus) -> Result<WorkerStatus, AdapterError> {
-        todo!()
+        let v = serde_json::to_vec(&w)
+            .map_err(|e| AdapterError::Anyhow(format!("json marshal error: {}", e)))?;
+        self.inner.put(WORKER_BUCKETKEY, &w.id, &v)?;
+        Ok(w)
     }
 
     fn refresh_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
-        todo!()
+        let mut w = self.get_worker(worker_id)?;
+        w.last_online = chrono::Utc::now();
+        self.create_worker(w)
     }
 
     fn update_mirror_status(
@@ -135,7 +168,11 @@ impl KvDBAdapter {
         mirror_id: &str,
         status: MirrorStatus,
     ) -> Result<MirrorStatus, AdapterError> {
-        todo!()
+        let id = format!("{}/{}", mirror_id, worker_id);
+        let v = serde_json::to_vec(&status)
+            .map_err(|e| AdapterError::Anyhow(format!("json marshal error: {}", e)))?;
+        self.inner.put(STATUS_BUCKETKEY, &id, &v)?;
+        Ok(status)
     }
 
     fn get_mirror_status(
@@ -143,19 +180,60 @@ impl KvDBAdapter {
         worker_id: &str,
         mirror_id: &str,
     ) -> Result<MirrorStatus, AdapterError> {
-        todo!()
+        let id = format!("{}/{}", mirror_id, worker_id);
+        let v = self.inner.get(STATUS_BUCKETKEY, &id)?;
+        match v {
+            Some(bytes) => {
+                let m: MirrorStatus = serde_json::from_slice(&bytes)
+                    .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+                Ok(m)
+            }
+            None => Err(AdapterError::Anyhow(format!(
+                "no mirror '{}' exists in worker '{}'",
+                mirror_id, worker_id
+            ))),
+        }
     }
 
     fn list_mirror_status(&self, worker_id: &str) -> Result<Vec<MirrorStatus>, AdapterError> {
-        todo!()
+        let vals = self.inner.get_all(STATUS_BUCKETKEY)?;
+        let mut result = Vec::new();
+
+        for (k, v) in vals {
+            // key format: mirrorID/workerID
+            let parts: Vec<&str> = k.split('/').collect();
+            if parts.len() > 1 && parts[1] == worker_id {
+                let m: MirrorStatus = serde_json::from_slice(&v)
+                    .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+                result.push(m);
+            }
+        }
+        Ok(result)
     }
 
     fn list_all_mirror_status(&self) -> Result<Vec<MirrorStatus>, AdapterError> {
-        todo!()
+        let vals = self.inner.get_all(STATUS_BUCKETKEY)?;
+        let mut result = Vec::new();
+
+        for (_, v) in vals {
+            let m: MirrorStatus = serde_json::from_slice(&v)
+                .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+            result.push(m);
+        }
+        Ok(result)
     }
 
     fn flush_disabled_jobs(&self) -> Result<(), AdapterError> {
-        todo!()
+        let vals = self.inner.get_all(STATUS_BUCKETKEY)?;
+        for (k, v) in vals {
+            let m: MirrorStatus = serde_json::from_slice(&v)
+                .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+
+            if m.status == hustsync_internal::status::SyncStatus::Disabled || m.name.is_empty() {
+                self.inner.delete(STATUS_BUCKETKEY, &k)?;
+            }
+        }
+        Ok(())
     }
 
     fn close(&self) -> Result<(), AdapterError> {
@@ -216,16 +294,20 @@ impl DbAdapterTrait for KvDBAdapter {
     fn flush_disabled_jobs(&self) -> Result<(), AdapterError> {
         KvDBAdapter::flush_disabled_jobs(self)
     }
+
+    fn close(&self) -> Result<(), AdapterError> {
+        KvDBAdapter::close(self)
+    }
 }
 
-fn make_db_adapter(
+pub fn make_db_adapter(
     db_type: impl AsRef<str>,
     db_file: impl AsRef<str>,
 ) -> Result<Box<dyn DbAdapterTrait>, AdapterError> {
     let db_type = DbType::from_str(db_type.as_ref())?;
     let adapter: Box<dyn DbAdapterTrait> = match db_type {
         DbType::Redb => {
-            let inner_db = redb::Database::open(db_file.as_ref())?;
+            let inner_db = redb::Database::create(db_file.as_ref())?;
             let db = RedbAdapter { db: inner_db };
             let kv = KvDBAdapter {
                 inner: Box::new(db),

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = { version = "0.4.43", features = ["serde"] }
 hustsync-config-parser = { path = "../hustsync-config-parser" }
 hustsync-internal = { path = "../hustsync-internal" }
 redb = "3.1.0"

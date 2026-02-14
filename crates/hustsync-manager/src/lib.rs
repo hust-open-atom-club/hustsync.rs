@@ -1,6 +1,6 @@
 mod common;
 mod config;
-mod database;
+pub mod database;
 mod server;
 
 pub use config::load_config;
