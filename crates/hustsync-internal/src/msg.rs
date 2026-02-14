@@ -10,28 +10,28 @@ use crate::status::SyncStatus;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct MirrorStatus {
-    pub(super) name: String,
-    pub(super) worker: String,
-    pub(super) upstream: String,
-    pub(super) size: String,
+    pub name: String,
+    pub worker: String,
+    pub upstream: String,
+    pub size: String,
     // TODO 错误不一定存在，考虑改成 Option<String>
-    pub(super) error_msg: String,
-    pub(super) last_update: DateTime<Utc>,
-    pub(super) last_started: DateTime<Utc>,
-    pub(super) lastt_ended: DateTime<Utc>,
-    pub(super) next_scheduled: DateTime<Utc>,
-    pub(super) status: SyncStatus,
-    pub(super) is_master: bool,
+    pub error_msg: String,
+    pub last_update: DateTime<Utc>,
+    pub last_started: DateTime<Utc>,
+    pub last_ended: DateTime<Utc>,
+    pub next_scheduled: DateTime<Utc>,
+    pub status: SyncStatus,
+    pub is_master: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkerStatus {
-    id: String,
-    url: String,
-    token: String,
-    last_online: DateTime<Utc>,
-    last_register: DateTime<Utc>,
+    pub id: String,
+    pub url: String,
+    pub token: String,
+    pub last_online: DateTime<Utc>,
+    pub last_register: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
