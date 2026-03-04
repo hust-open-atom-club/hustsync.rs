@@ -124,17 +124,16 @@ impl KvDBAdapter {
 
     fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
         let v = self.inner.get(WORKER_BUCKETKEY, worker_id)?;
-        match v {
-            Some(bytes) => {
-                let w: WorkerStatus = serde_json::from_slice(&bytes)
-                    .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
-                Ok(w)
-            }
-            None => Err(AdapterError::Anyhow(format!(
+        let Some(bytes) = v else {
+            return Err(AdapterError::Anyhow(format!(
                 "invalid workerID {}",
                 worker_id
-            ))),
-        }
+            )));
+        };
+
+        let w: WorkerStatus = serde_json::from_slice(&bytes)
+            .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+        Ok(w)
     }
 
     fn delete_worker(&self, worker_id: &str) -> Result<(), AdapterError> {
