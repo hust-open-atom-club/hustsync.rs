@@ -1,7 +1,6 @@
 use std::{error::Error, io, path::PathBuf, sync::Arc};
 
 use clap::{Args, Parser, ValueHint::FilePath};
-use hustsync_internal::logger::{self, init_logger};
 use hustsync_manager::Manager;
 use tracing::{info, warn};
 
@@ -83,7 +82,7 @@ struct WorkerArgs {
 }
 
 // TODO
-fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> {
+async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> {
     hustsync_internal::logger::init_logger(
         manager_args.verbose,
         manager_args.debug,
@@ -109,7 +108,7 @@ fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> {
     };
     info!("Run hustsync manager server.");
     // TODO
-    // manager.run()?;
+    manager.run().await?;
     Ok(())
 }
 
@@ -128,10 +127,11 @@ fn start_worker(worker_args: WorkerArgs) -> Result<(), Box<dyn Error>> {
     todo!()
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Manager(m) => start_manager(m),
+        Commands::Manager(m) => start_manager(m).await,
         Commands::Worker(w) => start_worker(w),
     }
 }

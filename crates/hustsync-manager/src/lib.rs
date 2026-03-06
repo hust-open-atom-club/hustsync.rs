@@ -1,6 +1,8 @@
 mod common;
 mod config;
 pub mod database;
+mod handlers;
+mod middleware;
 mod server;
 
 pub use config::load_config;

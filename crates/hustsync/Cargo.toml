@@ -10,6 +10,7 @@ tracing = "0.1.41"
 hustsync-internal = { path = "../hustsync-internal" }
 hustsync-manager = { path = "../hustsync-manager" }
 hustsync-worker = { path = "../hustsync-worker" }
+tokio = { version = "1.50.0", features = ["full"] }
 
 [lints]
 workspace = true

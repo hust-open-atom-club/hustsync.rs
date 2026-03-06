@@ -42,6 +42,7 @@ impl Default for ManagerServerConfig {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagerFileConfig {
+    #[serde(default)]
     pub status_file: String,
     pub db_type: String,
     pub db_file: String,
