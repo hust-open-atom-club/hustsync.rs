@@ -37,47 +37,31 @@ pub fn get_hustsync_manager(
     };
 
     manager.engine = manager.engine.layer(CatchPanicLayer::new());
-    if config.debug.unwrap() {
+    if config.debug {
         manager.engine = manager.engine.layer(TraceLayer::new_for_http());
     }
 
-    if let Some(files) = &config.files {
-        if let Some(ca) = &files.ca_cert {
-            if !ca.is_empty() {
-                match create_http_client(Some(ca)) {
-                    Ok(client) => {
-                        manager.http_client = Some(client);
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to create HTTP client with CA certificate: {}", e);
-                        return Err(e);
-                    }
-                }
+    if !config.files.ca_cert.is_empty() {
+        match create_http_client(Some(&config.files.ca_cert)) {
+            Ok(client) => {
+                manager.http_client = Some(client);
+            }
+            Err(e) => {
+                tracing::error!("Failed to create HTTP client with CA certificate: {}", e);
+                return Err(e);
             }
         }
-        if let Some(db_file) = &files.db_file {
-            if !db_file.is_empty() {
-                match make_db_adapter(
-                    config
-                        .as_ref()
-                        .files
-                        .as_ref()
-                        .unwrap()
-                        .db_type
-                        .clone()
-                        .unwrap_or_default(),
-                    db_file,
-                ) {
-                    Ok(adapter) => {
-                        manager.adapter = Some(adapter);
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to create database adapter: {}", e);
-                        return Err(Box::new(e));
-                    }
-                };
+    }
+    if !config.files.db_file.is_empty() {
+        match make_db_adapter(&config.files.db_type, &config.files.db_file) {
+            Ok(adapter) => {
+                manager.adapter = Some(adapter);
             }
-        }
+            Err(e) => {
+                tracing::error!("Failed to create database adapter: {}", e);
+                return Err(Box::new(e));
+            }
+        };
     }
 
     todo!()

@@ -4,17 +4,17 @@ use std::{collections::HashMap, error::Error, fs, path::Path};
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagerConfig {
-    pub server: Option<ManagerServerConfig>,
-    pub files: Option<ManagerFileConfig>,
-    pub debug: Option<bool>,
+    pub server: ManagerServerConfig,
+    pub files: ManagerFileConfig,
+    pub debug: bool,
 }
 
 impl Default for ManagerConfig {
     fn default() -> Self {
         ManagerConfig {
-            server: Some(ManagerServerConfig::default()),
-            files: Some(ManagerFileConfig::default()),
-            debug: Some(false),
+            server: ManagerServerConfig::default(),
+            files: ManagerFileConfig::default(),
+            debug: false,
         }
     }
 }
@@ -22,19 +22,19 @@ impl Default for ManagerConfig {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagerServerConfig {
-    pub addr: Option<String>,
-    pub port: Option<u16>,
-    pub ssl_cert: Option<String>,
-    pub ssl_key: Option<String>,
+    pub addr: String,
+    pub port: u16,
+    pub ssl_cert: String,
+    pub ssl_key: String,
 }
 
 impl Default for ManagerServerConfig {
     fn default() -> Self {
         ManagerServerConfig {
-            addr: Some("127.0.0.1".into()),
-            port: Some(14242),
-            ssl_cert: Some("".into()),
-            ssl_key: Some("".into()),
+            addr: "127.0.0.1".into(),
+            port: 14242,
+            ssl_cert: "".into(),
+            ssl_key: "".into(),
         }
     }
 }
@@ -42,19 +42,19 @@ impl Default for ManagerServerConfig {
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagerFileConfig {
-    pub status_file: Option<String>,
-    pub db_type: Option<String>,
-    pub db_file: Option<String>,
-    pub ca_cert: Option<String>,
+    pub status_file: String,
+    pub db_type: String,
+    pub db_file: String,
+    pub ca_cert: String,
 }
 
 impl Default for ManagerFileConfig {
     fn default() -> Self {
         ManagerFileConfig {
-            status_file: Some("/var/lib/hustsync/hustsync.json".into()),
-            db_type: Some("redb".into()),
-            db_file: Some("/var/lib/hustsync/hustsync.db".into()),
-            ca_cert: Some("".into()),
+            status_file: "/var/lib/hustsync/hustsync.json".into(),
+            db_type: "redb".into(),
+            db_file: "/var/lib/hustsync/hustsync.db".into(),
+            ca_cert: "".into(),
         }
     }
 }
