@@ -6,6 +6,7 @@ members = [
     "crates/hustsync-config-parser",
     "crates/hustsync-internal",
     "crates/hustsync-manager",
+    "crates/hustsync-worker",
 ]
 
 [workspace.lints.clippy]

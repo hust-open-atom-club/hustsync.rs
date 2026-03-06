@@ -300,7 +300,7 @@ impl DbAdapterTrait for KvDBAdapter {
 }
 
 pub fn make_db_adapter(
-    db_type: impl AsRef<str>,
+    db_type: String,
     db_file: impl AsRef<str>,
 ) -> Result<Box<dyn DbAdapterTrait>, AdapterError> {
     let db_type = DbType::from_str(db_type.as_ref())?;
