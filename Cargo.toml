@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/hustsync-cli", "crates/hustsync-config-parser", "crates/hustsync-internal", "crates/hustsync-manager"]
+members = [
+    "crates/hustsync",
+    "crates/hustsynctl",
+    "crates/hustsync-config-parser",
+    "crates/hustsync-internal",
+    "crates/hustsync-manager",
+]
 
 [workspace.lints.clippy]
 panic = "deny"
