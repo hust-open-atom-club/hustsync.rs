@@ -1,7 +1,8 @@
-use std::{error::Error, io, path::PathBuf};
+use std::{error::Error, io, path::PathBuf, sync::Arc};
 
 use clap::{Args, Parser, ValueHint::FilePath};
-use hustsync_internal::logger::init_logger;
+use hustsync_internal::logger::{self, init_logger};
+use hustsync_manager::Manager;
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
@@ -52,6 +53,9 @@ struct ManagerArgs {
     /// Run manager in debug mode
     #[arg(long)]
     debug: bool,
+    // Enable verbose logging
+    #[arg(short, long)]
+    verbose: bool,
     /// Enable systemd-compactiable logging
     #[arg(long)]
     with_systemd: bool,
@@ -79,15 +83,48 @@ struct WorkerArgs {
 }
 
 // TODO
-fn start_manager(manager_args: ManagerArgs) -> () {
-    println!("Starting HustSync Manager...");
-    println!("Manager Args: {:?}", manager_args);
-    todo!()
+fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> {
+    hustsync_internal::logger::init_logger(
+        manager_args.verbose,
+        manager_args.debug,
+        manager_args.with_systemd,
+    );
+
+    let config = match hustsync_manager::load_config(manager_args.config.unwrap_or_default()) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            warn!("Error loading manager config: {err}.");
+            std::process::exit(1);
+        }
+    };
+    let config = Arc::new(config);
+    //? SET WEB FRAMEWORK TO DEBUG MODE
+
+    let manager = match hustsync_manager::get_hustsync_manager(config) {
+        Ok(m) => m,
+        Err(err) => {
+            warn!("Error initializing manager: {err}.");
+            std::process::exit(1);
+        }
+    };
+    info!("Run hustsync manager server.");
+    // TODO
+    // manager.run()?;
+    Ok(())
 }
 
 // TODO
-fn start_worker(worker_args: WorkerArgs) -> () {
-    println!("Starting HustSync Worker...");
+fn start_worker(worker_args: WorkerArgs) -> Result<(), Box<dyn Error>> {
+    hustsync_internal::logger::init_logger(
+        worker_args.verbose,
+        worker_args.debug,
+        worker_args.with_systemd,
+    );
+    //? SET WEB FRAMEWORK TO DEBUG MODE
+
+    info!("Run hustsync worker.");
+    // TODO
+    // let config = match
     todo!()
 }
 
@@ -97,6 +134,4 @@ fn main() -> Result<(), Box<dyn Error>> {
         Commands::Manager(m) => start_manager(m),
         Commands::Worker(w) => start_worker(w),
     }
-
-    Ok(())
 }
