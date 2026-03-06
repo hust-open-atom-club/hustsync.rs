@@ -1,0 +1,1 @@
+cargo run -p hustsync m --config ../../docs/example/manager.conf --verbose

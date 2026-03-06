@@ -1,17 +1,25 @@
 use axum::{
-    Router,
+    Router, middleware,
     routing::{delete, get, post},
 };
+use axum_server::tls_rustls::RustlsConfig;
 use hustsync_config_parser::ManagerConfig;
 use hustsync_internal::util::create_http_client;
 use once_cell::sync::OnceCell;
 use reqwest::{Certificate, Client, Response};
-use std::error::Error;
 use std::sync::Arc;
+use std::{error::Error, time::Duration};
 use tokio::sync::RwLock;
+use tower_http::timeout::TimeoutLayer;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 use crate::database::{DbAdapterTrait, make_db_adapter};
+use crate::handlers;
+
+pub(crate) const ERROR_KEY: &str = "error";
+pub(crate) const INFO_KEY: &str = "message";
+
+static MANAGER: OnceCell<Manager> = OnceCell::new();
 
 pub struct Manager {
     pub config: Arc<ManagerConfig>,
@@ -21,7 +29,6 @@ pub struct Manager {
     pub http_client: Option<Client>,
 }
 
-static MANAGER: OnceCell<Manager> = OnceCell::new();
 pub fn get_hustsync_manager(
     config: Arc<ManagerConfig>,
 ) -> Result<&'static Manager, Box<dyn Error>> {
@@ -64,5 +71,67 @@ pub fn get_hustsync_manager(
         };
     }
 
-    todo!()
+    manager.engine = manager
+        .engine
+        .layer(middleware::from_fn(crate::middleware::context_error_logger));
+
+    manager.engine = manager.engine.route("/ping", get(handlers::ping_handler));
+    //     .route("/jobs", get(handlers::list_all_jobs))
+    //     .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
+    //     .route("/workers", get(handlers::list_all_workers))
+    //     .route("/workers", post(handlers::register_worker))
+    //     .route("/cmd", post(handlers::handle_cmd));
+
+    // let worker_validate_group = Router::new()
+    //     .route("/:id", delete(delete_worker))
+    //     .route("/:id/jobs", get(list_jobs_of_worker))
+    //     .route("/:id/jobs/:job", post(update_job_of_worker))
+    //     .route("/:id/jobs/:job/size", post(update_mirror_size))
+    //     .route("/:id/schedules", post(update_schedules_of_worker));
+    // // .layer(middleware::from_fn(crate::middleware::worker_id_validator));
+    // manager.engine = manager.engine.nest("/workers", worker_validate_group);
+    MANAGER
+        .set(manager)
+        .map_err(|_| "Manager cell already initialized")?;
+
+    MANAGER
+        .get()
+        .ok_or_else(|| "Failed to retrieve Manager after setting".into())
+}
+
+impl Manager {
+    pub async fn run(&'static self) -> Result<(), Box<dyn Error>> {
+        let addr = format!("{}:{}", self.config.server.addr, self.config.server.port);
+        let socket_addr: std::net::SocketAddr = addr.parse().expect("Failed to parse address");
+
+        let app = self.engine.clone().layer(TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(10),
+        ));
+
+        let is_tls =
+            !self.config.server.ssl_cert.is_empty() && !self.config.server.ssl_key.is_empty();
+
+        if !is_tls {
+            let listener = tokio::net::TcpListener::bind(&socket_addr)
+                .await
+                .expect("Failed to bind address");
+            tracing::info!("Manager (HTTP) listening on {}", addr);
+            axum::serve(listener, app).await.expect("Server error");
+        } else {
+            let tls_config = RustlsConfig::from_pem_file(
+                &self.config.server.ssl_cert,
+                &self.config.server.ssl_key,
+            )
+            .await
+            .expect("Failed to load TLS certificates");
+
+            tracing::info!("Manager (HTTPS) listening on {}", addr);
+            axum_server::bind_rustls(socket_addr, tls_config)
+                .serve(app.into_make_service())
+                .await
+                .expect("Server error");
+        }
+        Ok(())
+    }
 }
