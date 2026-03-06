@@ -1,6 +1,5 @@
 use regex::Regex;
-use reqwest::Certificate;
-use reqwest::blocking::{Client, Response};
+use reqwest::{Certificate, Client, Response};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
@@ -43,7 +42,7 @@ pub fn get_tls_certificate<P: AsRef<Path>>(ca_file: P) -> io::Result<Certificate
     Certificate::from_pem(&pem).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-pub fn create_http_client(ca_file: Option<&str>) -> Result<Client, Box<dyn std::error::Error>> {
+pub fn create_http_client(ca_file: Option<&String>) -> Result<Client, Box<dyn std::error::Error>> {
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(5))
         .pool_idle_timeout(Duration::from_secs(20));
@@ -56,7 +55,7 @@ pub fn create_http_client(ca_file: Option<&str>) -> Result<Client, Box<dyn std::
     Ok(builder.build()?)
 }
 
-pub fn post_json<T: Serialize>(
+pub async fn post_json<T: Serialize>(
     url: &str,
     obj: &T,
     client: Option<&Client>,
@@ -70,11 +69,12 @@ pub fn post_json<T: Serialize>(
         .post(url)
         .header("Content-Type", "application/json; charset=utf-8")
         .json(obj)
-        .send()?;
+        .send()
+        .await?;
     Ok(resp)
 }
 
-pub fn get_json<T: DeserializeOwned>(
+pub async fn get_json<T: DeserializeOwned>(
     url: &str,
     client: Option<&Client>,
 ) -> Result<T, Box<dyn std::error::Error>> {
@@ -83,11 +83,11 @@ pub fn get_json<T: DeserializeOwned>(
         None => &create_http_client(None)?,
     };
 
-    let resp = c.get(url).send()?;
+    let resp = c.get(url).send().await?;
     if !resp.status().is_success() {
         return Err(format!("HTTP status code is not 200: {}", resp.status()).into());
     }
-    let parsed = resp.json::<T>()?;
+    let parsed = resp.json::<T>().await?;
     Ok(parsed)
 }
 
