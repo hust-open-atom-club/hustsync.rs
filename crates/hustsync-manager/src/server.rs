@@ -30,11 +30,15 @@ pub struct Manager {
 }
 
 pub fn get_hustsync_manager(
-    config: Arc<ManagerConfig>,
+    config: Option<Arc<ManagerConfig>>,
 ) -> Result<&'static Manager, Box<dyn Error>> {
     if let Some(manager) = MANAGER.get() {
         return Ok(manager);
     }
+
+    let Some(config) = config else {
+        return Err("Manager not initialized and no config provided".into());
+    };
 
     let mut manager = Manager {
         config: Arc::clone(&config),
@@ -75,21 +79,21 @@ pub fn get_hustsync_manager(
         .engine
         .layer(middleware::from_fn(crate::middleware::context_error_logger));
 
-    manager.engine = manager.engine.route("/ping", get(handlers::ping_handler));
-    //     .route("/jobs", get(handlers::list_all_jobs))
-    //     .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
-    //     .route("/workers", get(handlers::list_all_workers))
-    //     .route("/workers", post(handlers::register_worker))
-    //     .route("/cmd", post(handlers::handle_cmd));
+    manager.engine = manager.engine.route("/ping", get(handlers::ping_handler))
+        .route("/jobs", get(handlers::list_all_jobs))
+        .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
+        .route("/workers", get(handlers::list_all_workers))
+        .route("/workers", post(handlers::register_worker));
 
-    // let worker_validate_group = Router::new()
-    //     .route("/:id", delete(delete_worker))
-    //     .route("/:id/jobs", get(list_jobs_of_worker))
-    //     .route("/:id/jobs/:job", post(update_job_of_worker))
-    //     .route("/:id/jobs/:job/size", post(update_mirror_size))
-    //     .route("/:id/schedules", post(update_schedules_of_worker));
-    // // .layer(middleware::from_fn(crate::middleware::worker_id_validator));
-    // manager.engine = manager.engine.nest("/workers", worker_validate_group);
+    let worker_validate_group = Router::new()
+        .route("/{id}", delete(handlers::delete_worker))
+        .route("/{id}/jobs", get(handlers::list_jobs_of_worker))
+        .route("/{id}/jobs/{job}", post(handlers::update_job_of_worker))
+        .route("/{id}/jobs/{job}/size", post(handlers::update_mirror_size))
+        .route("/{id}/schedules", post(handlers::update_schedules_of_worker));
+    // .layer(middleware::from_fn(crate::middleware::worker_id_validator));
+    manager.engine = manager.engine.nest("/workers", worker_validate_group)
+        .route("/cmd", post(handlers::handle_cmd));
     MANAGER
         .set(manager)
         .map_err(|_| "Manager cell already initialized")?;

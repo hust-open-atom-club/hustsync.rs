@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum SyncStatus {
     None,
     Failed,
@@ -22,7 +22,7 @@ mod tests {
     #[test]
     fn test_sync_status_json_ser_de() {
         let b = serde_json::to_vec(&SyncStatus::PreSyncing).unwrap();
-        assert_eq!(b, b"\"pre-syncing\"");
+        assert_eq!(b, b"\"pre_syncing\"");
 
         let s: SyncStatus = serde_json::from_slice(b"\"failed\"").unwrap();
         assert_eq!(s, SyncStatus::Failed);

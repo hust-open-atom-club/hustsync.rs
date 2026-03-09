@@ -97,9 +97,8 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
         }
     };
     let config = Arc::new(config);
-    //? SET WEB FRAMEWORK TO DEBUG MODE
 
-    let manager = match hustsync_manager::get_hustsync_manager(config) {
+    let manager = match hustsync_manager::get_hustsync_manager(Some(config)) {
         Ok(m) => m,
         Err(err) => {
             warn!("Error initializing manager: {err}.");
@@ -107,7 +106,6 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
         }
     };
     info!("Run hustsync manager server.");
-    // TODO
     manager.run().await?;
     Ok(())
 }
