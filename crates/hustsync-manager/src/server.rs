@@ -76,20 +76,19 @@ pub fn get_hustsync_manager(
         .layer(middleware::from_fn(crate::middleware::context_error_logger));
 
     manager.engine = manager.engine.route("/ping", get(handlers::ping_handler));
-    //     .route("/jobs", get(handlers::list_all_jobs))
+    manager.engine = manager.engine.route("/jobs", get(handlers::list_all_jobs));
     //     .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
-    //     .route("/workers", get(handlers::list_all_workers))
-    //     .route("/workers", post(handlers::register_worker))
+    manager.engine = manager.engine.route("/workers", get(handlers::list_all_workers));
+    manager.engine = manager.engine.route("/workers", post(handlers::register_worker));
     //     .route("/cmd", post(handlers::handle_cmd));
 
-    // let worker_validate_group = Router::new()
-    //     .route("/:id", delete(delete_worker))
-    //     .route("/:id/jobs", get(list_jobs_of_worker))
-    //     .route("/:id/jobs/:job", post(update_job_of_worker))
+    let worker_validate_group = Router::new()
+        // .route("/{id}", delete(delete_worker))
+        .route("/{id}/jobs/{job}", post(handlers::update_job_of_worker));
     //     .route("/:id/jobs/:job/size", post(update_mirror_size))
     //     .route("/:id/schedules", post(update_schedules_of_worker));
     // // .layer(middleware::from_fn(crate::middleware::worker_id_validator));
-    // manager.engine = manager.engine.nest("/workers", worker_validate_group);
+    manager.engine = manager.engine.nest("/workers", worker_validate_group);
     MANAGER
         .set(manager)
         .map_err(|_| "Manager cell already initialized")?;
