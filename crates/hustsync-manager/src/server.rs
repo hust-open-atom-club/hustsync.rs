@@ -77,16 +77,16 @@ pub fn get_hustsync_manager(
 
     manager.engine = manager.engine.route("/ping", get(handlers::ping_handler));
     manager.engine = manager.engine.route("/jobs", get(handlers::list_all_jobs));
-    //     .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
+    manager.engine = manager.engine.route("/jobs/disabled", delete(handlers::flush_disabled_jobs));
     manager.engine = manager.engine.route("/workers", get(handlers::list_all_workers));
     manager.engine = manager.engine.route("/workers", post(handlers::register_worker));
-    //     .route("/cmd", post(handlers::handle_cmd));
+    manager.engine = manager.engine.route("/cmd", post(handlers::handle_cmd));
 
     let worker_validate_group = Router::new()
         // .route("/{id}", delete(delete_worker))
-        .route("/{id}/jobs/{job}", post(handlers::update_job_of_worker));
-    //     .route("/:id/jobs/:job/size", post(update_mirror_size))
-    //     .route("/:id/schedules", post(update_schedules_of_worker));
+        .route("/{id}/jobs/{job}", post(handlers::update_job_of_worker))
+        .route("/{id}/jobs/size", post(handlers::update_mirror_size))
+        .route("/{id}/schedules", post(handlers::update_schedules_of_worker));
     // // .layer(middleware::from_fn(crate::middleware::worker_id_validator));
     manager.engine = manager.engine.nest("/workers", worker_validate_group);
     MANAGER

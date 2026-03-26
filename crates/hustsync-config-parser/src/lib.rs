@@ -32,7 +32,7 @@ impl Default for ManagerServerConfig {
     fn default() -> Self {
         ManagerServerConfig {
             addr: "127.0.0.1".into(),
-            port: 14242,
+            port: 12345,
             ssl_cert: "".into(),
             ssl_key: "".into(),
         }
@@ -52,9 +52,9 @@ pub struct ManagerFileConfig {
 impl Default for ManagerFileConfig {
     fn default() -> Self {
         ManagerFileConfig {
-            status_file: "/var/lib/hustsync/hustsync.json".into(),
+            status_file: "".into(),
             db_type: "redb".into(),
-            db_file: "/var/lib/hustsync/hustsync.db".into(),
+            db_file: "/tmp/tunasync/manager.db".into(),
             ca_cert: "".into(),
         }
     }

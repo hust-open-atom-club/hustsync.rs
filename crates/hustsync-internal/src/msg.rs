@@ -36,20 +36,20 @@ pub struct WorkerStatus {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct MirrorSchedules {
-    schedules: Vec<MirrorSchedule>,
+pub struct MirrorSchedules {
+    pub schedules: Vec<MirrorSchedule>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct MirrorSchedule {
-    name: String,
-    next_schedule: DateTime<Utc>,
+pub struct MirrorSchedule {
+    pub name: String,
+    pub next_schedule: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-enum CmdVerb {
+pub enum CmdVerb {
     Start,
     Stop,
     Disable,
@@ -60,19 +60,19 @@ enum CmdVerb {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct WorkerCmd {
-    options: HashMap<String, bool>,
-    args: Vec<String>,
-    mirror_id: String,
-    cmd: CmdVerb,
+pub struct WorkerCmd {
+    pub options: HashMap<String, bool>,
+    pub args: Vec<String>,
+    pub mirror_id: String,
+    pub cmd: CmdVerb,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct ClientCmd {
-    options: HashMap<String, bool>,
-    args: Vec<String>,
-    mirror_id: String,
-    worker_id: String,
-    cmd: CmdVerb,
+pub struct ClientCmd {
+    pub options: HashMap<String, bool>,
+    pub args: Vec<String>,
+    pub mirror_id: String,
+    pub worker_id: String,
+    pub cmd: CmdVerb,
 }

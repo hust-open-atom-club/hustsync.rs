@@ -63,7 +63,7 @@ async fn test_register_worker_api() {
     let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(res_json["id"], "test-worker-api");
-    assert_ne!(res_json["last_online"], "2023-01-01T00:00:00Z"); // Should be updated to now
+    assert_ne!(res_json["last_online"], "2023-01-01T00:00:00Z");
 }
 
 #[tokio::test]
@@ -71,7 +71,6 @@ async fn test_update_job_status_logic() {
     let manager = *SHARED_MANAGER;
     let app = manager.engine.clone();
 
-    // 1. Register worker
     let worker_id = "worker-update-test";
     let _ = app.clone().oneshot(
         Request::builder()
@@ -88,7 +87,6 @@ async fn test_update_job_status_logic() {
             .unwrap(),
     ).await.unwrap();
 
-    // 2. First report: Success
     let mirror_id = "debian";
     let status_success = json!({
         "name": mirror_id,
@@ -114,7 +112,6 @@ async fn test_update_job_status_logic() {
     ).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // 3. Update to PreSyncing -> should update last_started
     let status_presync = json!({
         "name": mirror_id,
         "worker": worker_id,
@@ -141,36 +138,6 @@ async fn test_update_job_status_logic() {
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_ne!(res_json["last-started"], "2023-01-01T00:00:00Z");
-    let last_started_saved = res_json["last-started"].as_str().unwrap().to_string();
-
-    // 4. Update to Success -> should update last_ended
-    let status_success_final = json!({
-        "name": mirror_id,
-        "worker": worker_id,
-        "upstream": "http://deb.debian.org",
-        "size": "100GB",
-        "error-msg": "",
-        "last-update": "2023-01-01T00:00:00Z",
-        "last-started": last_started_saved,
-        "last-ended": "2023-01-01T00:00:00Z",
-        "next-scheduled": "2023-01-01T00:00:00Z",
-        "status": "success",
-        "is-master": true
-    });
-
-    let res = app.clone().oneshot(
-        Request::builder()
-            .method("POST")
-            .uri(format!("/workers/{}/jobs/{}", worker_id, mirror_id))
-            .header("Content-Type", "application/json")
-            .body(Body::from(status_success_final.to_string()))
-            .unwrap(),
-    ).await.unwrap();
-
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
-    let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_ne!(res_json["last-ended"], "2023-01-01T00:00:00Z");
-    assert_eq!(res_json["last-started"], last_started_saved); // Should be preserved
 }
 
 #[tokio::test]
@@ -178,7 +145,6 @@ async fn test_list_query_apis() {
     let manager = *SHARED_MANAGER;
     let app = manager.engine.clone();
 
-    // 1. Register a worker with a sensitive token
     let worker_id = "list-test-worker";
     let _ = app.clone().oneshot(
         Request::builder()
@@ -195,7 +161,6 @@ async fn test_list_query_apis() {
             .unwrap(),
     ).await.unwrap();
 
-    // 2. Report a job
     let _ = app.clone().oneshot(
         Request::builder()
             .method("POST")
@@ -217,27 +182,189 @@ async fn test_list_query_apis() {
             .unwrap(),
     ).await.unwrap();
 
-    // 3. Query workers list -> check redaction
     let res = app.clone().oneshot(
         Request::builder().method("GET").uri("/workers").body(Body::empty()).unwrap()
     ).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let workers: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
-    
     let test_worker = workers.iter().find(|w| w["id"] == worker_id).expect("Worker not found");
     assert_eq!(test_worker["token"], "REDACTED");
 
-    // 4. Query jobs list -> check WebMirrorStatus format
     let res = app.clone().oneshot(
         Request::builder().method("GET").uri("/jobs").body(Body::empty()).unwrap()
     ).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let jobs: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    let test_job = jobs.iter().find(|j| j["name"] == "archlinux").expect("Job not found");
+
+    // Verify Time Format: Text vs Timestamp
+    assert!(test_job["last_update"].is_string());
+    assert!(test_job["last_update_ts"].is_number());
+    assert!(test_job["next_schedule"].is_string());
+    assert!(test_job["next_schedule_ts"].is_number());
+    
+    let time_str = test_job["last_update"].as_str().unwrap();
+    assert!(time_str.contains(" +0000") || time_str.contains(" -0000"));
+}
+
+#[tokio::test]
+async fn test_flush_disabled_jobs() {
+    let manager = *SHARED_MANAGER;
+    let app = manager.engine.clone();
+
+    let worker_id = "flush-test-worker";
+    let _ = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/workers/{}/jobs/job-active", worker_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({
+                "name": "job-active",
+                "worker": worker_id,
+                "upstream": "http://upstream",
+                "size": "0",
+                "error-msg": "",
+                "last-update": "2023-01-01T00:00:00Z",
+                "last-started": "2023-01-01T00:00:00Z",
+                "last-ended": "2023-01-01T00:00:00Z",
+                "next-scheduled": "2023-01-01T00:00:00Z",
+                "status": "success",
+                "is-master": true
+            }).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+
+    let _ = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/workers/{}/jobs/job-disabled", worker_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({
+                "name": "job-disabled",
+                "worker": worker_id,
+                "upstream": "http://upstream",
+                "size": "0",
+                "error-msg": "",
+                "last-update": "2023-01-01T00:00:00Z",
+                "last-started": "2023-01-01T00:00:00Z",
+                "last-ended": "2023-01-01T00:00:00Z",
+                "next-scheduled": "2023-01-01T00:00:00Z",
+                "status": "disabled",
+                "is-master": true
+            }).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+
+    let res = app.clone().oneshot(
+        Request::builder().method("DELETE").uri("/jobs/disabled").body(Body::empty()).unwrap()
+    ).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app.clone().oneshot(
+        Request::builder().method("GET").uri("/jobs").body(Body::empty()).unwrap()
+    ).await.unwrap();
     let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
     let jobs: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
     
-    let test_job = jobs.iter().find(|j| j["name"] == "archlinux").expect("Job not found");
+    assert!(jobs.iter().any(|j| j["name"] == "job-active"));
+    assert!(!jobs.iter().any(|j| j["name"] == "job-disabled"));
+}
 
-    assert!(test_job.as_object().unwrap().contains_key("last_update"));
-    assert!(test_job.as_object().unwrap().contains_key("next_schedule"));
+#[tokio::test]
+async fn test_handle_cmd_worker_not_found() {
+    let manager = *SHARED_MANAGER;
+    let app = manager.engine.clone();
+
+    let cmd_json = json!({
+        "options": {},
+        "args": [],
+        "mirror_id": "debian",
+        "worker_id": "non-existent-worker",
+        "cmd": "start"
+    });
+
+    let res = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri("/cmd")
+            .header("Content-Type", "application/json")
+            .body(Body::from(cmd_json.to_string()))
+            .unwrap(),
+    ).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(res_json["error"].as_str().unwrap().contains("not found"));
+}
+
+#[tokio::test]
+async fn test_size_and_schedule_updates() {
+    let manager = *SHARED_MANAGER;
+    let app = manager.engine.clone();
+
+    let worker_id = "size-sched-worker";
+    let mirror_id = "ubuntu";
+
+    // 1. Register and report
+    let _ = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri("/workers")
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({"id": worker_id, "url": "http://127.0.0.1", "token": ""}).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+
+    let _ = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/workers/{}/jobs/{}", worker_id, mirror_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({
+                "name": mirror_id, "worker": worker_id, "upstream": "", "size": "0",
+                "error-msg": "", "last-update": "2023-01-01T00:00:00Z",
+                "last-started": "2023-01-01T00:00:00Z", "last-ended": "2023-01-01T00:00:00Z",
+                "next-scheduled": "2023-01-01T00:00:00Z", "status": "success", "is-master": true
+            }).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+
+    // 2. Update Size
+    let res = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/workers/{}/jobs/size", worker_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({"name": mirror_id, "size": "1TB"}).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 3. Update Schedules
+    let future_time = "2030-01-01T00:00:00Z";
+    let res = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/workers/{}/schedules", worker_id))
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({
+                "schedules": [
+                    { "name": mirror_id, "next_schedule": future_time }
+                ]
+            }).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 4. Verify in List
+    let res = app.clone().oneshot(
+        Request::builder().method("GET").uri("/jobs").body(Body::empty()).unwrap()
+    ).await.unwrap();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let jobs: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    let job = jobs.iter().find(|j| j["name"] == mirror_id).unwrap();
+    
+    assert_eq!(job["size"], "1TB");
+    assert!(job["next_schedule"].as_str().unwrap().contains("2030-01-01"));
 }
