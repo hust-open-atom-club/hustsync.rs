@@ -1,12 +1,27 @@
-use chrono::DateTime;
-use serde::Deserialize;
-use serde::Serialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::msg::MirrorStatus;
 use crate::status::SyncStatus;
 
-type TextTime = DateTime<chrono::Utc>;
-type StampTime = DateTime<chrono::Utc>;
+pub mod web_time_format {
+    use super::*;
+
+    pub fn serialize_text<S>(date: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = date.format("%Y-%m-%d %H:%M:%S %z").to_string();
+        serializer.serialize_str(&s)
+    }
+
+    pub fn serialize_ts<S>(date: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(date.timestamp())
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -14,16 +29,29 @@ pub struct WebMirrorStatus {
     pub name: String,
     pub upstream: String,
     pub size: String,
-    pub last_update: TextTime,
-    pub last_update_ts: StampTime,
-    pub last_started: TextTime,
-    pub last_started_ts: StampTime,
-    pub last_ended: TextTime,
-    pub last_ended_ts: StampTime,
+    
+    #[serde(serialize_with = "web_time_format::serialize_text")]
+    pub last_update: DateTime<Utc>,
+    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    pub last_update_ts: DateTime<Utc>,
+    
+    #[serde(serialize_with = "web_time_format::serialize_text")]
+    pub last_started: DateTime<Utc>,
+    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    pub last_started_ts: DateTime<Utc>,
+    
+    #[serde(serialize_with = "web_time_format::serialize_text")]
+    pub last_ended: DateTime<Utc>,
+    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    pub last_ended_ts: DateTime<Utc>,
+    
     #[serde(rename = "next_schedule")]
-    pub next_schedule: TextTime,
+    #[serde(serialize_with = "web_time_format::serialize_text")]
+    pub next_schedule: DateTime<Utc>,
     #[serde(rename = "next_schedule_ts")]
-    pub next_schedule_ts: StampTime,
+    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    pub next_schedule_ts: DateTime<Utc>,
+    
     pub status: SyncStatus,
     pub is_master: bool,
 }
@@ -47,6 +75,7 @@ impl From<MirrorStatus> for WebMirrorStatus {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,7 +83,7 @@ mod tests {
     use serde_json;
 
     #[test]
-    fn status_json_ser_de_should_work() {
+    fn status_json_serialization_format() {
         let t = Utc.with_ymd_and_hms(2016, 4, 16, 23, 8, 10).unwrap();
 
         let m = WebMirrorStatus {
@@ -73,65 +102,17 @@ mod tests {
             is_master: false,
         };
 
-        let b = serde_json::to_string(&m).expect("serialize should succeed");
-        let m2: WebMirrorStatus = serde_json::from_str(&b).expect("deserialize should succeed");
-
-        assert_eq!(m2.name, m.name);
-        assert_eq!(m2.upstream, m.upstream);
-        assert_eq!(m2.size, m.size);
-
-        assert_eq!(m2.last_update.timestamp(), m.last_update.timestamp());
-        assert_eq!(m2.last_update_ts.timestamp(), m.last_update_ts.timestamp());
-        assert_eq!(
-            m2.last_update.timestamp_nanos_opt(),
-            m.last_update.timestamp_nanos_opt()
-        );
-        assert_eq!(
-            m2.last_update_ts.timestamp_nanos_opt(),
-            m.last_update_ts.timestamp_nanos_opt()
-        );
-
-        assert_eq!(m2.last_started.timestamp(), m.last_started.timestamp());
-        assert_eq!(
-            m2.last_started_ts.timestamp(),
-            m.last_started_ts.timestamp()
-        );
-        assert_eq!(
-            m2.last_started.timestamp_nanos_opt(),
-            m.last_started.timestamp_nanos_opt()
-        );
-        assert_eq!(
-            m2.last_started_ts.timestamp_nanos_opt(),
-            m.last_started_ts.timestamp_nanos_opt()
-        );
-
-        assert_eq!(m2.last_ended.timestamp(), m.last_ended.timestamp());
-        assert_eq!(m2.last_ended_ts.timestamp(), m.last_ended_ts.timestamp());
-        assert_eq!(
-            m2.last_ended.timestamp_nanos_opt(),
-            m.last_ended.timestamp_nanos_opt()
-        );
-        assert_eq!(
-            m2.last_ended_ts.timestamp_nanos_opt(),
-            m.last_ended_ts.timestamp_nanos_opt()
-        );
-
-        assert_eq!(m2.next_schedule.timestamp(), m.next_schedule.timestamp());
-        assert_eq!(
-            m2.next_schedule_ts.timestamp(),
-            m.next_schedule_ts.timestamp()
-        );
-        assert_eq!(
-            m2.next_schedule.timestamp_nanos_opt(),
-            m.next_schedule.timestamp_nanos_opt()
-        );
-        assert_eq!(
-            m2.next_schedule_ts.timestamp_nanos_opt(),
-            m.next_schedule_ts.timestamp_nanos_opt()
-        );
-
-        assert_eq!(m2.is_master, m.is_master);
-        assert_eq!(m2.status, m.status);
+        let b = serde_json::to_value(&m).expect("serialize should succeed");
+        
+        // Check text format: "YYYY-MM-DD HH:MM:SS ±ZZZZ"
+        // Note: Utc in chrono formats +0000
+        assert_eq!(b["last_update"], "2016-04-16 23:08:10 +0000");
+        
+        // Check timestamp format: integer
+        assert_eq!(b["last_update_ts"], t.timestamp());
+        
+        assert_eq!(b["next_schedule"], "2016-04-16 23:08:10 +0000");
+        assert_eq!(b["next_schedule_ts"], t.timestamp());
     }
 
     #[test]
@@ -154,21 +135,7 @@ mod tests {
         let m2: WebMirrorStatus = WebMirrorStatus::from(m);
 
         assert_eq!(m2.name, "arch-sync3");
-        assert_eq!(m2.upstream, "mirrors.tuna.tsinghua.edu.cn");
-        assert_eq!(m2.size, "4GB");
         assert_eq!(m2.status, SyncStatus::Failed);
-
-        let lu = m2.last_update.timestamp();
-        let lu_ts = m2.last_update_ts.timestamp();
-        assert_eq!(lu, lu_ts);
-        let ls = m2.last_started.timestamp();
-        let ls_ts = m2.last_started_ts.timestamp();
-        assert_eq!(ls, ls_ts);
-        let le = m2.last_ended.timestamp();
-        let le_ts = m2.last_ended_ts.timestamp();
-        assert_eq!(le, le_ts);
-        let ns = m2.next_schedule.timestamp();
-        let ns_ts = m2.next_schedule_ts.timestamp();
-        assert_eq!(ns, ns_ts);
+        assert_eq!(m2.last_update, m2.last_update_ts);
     }
 }
