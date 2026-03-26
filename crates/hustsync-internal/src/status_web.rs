@@ -9,23 +9,21 @@ type TextTime = DateTime<chrono::Utc>;
 type StampTime = DateTime<chrono::Utc>;
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct WebMirrorStatus {
-    pub name: String,
-    pub upstream: String,
-    pub size: String,
-    pub last_update: TextTime,
-    pub last_update_ts: StampTime,
-    pub last_started: TextTime,
-    pub last_started_ts: StampTime,
-    pub last_ended: TextTime,
-    pub last_ended_ts: StampTime,
-    #[serde(rename = "next_schedule")]
-    pub next_schedule: TextTime,
-    #[serde(rename = "next_schedule_ts")]
-    pub next_schedule_ts: StampTime,
-    pub status: SyncStatus,
-    pub is_master: bool,
+#[serde(rename_all = "kebab-case")]
+struct WebMirrorStatus {
+    name: String,
+    upstream: String,
+    size: String,
+    laste_update: TextTime,
+    last_update_ts: StampTime,
+    last_started: TextTime,
+    last_started_ts: StampTime,
+    last_ended: TextTime,
+    last_ended_ts: StampTime,
+    next_scheduled: TextTime,
+    next_scheduled_ts: StampTime,
+    status: SyncStatus,
+    is_master: bool,
 }
 
 impl From<MirrorStatus> for WebMirrorStatus {
@@ -34,14 +32,14 @@ impl From<MirrorStatus> for WebMirrorStatus {
             name: ms.name,
             upstream: ms.upstream,
             size: ms.size,
-            last_update: ms.last_update,
+            laste_update: ms.last_update,
             last_update_ts: ms.last_update,
             last_started: ms.last_started,
             last_started_ts: ms.last_started,
             last_ended: ms.last_ended,
             last_ended_ts: ms.last_ended,
-            next_schedule: ms.next_scheduled,
-            next_schedule_ts: ms.next_scheduled,
+            next_scheduled: ms.next_scheduled,
+            next_scheduled_ts: ms.next_scheduled,
             status: ms.status,
             is_master: ms.is_master,
         }
@@ -61,14 +59,14 @@ mod tests {
             name: "hustlinux".to_string(),
             upstream: "rsync://mirrors.hust.edu.cn/hustlinux/".to_string(),
             size: "5GB".to_string(),
-            last_update: t,
+            laste_update: t,
             last_update_ts: t,
             last_started: t,
             last_started_ts: t,
             last_ended: t,
             last_ended_ts: t,
-            next_schedule: t,
-            next_schedule_ts: t,
+            next_scheduled: t,
+            next_scheduled_ts: t,
             status: SyncStatus::Success,
             is_master: false,
         };
@@ -80,11 +78,11 @@ mod tests {
         assert_eq!(m2.upstream, m.upstream);
         assert_eq!(m2.size, m.size);
 
-        assert_eq!(m2.last_update.timestamp(), m.last_update.timestamp());
+        assert_eq!(m2.laste_update.timestamp(), m.laste_update.timestamp());
         assert_eq!(m2.last_update_ts.timestamp(), m.last_update_ts.timestamp());
         assert_eq!(
-            m2.last_update.timestamp_nanos_opt(),
-            m.last_update.timestamp_nanos_opt()
+            m2.laste_update.timestamp_nanos_opt(),
+            m.laste_update.timestamp_nanos_opt()
         );
         assert_eq!(
             m2.last_update_ts.timestamp_nanos_opt(),
@@ -116,18 +114,18 @@ mod tests {
             m.last_ended_ts.timestamp_nanos_opt()
         );
 
-        assert_eq!(m2.next_schedule.timestamp(), m.next_schedule.timestamp());
+        assert_eq!(m2.next_scheduled.timestamp(), m.next_scheduled.timestamp());
         assert_eq!(
-            m2.next_schedule_ts.timestamp(),
-            m.next_schedule_ts.timestamp()
+            m2.next_scheduled_ts.timestamp(),
+            m.next_scheduled_ts.timestamp()
         );
         assert_eq!(
-            m2.next_schedule.timestamp_nanos_opt(),
-            m.next_schedule.timestamp_nanos_opt()
+            m2.next_scheduled.timestamp_nanos_opt(),
+            m.next_scheduled.timestamp_nanos_opt()
         );
         assert_eq!(
-            m2.next_schedule_ts.timestamp_nanos_opt(),
-            m.next_schedule_ts.timestamp_nanos_opt()
+            m2.next_scheduled_ts.timestamp_nanos_opt(),
+            m.next_scheduled_ts.timestamp_nanos_opt()
         );
 
         assert_eq!(m2.is_master, m.is_master);
@@ -158,7 +156,7 @@ mod tests {
         assert_eq!(m2.size, "4GB");
         assert_eq!(m2.status, SyncStatus::Failed);
 
-        let lu = m2.last_update.timestamp();
+        let lu = m2.laste_update.timestamp();
         let lu_ts = m2.last_update_ts.timestamp();
         assert_eq!(lu, lu_ts);
         let ls = m2.last_started.timestamp();
@@ -167,8 +165,8 @@ mod tests {
         let le = m2.last_ended.timestamp();
         let le_ts = m2.last_ended_ts.timestamp();
         assert_eq!(le, le_ts);
-        let ns = m2.next_schedule.timestamp();
-        let ns_ts = m2.next_schedule_ts.timestamp();
+        let ns = m2.next_scheduled.timestamp();
+        let ns_ts = m2.next_scheduled_ts.timestamp();
         assert_eq!(ns, ns_ts);
     }
 }

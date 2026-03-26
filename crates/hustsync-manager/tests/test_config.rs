@@ -13,14 +13,10 @@ debug = true
 [server]
 addr = "0.0.0.0"
 port = 5000
-ssl_cert = ""
-ssl_key = ""
 
 [files]
 status_file = "/tmp/tunasync.json"
-db_type = "redb"
 db_file = "/var/lib/tunasync/tunasync.db"
-ca_cert = ""
 "#
 }
 
@@ -29,12 +25,12 @@ fn toml_decoding_should_work() {
     let cfg_blob = make_cfg_blob();
     let cfg: ManagerConfig = toml::from_str(cfg_blob).expect("decode toml");
     assert_eq!(
-        cfg.server.addr,
+        cfg.server.as_ref().unwrap().addr.as_ref().unwrap(),
         "0.0.0.0"
     );
-    assert_eq!(cfg.server.port, 5000);
+    assert_eq!(cfg.server.as_ref().unwrap().port.unwrap(), 5000);
     assert_eq!(
-        cfg.files.db_file,
+        cfg.files.as_ref().unwrap().db_file.as_ref().unwrap(),
         "/var/lib/tunasync/tunasync.db"
     );
 }
