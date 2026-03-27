@@ -1,0 +1,15 @@
+[global]
+name = "test_worker"
+log_dir = "/tmp/hustsync_test/log"
+mirror_dir = "/tmp/hustsync_test/mirrors"
+concurrent = 10
+
+[manager]
+api_base = "http://127.0.0.1:12345"
+token = "secret"
+ca_cert = ""
+
+[server]
+hostname = "127.0.0.1"
+listen_addr = "127.0.0.1"
+listen_port = 6000
