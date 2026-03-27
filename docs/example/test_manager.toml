@@ -1,0 +1,13 @@
+debug = true
+
+[server]
+addr = "127.0.0.1"
+port = 12345
+ssl_cert = ""
+ssl_key = ""
+
+[files]
+status_file = "/tmp/hustsync_test/status.json"
+db_type = "redb"
+db_file = "/tmp/hustsync_test/manager.db"
+ca_cert = ""
