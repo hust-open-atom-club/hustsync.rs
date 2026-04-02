@@ -19,91 +19,95 @@ use crate::handlers;
 pub(crate) const ERROR_KEY: &str = "error";
 pub(crate) const INFO_KEY: &str = "message";
 
-static MANAGER: OnceCell<Manager> = OnceCell::new();
-
 pub struct Manager {
     pub config: Arc<ManagerConfig>,
-    pub engine: Router,
-    pub adapter: Option<Box<dyn DbAdapterTrait>>,
-    // pub rwmu: RwLock<()>,
+    pub adapter: Option<Arc<dyn DbAdapterTrait>>,
     pub http_client: Option<Client>,
 }
 
-pub fn get_hustsync_manager(
-    config: Arc<ManagerConfig>,
-) -> Result<&'static Manager, Box<dyn Error>> {
-    if let Some(manager) = MANAGER.get() {
-        return Ok(manager);
-    }
+impl Manager {
+    pub fn new(config: Arc<ManagerConfig>) -> Result<Self, Box<dyn Error>> {
+        let mut manager = Manager {
+            config: Arc::clone(&config),
+            adapter: None,
+            http_client: None,
+        };
 
-    let mut manager = Manager {
-        config: Arc::clone(&config),
-        engine: Router::new(),
-        adapter: None,
-        http_client: None,
-    };
-
-    manager.engine = manager.engine.layer(CatchPanicLayer::new());
-    if config.debug {
-        manager.engine = manager.engine.layer(TraceLayer::new_for_http());
-    }
-
-    if !config.files.ca_cert.is_empty() {
-        match create_http_client(Some(&config.files.ca_cert)) {
-            Ok(client) => {
-                manager.http_client = Some(client);
+        if !config.files.ca_cert.is_empty() {
+            match create_http_client(Some(&config.files.ca_cert)) {
+                Ok(client) => {
+                    manager.http_client = Some(client);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create HTTP client with CA certificate: {}", e);
+                    return Err(e);
+                }
             }
-            Err(e) => {
-                tracing::error!("Failed to create HTTP client with CA certificate: {}", e);
-                return Err(e);
+        } else {
+            match create_http_client(None) {
+                Ok(client) => manager.http_client = Some(client),
+                Err(e) => tracing::error!("Failed to create default HTTP client: {}", e),
             }
         }
+        if !config.files.db_file.is_empty() {
+            match make_db_adapter(&config.files.db_type, &config.files.db_file) {
+                Ok(adapter) => {
+                    if let Err(e) = adapter.init() {
+                        tracing::error!("Failed to initialize database tables: {}", e);
+                        return Err(Box::new(e));
+                    }
+                    manager.adapter = Some(Arc::from(adapter));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to create database adapter: {}", e);
+                    return Err(Box::new(e));
+                }
+            };
+        }
+
+        Ok(manager)
     }
-    if !config.files.db_file.is_empty() {
-        match make_db_adapter(&config.files.db_type, &config.files.db_file) {
-            Ok(adapter) => {
-                manager.adapter = Some(adapter);
-            }
-            Err(e) => {
-                tracing::error!("Failed to create database adapter: {}", e);
-                return Err(Box::new(e));
-            }
-        };
+
+    pub fn make_router(self: Arc<Self>) -> Router {
+        let config = Arc::clone(&self.config);
+        
+        let mut router = Router::new()
+            .route("/ping", get(handlers::ping_handler))
+            .route("/jobs", get(handlers::list_all_jobs))
+            .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
+            .route("/workers", get(handlers::list_all_workers))
+            .route("/workers", post(handlers::register_worker))
+            .route("/cmd", post(handlers::handle_cmd));
+
+        let worker_validate_group = Router::new()
+            .route("/{id}", delete(handlers::delete_worker))
+            .route("/{id}/jobs", get(handlers::list_jobs_of_worker))
+            .route("/{id}/jobs/{job}", post(handlers::update_job_of_worker))
+            .route("/{id}/jobs/{job}/size", post(handlers::update_mirror_size))
+            .route("/{id}/schedules", post(handlers::update_schedules_of_worker))
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&self),
+                crate::middleware::worker_id_validator,
+            ));
+
+        router = router.nest("/workers", worker_validate_group);
+
+        router = router
+            .layer(middleware::from_fn(crate::middleware::context_error_logger))
+            .layer(CatchPanicLayer::new());
+
+        if config.debug {
+            router = router.layer(TraceLayer::new_for_http());
+        }
+
+        router.with_state(self)
     }
 
-    manager.engine = manager
-        .engine
-        .layer(middleware::from_fn(crate::middleware::context_error_logger));
-
-    manager.engine = manager.engine.route("/ping", get(handlers::ping_handler));
-    manager.engine = manager.engine.route("/jobs", get(handlers::list_all_jobs));
-    manager.engine = manager.engine.route("/jobs/disabled", delete(handlers::flush_disabled_jobs));
-    manager.engine = manager.engine.route("/workers", get(handlers::list_all_workers));
-    manager.engine = manager.engine.route("/workers", post(handlers::register_worker));
-    manager.engine = manager.engine.route("/cmd", post(handlers::handle_cmd));
-
-    let worker_validate_group = Router::new()
-        // .route("/{id}", delete(delete_worker))
-        .route("/{id}/jobs/{job}", post(handlers::update_job_of_worker))
-        .route("/{id}/jobs/size", post(handlers::update_mirror_size))
-        .route("/{id}/schedules", post(handlers::update_schedules_of_worker));
-    // // .layer(middleware::from_fn(crate::middleware::worker_id_validator));
-    manager.engine = manager.engine.nest("/workers", worker_validate_group);
-    MANAGER
-        .set(manager)
-        .map_err(|_| "Manager cell already initialized")?;
-
-    MANAGER
-        .get()
-        .ok_or_else(|| "Failed to retrieve Manager after setting".into())
-}
-
-impl Manager {
-    pub async fn run(&'static self) -> Result<(), Box<dyn Error>> {
+    pub async fn run(self: Arc<Self>) -> Result<(), Box<dyn Error>> {
         let addr = format!("{}:{}", self.config.server.addr, self.config.server.port);
         let socket_addr: std::net::SocketAddr = addr.parse().expect("Failed to parse address");
 
-        let app = self.engine.clone().layer(TimeoutLayer::with_status_code(
+        let app = self.clone().make_router().layer(TimeoutLayer::with_status_code(
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(10),
         ));

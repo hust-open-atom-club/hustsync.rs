@@ -9,8 +9,9 @@ clap = { version = "4.5.53", features = ["derive"] }
 tracing = "0.1.41"
 hustsync-internal = { path = "../hustsync-internal" }
 hustsync-manager = { path = "../hustsync-manager" }
-hustsync-worker = { path = "../hustsync-worker" }
+hustsync-worker = { version = "0.1.0", path = "../hustsync-worker" }
 tokio = { version = "1.50.0", features = ["full"] }
+hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 
 [lints]
 workspace = true

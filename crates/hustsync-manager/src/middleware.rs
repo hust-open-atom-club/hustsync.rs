@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -30,19 +31,30 @@ pub async fn context_error_logger(req: Request, next: Next) -> Response {
 
 pub async fn worker_id_validator(
     State(manager): State<Arc<Manager>>,
-    Path(worker_id): Path<String>,
     req: Request,
     next: Next,
 ) -> Result<Response, Response> {
-    match manager.adapter.as_ref().unwrap().get_worker(&worker_id) {
-        Ok(_) => Ok(next.run(req).await),
-        Err(e) => {
+    
+    let path = req.uri().path();
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    
+    if parts.len() >= 2 && parts[0] == "workers" {
+        let worker_id = parts[1];
+        if let Some(adapter) = &manager.adapter {
+            if let Err(e) = adapter.get_worker(worker_id) {
+                let error_body = Json(json!({
+                    "error": format!("invalid workerID {}", worker_id),
+                    "details": e.to_string()
+                }));
+                return Err((StatusCode::BAD_REQUEST, error_body).into_response());
+            }
+        } else {
             let error_body = Json(json!({
-                "error": format!("invalid workerID {}", worker_id),
-                "details": e.to_string()
+                "error": "Database adapter not initialized"
             }));
-
-            Err((StatusCode::BAD_REQUEST, error_body).into_response())
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error_body).into_response());
         }
     }
+
+    Ok(next.run(req).await)
 }
