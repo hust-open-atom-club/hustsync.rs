@@ -34,13 +34,13 @@ pub struct WorkerStatus {
     pub last_register: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MirrorSchedules {
     pub schedules: Vec<MirrorSchedule>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MirrorSchedule {
     pub name: String,

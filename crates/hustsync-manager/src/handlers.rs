@@ -1,4 +1,4 @@
-use axum::extract::{FromRequestParts, Path};
+use axum::extract::{FromRequestParts, Path, State};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::{Json, response::IntoResponse};
@@ -7,35 +7,26 @@ use hustsync_internal::msg::{MirrorStatus, WorkerStatus, ClientCmd, WorkerCmd, C
 use hustsync_internal::status::SyncStatus;
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::database::DbAdapterTrait;
-use crate::server::{ERROR_KEY, INFO_KEY, get_hustsync_manager};
+use crate::server::{ERROR_KEY, INFO_KEY, Manager};
 
 // Custom Extractor for the database adapter
-pub struct Database(pub &'static dyn DbAdapterTrait);
+pub struct Database(pub Arc<dyn DbAdapterTrait>);
 
-impl<S> FromRequestParts<S> for Database
-where
-    S: Send + Sync,
-{
+impl FromRequestParts<Arc<Manager>> for Database {
     type Rejection = (StatusCode, Json<serde_json::Value>);
 
-    async fn from_request_parts(_parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let manager = get_hustsync_manager(Default::default()).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ ERROR_KEY: format!("Manager not initialized: {}", e) })),
-            )
-        })?;
-
-        let adapter = manager.adapter.as_ref().ok_or_else(|| {
+    async fn from_request_parts(_parts: &mut Parts, state: &Arc<Manager>) -> Result<Self, Self::Rejection> {
+        let adapter = state.adapter.as_ref().ok_or_else(|| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ ERROR_KEY: "Database adapter not initialized" })),
             )
         })?;
 
-        Ok(Database(adapter.as_ref()))
+        Ok(Database(Arc::clone(adapter)))
     }
 }
 
@@ -92,6 +83,35 @@ pub async fn list_all_jobs(Database(adapter): Database) -> impl IntoResponse {
     }
 }
 
+pub async fn list_jobs_of_worker(
+    Database(adapter): Database,
+    Path(worker_id): Path<String>,
+) -> impl IntoResponse {
+    match adapter.list_mirror_status(&worker_id) {
+        Ok(statuses) => (StatusCode::OK, Json(json!(statuses))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ ERROR_KEY: format!("Failed to list jobs of worker {}: {}", worker_id, e) })),
+        ),
+    }
+}
+
+pub async fn delete_worker(
+    Database(adapter): Database,
+    Path(worker_id): Path<String>,
+) -> impl IntoResponse {
+    match adapter.delete_worker(&worker_id) {
+        Ok(_) => {
+            tracing::info!("Worker <{}> deleted", worker_id);
+            (StatusCode::OK, Json(json!({ INFO_KEY: "deleted" })))
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ ERROR_KEY: format!("Failed to delete worker: {}", e) })),
+        ),
+    }
+}
+
 pub async fn flush_disabled_jobs(Database(adapter): Database) -> impl IntoResponse {
     match adapter.flush_disabled_jobs() {
         Ok(_) => (StatusCode::OK, Json(json!({ INFO_KEY: "flushed" }))),
@@ -128,21 +148,28 @@ pub async fn update_job_of_worker(
         } else {
             status.last_started = now;
         }
+    } else if let Some(ref cur) = cur_status {
+        status.last_started = cur.last_started;
     }
 
-    let is_finished = |s: SyncStatus| {
-        s == SyncStatus::Success || s == SyncStatus::Failed || s == SyncStatus::Disabled
-    };
+    if status.status == SyncStatus::Success {
+        status.last_update = now;
+    } else if let Some(ref cur) = cur_status {
+        status.last_update = cur.last_update;
+    }
 
-    if is_finished(status.status) {
-        if let Some(ref cur) = cur_status {
-            if !is_finished(cur.status) {
-                status.last_ended = now;
-            } else {
-                status.last_ended = cur.last_ended;
+    if status.status == SyncStatus::Success || status.status == SyncStatus::Failed {
+        status.last_ended = now;
+    } else if let Some(ref cur) = cur_status {
+        status.last_ended = cur.last_ended;
+    }
+
+    // Retain valid previous size if the new one is "unknown" or empty
+    if let Some(ref cur) = cur_status {
+        if !cur.size.is_empty() && cur.size != "unknown" {
+            if status.size.is_empty() || status.size == "unknown" {
+                status.size = cur.size.clone();
             }
-        } else {
-            status.last_ended = now;
         }
     }
 
@@ -157,22 +184,21 @@ pub async fn update_job_of_worker(
 
 #[derive(Deserialize)]
 pub struct SizeMsg {
-    pub name: String,
     pub size: String,
 }
 
 pub async fn update_mirror_size(
     Database(adapter): Database,
-    Path(worker_id): Path<String>,
+    Path((worker_id, mirror_id)): Path<(String, String)>,
     Json(msg): Json<SizeMsg>,
 ) -> impl IntoResponse {
     let _ = adapter.refresh_worker(&worker_id);
     
-    match adapter.get_mirror_status(&worker_id, &msg.name) {
+    match adapter.get_mirror_status(&worker_id, &mirror_id) {
         Ok(mut status) => {
             if !msg.size.is_empty() && msg.size != "unknown" {
                 status.size = msg.size;
-                match adapter.update_mirror_status(&worker_id, &msg.name, status) {
+                match adapter.update_mirror_status(&worker_id, &mirror_id, status) {
                     Ok(new_status) => (StatusCode::OK, Json(json!(new_status))),
                     Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ ERROR_KEY: format!("Failed to save size: {}", e) }))),
                 }
@@ -192,9 +218,30 @@ pub async fn update_schedules_of_worker(
     let _ = adapter.refresh_worker(&worker_id);
 
     for s in schedules.schedules {
-        if let Ok(mut status) = adapter.get_mirror_status(&worker_id, &s.name) {
-            status.next_scheduled = s.next_schedule;
-            let _ = adapter.update_mirror_status(&worker_id, &s.name, status);
+        if s.name.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ ERROR_KEY: "mirror Name should not be empty" })),
+            );
+        }
+
+        match adapter.get_mirror_status(&worker_id, &s.name) {
+            Ok(mut status) => {
+                if status.next_scheduled == s.next_schedule {
+                    continue;
+                }
+                status.next_scheduled = s.next_schedule;
+                if let Err(e) = adapter.update_mirror_status(&worker_id, &s.name, status) {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ ERROR_KEY: format!("failed to update job {} of worker {}: {}", s.name, worker_id, e) })),
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!("failed to get job {} of worker {}: {}", s.name, worker_id, e);
+                continue;
+            }
         }
     }
 
@@ -202,14 +249,10 @@ pub async fn update_schedules_of_worker(
 }
 
 pub async fn handle_cmd(
+    State(manager): State<Arc<Manager>>,
     Database(adapter): Database,
     Json(client_cmd): Json<ClientCmd>,
 ) -> impl IntoResponse {
-    let manager = match get_hustsync_manager(Default::default()) {
-        Ok(m) => m,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ ERROR_KEY: "Manager not initialized" }))),
-    };
-
     let worker_id = &client_cmd.worker_id;
     if worker_id.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ ERROR_KEY: "workerID should not be empty" })));
@@ -228,9 +271,18 @@ pub async fn handle_cmd(
     };
 
     if client_cmd.cmd == CmdVerb::Disable {
-        if let Ok(mut status) = adapter.get_mirror_status(worker_id, &client_cmd.mirror_id) {
-            status.status = SyncStatus::Disabled;
-            let _ = adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, status);
+        if let Ok(status) = adapter.get_mirror_status(worker_id, &client_cmd.mirror_id) {
+            let mut new_status = status;
+            new_status.status = SyncStatus::Disabled;
+            let _ = adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status);
+        }
+    } else if client_cmd.cmd == CmdVerb::Stop {
+        if let Ok(status) = adapter.get_mirror_status(worker_id, &client_cmd.mirror_id) {
+            if status.status != SyncStatus::Disabled {
+                let mut new_status = status;
+                new_status.status = SyncStatus::Paused;
+                let _ = adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status);
+            }
         }
     }
 
@@ -250,3 +302,4 @@ pub async fn handle_cmd(
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ ERROR_KEY: format!("Failed to forward command to worker: {}", e) }))),
     }
 }
+

@@ -6,4 +6,4 @@ mod middleware;
 mod server;
 
 pub use config::load_config;
-pub use server::{Manager, get_hustsync_manager};
+pub use server::Manager;

@@ -3,15 +3,14 @@ use axum::{
     http::{Request, StatusCode},
 };
 use hustsync_config_parser::ManagerConfig;
-use hustsync_manager::get_hustsync_manager;
+use hustsync_manager::Manager;
 use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
-use once_cell::sync::Lazy;
 
-static SHARED_MANAGER: Lazy<&'static hustsync_manager::Manager> = Lazy::new(|| {
-    let db_path = "/tmp/test_api_shared.db";
-    let _ = std::fs::remove_file(db_path);
+fn create_test_app(db_name: &str) -> axum::Router {
+    let db_path = format!("/tmp/{}.db", db_name);
+    let _ = std::fs::remove_file(&db_path);
 
     let config = Arc::new(ManagerConfig {
         debug: true,
@@ -24,18 +23,18 @@ static SHARED_MANAGER: Lazy<&'static hustsync_manager::Manager> = Lazy::new(|| {
         files: hustsync_config_parser::ManagerFileConfig {
             status_file: "".to_string(),
             db_type: "redb".to_string(),
-            db_file: db_path.to_string(),
+            db_file: db_path,
             ca_cert: "".to_string(),
         },
     });
 
-    get_hustsync_manager(config).expect("Failed to get manager")
-});
+    let manager = Manager::new(config).expect("Failed to create manager");
+    Arc::new(manager).make_router()
+}
 
 #[tokio::test]
 async fn test_register_worker_api() {
-    let manager = *SHARED_MANAGER;
-    let app = manager.engine.clone();
+    let app = create_test_app("test_register");
 
     let worker_json = json!({
         "id": "test-worker-api",
@@ -68,8 +67,7 @@ async fn test_register_worker_api() {
 
 #[tokio::test]
 async fn test_update_job_status_logic() {
-    let manager = *SHARED_MANAGER;
-    let app = manager.engine.clone();
+    let app = create_test_app("test_status_logic");
 
     let worker_id = "worker-update-test";
     let _ = app.clone().oneshot(
@@ -142,8 +140,7 @@ async fn test_update_job_status_logic() {
 
 #[tokio::test]
 async fn test_list_query_apis() {
-    let manager = *SHARED_MANAGER;
-    let app = manager.engine.clone();
+    let app = create_test_app("test_list_query");
 
     let worker_id = "list-test-worker";
     let _ = app.clone().oneshot(
@@ -209,10 +206,24 @@ async fn test_list_query_apis() {
 
 #[tokio::test]
 async fn test_flush_disabled_jobs() {
-    let manager = *SHARED_MANAGER;
-    let app = manager.engine.clone();
+    let app = create_test_app("test_flush");
 
     let worker_id = "flush-test-worker";
+    let _ = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri("/workers")
+            .header("Content-Type", "application/json")
+            .body(Body::from(json!({
+                "id": worker_id,
+                "url": "http://127.0.0.1:8081",
+                "token": "test-token",
+                "last_online": "2023-01-01T00:00:00Z",
+                "last_register": "2023-01-01T00:00:00Z"
+            }).to_string()))
+            .unwrap(),
+    ).await.unwrap();
+
     let _ = app.clone().oneshot(
         Request::builder()
             .method("POST")
@@ -272,8 +283,7 @@ async fn test_flush_disabled_jobs() {
 
 #[tokio::test]
 async fn test_handle_cmd_worker_not_found() {
-    let manager = *SHARED_MANAGER;
-    let app = manager.engine.clone();
+    let app = create_test_app("test_cmd_not_found");
 
     let cmd_json = json!({
         "options": {},
@@ -300,13 +310,12 @@ async fn test_handle_cmd_worker_not_found() {
 
 #[tokio::test]
 async fn test_size_and_schedule_updates() {
-    let manager = *SHARED_MANAGER;
-    let app = manager.engine.clone();
+    let app = create_test_app("test_size_sched");
 
     let worker_id = "size-sched-worker";
     let mirror_id = "ubuntu";
 
-    // 1. Register and report
+    // 1. Register
     let _ = app.clone().oneshot(
         Request::builder()
             .method("POST")
@@ -316,6 +325,7 @@ async fn test_size_and_schedule_updates() {
             .unwrap(),
     ).await.unwrap();
 
+    // Report initial status
     let _ = app.clone().oneshot(
         Request::builder()
             .method("POST")
@@ -330,13 +340,13 @@ async fn test_size_and_schedule_updates() {
             .unwrap(),
     ).await.unwrap();
 
-    // 2. Update Size
+    // 2. Update Size (Using the new specific size route)
     let res = app.clone().oneshot(
         Request::builder()
             .method("POST")
-            .uri(format!("/workers/{}/jobs/size", worker_id))
+            .uri(format!("/workers/{}/jobs/{}/size", worker_id, mirror_id))
             .header("Content-Type", "application/json")
-            .body(Body::from(json!({"name": mirror_id, "size": "1TB"}).to_string()))
+            .body(Body::from(json!({"size": "1TB"}).to_string()))
             .unwrap(),
     ).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -355,6 +365,11 @@ async fn test_size_and_schedule_updates() {
             }).to_string()))
             .unwrap(),
     ).await.unwrap();
+    // Print body if error
+    if res.status() != StatusCode::OK {
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        panic!("Schedules failed: {:?}", body);
+    }
     assert_eq!(res.status(), StatusCode::OK);
 
     // 4. Verify in List

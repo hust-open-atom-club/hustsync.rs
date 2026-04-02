@@ -90,17 +90,41 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
         manager_args.with_systemd,
     );
 
-    let config = match hustsync_manager::load_config(manager_args.config.unwrap_or_default()) {
+    let mut config = match hustsync_manager::load_config(manager_args.config.unwrap_or_default()) {
         Ok(cfg) => cfg,
         Err(err) => {
             warn!("Error loading manager config: {err}.");
             std::process::exit(1);
         }
     };
+    
+    // Override with command-line arguments
+    if let Some(addr) = manager_args.addr {
+        config.server.addr = addr;
+    }
+    if let Some(port) = manager_args.port {
+        config.server.port = port;
+    }
+    if let Some(cert) = manager_args.cert {
+        config.server.ssl_cert = cert.to_string_lossy().to_string();
+    }
+    if let Some(key) = manager_args.key {
+        config.server.ssl_key = key.to_string_lossy().to_string();
+    }
+    if let Some(db_file) = manager_args.db_file {
+        config.files.db_file = db_file.to_string_lossy().to_string();
+    }
+    if let Some(db_type) = manager_args.db_type {
+        config.files.db_type = db_type;
+    }
+    if manager_args.debug {
+        config.debug = true;
+    }
+
     let config = Arc::new(config);
     //? SET WEB FRAMEWORK TO DEBUG MODE
 
-    let manager = match hustsync_manager::get_hustsync_manager(config) {
+    let manager = match Manager::new(config) {
         Ok(m) => m,
         Err(err) => {
             warn!("Error initializing manager: {err}.");
@@ -108,8 +132,8 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
         }
     };
     info!("Run hustsync manager server.");
-    // TODO
-    manager.run().await?;
+    
+    Arc::new(manager).run().await?;
     Ok(())
 }
 
