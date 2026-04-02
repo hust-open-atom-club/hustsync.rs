@@ -9,6 +9,10 @@ use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
 
+pub fn format_path(path: &str, name: &str) -> String {
+    path.replace("{{.Name}}", name)
+}
+
 fn rsync_exit_values_map() -> HashMap<i32, &'static str> {
     let mut m = HashMap::new();
     m.insert(0, "Success");
