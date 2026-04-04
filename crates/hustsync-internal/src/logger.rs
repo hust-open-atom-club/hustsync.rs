@@ -10,7 +10,7 @@ pub fn init_logger(verbose: bool, debug: bool, with_systemd: bool) {
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(format!(
-            "tunasync={lvl},tunasynctl={lvl},tracing_subscriber={lvl},rustls={lvl},{lvl}",
+            "hustsync={lvl},hustsynctl={lvl},tracing_subscriber={lvl},rustls={lvl},{lvl}",
             lvl = level
         ))
     });

@@ -17,9 +17,9 @@ ssl_cert = ""
 ssl_key = ""
 
 [files]
-status_file = "/tmp/tunasync.json"
+status_file = "/tmp/hustsync.json"
 db_type = "redb"
-db_file = "/var/lib/tunasync/tunasync.db"
+db_file = "/var/lib/hustsync/hustsync.db"
 ca_cert = ""
 "#
 }
@@ -35,12 +35,12 @@ fn toml_decoding_should_work() {
     assert_eq!(cfg.server.port, 5000);
     assert_eq!(
         cfg.files.db_file,
-        "/var/lib/tunasync/tunasync.db"
+        "/var/lib/hustsync/hustsync.db"
     );
 }
 
 // TODO 创建 clap 应用以测试更完整的加载流程
-// 需要对应 tunasync config_test 部分
+// 需要对应 hustsync config_test 部分
 #[test]
 fn toml_loading_should_work() {
     let cfg_blob = make_cfg_blob();

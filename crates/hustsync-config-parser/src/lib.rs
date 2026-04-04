@@ -54,7 +54,7 @@ impl Default for ManagerFileConfig {
         ManagerFileConfig {
             status_file: "".into(),
             db_type: "redb".into(),
-            db_file: "/tmp/tunasync/manager.db".into(),
+            db_file: "/tmp/hustsync/manager.db".into(),
             ca_cert: "".into(),
         }
     }
@@ -110,8 +110,8 @@ impl Default for WorkerGlobalConfig {
                 exec_on_failure: None,
             }),
             name: Some("test_worker".into()),
-            log_dir: Some("/tmp/tunasync/log/tunasync/{{.Name}}".into()),
-            mirror_dir: Some("/tmp/tunasync".into()),
+            log_dir: Some("/tmp/hustsync/log/hustsync/{{.Name}}".into()),
+            mirror_dir: Some("/tmp/hustsync".into()),
             concurrent: Some(10),
             rsync_options: None,
             dangerous_global_success_exit_codes: None,
@@ -150,7 +150,7 @@ impl Default for WorkerCgroupConfig {
         WorkerCgroupConfig {
             enable: Some(false),
             base_path: Some("/sys/fs/cgroup".into()),
-            group: Some("tunasync".into()),
+            group: Some("hustsync".into()),
         }
     }
 }
@@ -190,7 +190,9 @@ pub struct MirrorConfig {
     pub provider: Option<String>,
     pub upstream: Option<String>,
     pub use_ipv6: Option<bool>,
+    pub use_ipv4: Option<bool>,
     pub mirror_dir: Option<String>,
+    pub mirror_subdir: Option<String>,
     pub mirror_type: Option<String>,
     pub log_dir: Option<String>,
     pub env: Option<HashMap<String, String>>,
@@ -198,7 +200,14 @@ pub struct MirrorConfig {
     pub command: Option<String>,
     pub fail_on_match: Option<String>,
     pub size_pattern: Option<String>,
+    pub exclude_file: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub rsync_no_timeout: Option<bool>,
+    pub rsync_timeout: Option<u32>,
     pub rsync_options: Option<Vec<String>>,
+    pub rsync_override: Option<Vec<String>>,
+    pub rsync_override_only: Option<bool>,
     pub stage1_profile: Option<String>,
     pub memory_limit: Option<String>,
 }
@@ -223,7 +232,9 @@ impl Default for MirrorConfig {
             provider: Some("rsync".into()),
             upstream: Some("rsync://rsync.elv.sh/elvish/".into()),
             use_ipv6: Some(false),
+            use_ipv4: None,
             mirror_dir: None,
+            mirror_subdir: None,
             mirror_type: None,
             log_dir: None,
             env: None,
@@ -231,7 +242,14 @@ impl Default for MirrorConfig {
             command: None,
             fail_on_match: None,
             size_pattern: None,
+            exclude_file: None,
+            username: None,
+            password: None,
+            rsync_no_timeout: None,
+            rsync_timeout: None,
             rsync_options: None,
+            rsync_override: None,
+            rsync_override_only: None,
             stage1_profile: None,
             memory_limit: None,
         }

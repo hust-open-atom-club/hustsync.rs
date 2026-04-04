@@ -15,7 +15,11 @@ pub mod provider;
 pub mod schedule;
 
 pub use job::MirrorJob;
-use provider::{MirrorProvider, cmd_provider::{CmdProvider, CmdProviderConfig}};
+use provider::{
+    MirrorProvider, 
+    cmd_provider::{CmdProvider, CmdProviderConfig},
+    rsync_provider::{RsyncProvider, RsyncProviderConfig}
+};
 use hustsync_internal::util::format_path;
 use schedule::ScheduleQueue;
 
@@ -50,7 +54,7 @@ impl Worker {
         if let Some(ref mut global) = cfg.global {
             if let Some(ref mut retry) = global.retry {
                 if retry.retry.unwrap_or(0) == 0 {
-                    retry.retry = Some(3); // defaultMaxRetry equivalent
+                    retry.retry = Some(2); // defaultMaxRetry
                 }
             }
         }
@@ -139,7 +143,7 @@ impl Worker {
 
         let retry = m_cfg.retry.as_ref().and_then(|r| r.retry)
             .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.retry)))
-            .unwrap_or(3);
+            .unwrap_or(2);
 
         let timeout = m_cfg.retry.as_ref().and_then(|r| r.timeout)
             .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.timeout)))
@@ -147,14 +151,14 @@ impl Worker {
 
         let log_dir_base = m_cfg.log_dir.as_deref()
             .or_else(|| global.and_then(|g| g.log_dir.as_deref()))
-            .unwrap_or("/tmp/tunasync/log/{{.Name}}");
+            .unwrap_or("/tmp/hustsync/log/{{.Name}}");
         
         let log_dir = format_path(log_dir_base, name);
         let log_file = format!("{}/latest.log", log_dir.trim_end_matches('/'));
 
         let mirror_dir_base = m_cfg.mirror_dir.as_deref()
             .or_else(|| global.and_then(|g| g.mirror_dir.as_deref()))
-            .unwrap_or("/tmp/tunasync");
+            .unwrap_or("/tmp/hustsync");
         
         let mirror_dir = format_path(mirror_dir_base, name);
 
@@ -183,9 +187,32 @@ impl Worker {
                 Ok(Box::new(p))
             }
             "rsync" => {
-                // TODO: implement rsync provider
-                tracing::error!("Provider type 'rsync' for mirror '{}' is not implemented yet!", name);
-                Err(provider::ProviderError::UnknownType(p_type.to_string()))
+                let rsync_cfg = RsyncProviderConfig {
+                    name: name.to_string(),
+                    command: m_cfg.command.clone().unwrap_or_else(|| "rsync".to_string()),
+                    upstream_url: m_cfg.upstream.clone().unwrap_or_default(),
+                    username: m_cfg.username.clone(),
+                    password: m_cfg.password.clone(),
+                    exclude_file: m_cfg.exclude_file.clone(),
+                    rsync_options: m_cfg.rsync_options.clone().unwrap_or_default(),
+                    global_options: global.and_then(|g| g.rsync_options.clone()).unwrap_or_default(),
+                    rsync_override: m_cfg.rsync_override.clone(),
+                    rsync_override_only: m_cfg.rsync_override_only.unwrap_or(false),
+                    rsync_no_timeout: m_cfg.rsync_no_timeout.unwrap_or(false),
+                    rsync_timeout: m_cfg.rsync_timeout,
+                    env: m_cfg.env.clone().unwrap_or_default(),
+                    working_dir: mirror_dir,
+                    log_dir,
+                    log_file,
+                    use_ipv6: m_cfg.use_ipv6.unwrap_or(false),
+                    use_ipv4: m_cfg.use_ipv4.unwrap_or(false),
+                    interval: Duration::from_secs(interval as u64 * 60),
+                    retry,
+                    timeout: Duration::from_secs(timeout as u64),
+                    is_master,
+                };
+                let p = RsyncProvider::new(rsync_cfg)?;
+                Ok(Box::new(p))
             }
             "two-stage-rsync" => {
                 // TODO: implement two-stage-rsync provider

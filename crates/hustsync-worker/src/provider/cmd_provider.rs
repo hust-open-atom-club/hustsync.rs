@@ -49,7 +49,11 @@ pub struct CmdProvider {
 }
 
 impl CmdProvider {
-    pub fn new(config: CmdProviderConfig) -> Result<Self, ProviderError> {
+    pub fn new(mut config: CmdProviderConfig) -> Result<Self, ProviderError> {
+        if config.retry == 0 {
+            config.retry = 2;
+        }
+
         let cmd_args = shlex::split(&config.command)
             .ok_or_else(|| ProviderError::Execution("Failed to parse command with shlex".into()))?;
 
@@ -142,12 +146,12 @@ impl MirrorProvider for CmdProvider {
             cmd.process_group(0);
         }
 
-        // Set standard tunasync env vars
-        cmd.env("TUNASYNC_MIRROR_NAME", &self.config.name)
-            .env("TUNASYNC_WORKING_DIR", &self.config.working_dir)
-            .env("TUNASYNC_UPSTREAM_URL", &self.config.upstream_url)
-            .env("TUNASYNC_LOG_DIR", &self.config.log_dir)
-            .env("TUNASYNC_LOG_FILE", &self.config.log_file);
+        // Set standard hustsync env vars
+        cmd.env("HUSTSYNC_MIRROR_NAME", &self.config.name)
+            .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
+            .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
+            .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
+            .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
 
         for (k, v) in &self.config.env {
             cmd.env(k, v);
@@ -226,12 +230,6 @@ impl MirrorProvider for CmdProvider {
     }
 
     fn data_size(&self) -> Option<String> {
-        // We use try_lock or blocking_lock if needed, but data_size shouldn't be held long
-        // Since we are in a sync method, we just use a trick or we change the trait to return Option<String>.
-        // Wait, `data_size` is sync, so we block? Better to block_in_place if needed, or we just clone.
-        // Let's use `try_lock()` and return None if we can't get it instantly, or `blocking_lock()`.
-        // Actually, std::sync::Mutex is better for data_size if it's just a string, but tokio's Mutex is fine if we use `blocking_lock`.
-        // Since this is called rarely, try_lock is usually enough.
         if let Ok(guard) = self.data_size.try_lock() {
             guard.clone()
         } else {
