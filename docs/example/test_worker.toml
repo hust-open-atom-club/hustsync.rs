@@ -1,6 +1,6 @@
 [global]
 name = "test_worker"
-log_dir = "/tmp/hustsync_test/log"
+log_dir = "/tmp/hustsync_test/log/{{.Name}}"
 mirror_dir = "/tmp/hustsync_test/mirrors"
 concurrent = 10
 
@@ -13,3 +13,11 @@ ca_cert = ""
 hostname = "127.0.0.1"
 listen_addr = "127.0.0.1"
 listen_port = 6000
+
+[[mirrors]]
+name = "elvish"
+provider = "rsync"
+upstream = "rsync://rsync.elv.sh/elvish/"
+interval = 1440
+retry = 2
+timeout = 600
