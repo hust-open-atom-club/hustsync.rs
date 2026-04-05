@@ -152,7 +152,14 @@ impl MirrorProvider for CmdProvider {
             .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
             .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
             .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
-
+    
+        // Set standard tunatsync env vars
+        cmd.env("TUNASYNC_MIRROR_NAME", &self.config.name)
+            .env("TUNASYNC_WORKING_DIR", &self.config.working_dir)
+            .env("TUNASYNC_UPSTREAM_URL", &self.config.upstream_url)
+            .env("TUNASYNC_LOG_DIR", &self.config.log_dir)
+            .env("TUNASYNC_LOG_FILE", &self.config.log_file);
+        
         for (k, v) in &self.config.env {
             cmd.env(k, v);
         }
