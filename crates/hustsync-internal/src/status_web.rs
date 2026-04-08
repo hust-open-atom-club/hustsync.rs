@@ -6,6 +6,7 @@ use crate::status::SyncStatus;
 
 pub mod web_time_format {
     use super::*;
+    use serde::Deserializer;
 
     pub fn serialize_text<S>(date: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -15,11 +16,30 @@ pub mod web_time_format {
         serializer.serialize_str(&s)
     }
 
+    pub fn deserialize_text<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S %z")
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(serde::de::Error::custom)
+    }
+
     pub fn serialize_ts<S>(date: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_i64(date.timestamp())
+    }
+
+    pub fn deserialize_ts<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ts = i64::deserialize(deserializer)?;
+        DateTime::from_timestamp(ts, 0)
+            .ok_or_else(|| serde::de::Error::custom("Invalid timestamp"))
     }
 }
 
@@ -30,30 +50,42 @@ pub struct WebMirrorStatus {
     pub upstream: String,
     pub size: String,
     
-    #[serde(serialize_with = "web_time_format::serialize_text")]
+    #[serde(with = "web_time_format_text")]
     pub last_update: DateTime<Utc>,
-    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    #[serde(with = "web_time_format_ts")]
     pub last_update_ts: DateTime<Utc>,
     
-    #[serde(serialize_with = "web_time_format::serialize_text")]
+    #[serde(with = "web_time_format_text")]
     pub last_started: DateTime<Utc>,
-    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    #[serde(with = "web_time_format_ts")]
     pub last_started_ts: DateTime<Utc>,
     
-    #[serde(serialize_with = "web_time_format::serialize_text")]
+    #[serde(with = "web_time_format_text")]
     pub last_ended: DateTime<Utc>,
-    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    #[serde(with = "web_time_format_ts")]
     pub last_ended_ts: DateTime<Utc>,
     
     #[serde(rename = "next_schedule")]
-    #[serde(serialize_with = "web_time_format::serialize_text")]
+    #[serde(with = "web_time_format_text")]
     pub next_schedule: DateTime<Utc>,
     #[serde(rename = "next_schedule_ts")]
-    #[serde(serialize_with = "web_time_format::serialize_ts")]
+    #[serde(with = "web_time_format_ts")]
     pub next_schedule_ts: DateTime<Utc>,
     
     pub status: SyncStatus,
     pub is_master: bool,
+}
+
+pub mod web_time_format_text {
+    use super::*;
+    pub use web_time_format::serialize_text as serialize;
+    pub use web_time_format::deserialize_text as deserialize;
+}
+
+pub mod web_time_format_ts {
+    use super::*;
+    pub use web_time_format::serialize_ts as serialize;
+    pub use web_time_format::deserialize_ts as deserialize;
 }
 
 impl From<MirrorStatus> for WebMirrorStatus {
