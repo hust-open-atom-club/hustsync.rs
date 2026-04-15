@@ -39,10 +39,9 @@ pub async fn worker_id_validator(
     if parts.len() >= 2 && parts[0] == "workers" {
         let worker_id = parts[1];
         if let Some(adapter) = &manager.adapter {
-            if let Err(e) = adapter.get_worker(worker_id) {
+            if let Err(_e) = adapter.get_worker(worker_id) {
                 let error_body = Json(json!({
-                    "error": format!("invalid workerID {}", worker_id),
-                    "details": e.to_string()
+                    "error": format!("invalid workerID {}", worker_id)
                 }));
                 return Err((StatusCode::BAD_REQUEST, error_body).into_response());
             }

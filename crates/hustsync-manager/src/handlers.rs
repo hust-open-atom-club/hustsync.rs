@@ -93,7 +93,11 @@ pub async fn list_jobs_of_worker(
     Path(worker_id): Path<String>,
 ) -> impl IntoResponse {
     match adapter.list_mirror_status(&worker_id) {
-        Ok(statuses) => (StatusCode::OK, Json(json!(statuses))),
+        Ok(statuses) => {
+            let web_statuses: Vec<hustsync_internal::status_web::WebMirrorStatus> =
+                statuses.into_iter().map(|s| s.into()).collect();
+            (StatusCode::OK, Json(json!(web_statuses)))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(
