@@ -1,0 +1,6 @@
+{
+  "schedules": [
+    { "name": "archlinux", "next_schedule": "2026-04-15T14:00:00Z" },
+    { "name": "ubuntu",    "next_schedule": "2026-04-15T14:30:00Z" }
+  ]
+}

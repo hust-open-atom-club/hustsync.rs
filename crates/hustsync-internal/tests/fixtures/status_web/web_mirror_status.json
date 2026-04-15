@@ -1,0 +1,15 @@
+{
+  "name": "archlinux",
+  "upstream": "rsync://rsync.archlinux.org/archlinux/",
+  "size": "100G",
+  "last_update":      "2026-04-15 12:00:00 +0000",
+  "last_update_ts":   1776254400,
+  "last_started":     "2026-04-15 11:58:00 +0000",
+  "last_started_ts":  1776254280,
+  "last_ended":       "2026-04-15 12:00:00 +0000",
+  "last_ended_ts":    1776254400,
+  "next_schedule":    "2026-04-15 14:00:00 +0000",
+  "next_schedule_ts": 1776261600,
+  "status": "success",
+  "is_master": true
+}

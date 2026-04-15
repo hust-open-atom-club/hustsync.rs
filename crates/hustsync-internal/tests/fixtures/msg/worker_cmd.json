@@ -1,0 +1,6 @@
+{
+  "cmd": "start",
+  "mirror_id": "archlinux",
+  "args": ["--force"],
+  "options": { "force": true }
+}

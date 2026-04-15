@@ -1,0 +1,7 @@
+{
+  "cmd": "start",
+  "mirror_id": "archlinux",
+  "worker_id": "mirror-01",
+  "args": ["--force"],
+  "options": { "force": true }
+}

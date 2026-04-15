@@ -1,0 +1,7 @@
+{
+  "id": "mirror-01",
+  "url": "https://mirror-01.example.com:6001/",
+  "token": "s3cret",
+  "last_online": "2026-04-15T12:00:00Z",
+  "last_register": "2026-04-15T10:00:00Z"
+}
