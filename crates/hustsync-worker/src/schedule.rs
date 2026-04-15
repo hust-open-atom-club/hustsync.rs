@@ -45,6 +45,12 @@ pub struct ScheduleQueue {
     jobs_time: HashMap<String, Instant>, 
 }
 
+impl Default for ScheduleQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScheduleQueue {
     pub fn new() -> Self {
         Self {
@@ -124,6 +130,7 @@ impl ScheduleQueue {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
