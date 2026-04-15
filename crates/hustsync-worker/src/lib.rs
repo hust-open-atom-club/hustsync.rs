@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,9 +12,12 @@ use hustsync_internal::msg::WorkerStatus;
 use chrono::Utc;
 
 mod server;
+pub mod error;
 pub mod job;
 pub mod provider;
 pub mod schedule;
+
+pub use error::{HookError, WorkerError};
 
 pub use job::MirrorJob;
 use provider::{
@@ -67,25 +72,16 @@ impl Worker {
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
 
-        let mut worker = Worker {
-            cfg: Arc::clone(&cfg),
-            jobs: Arc::new(RwLock::new(HashMap::new())),
-            job_handles: Mutex::new(JoinSet::new()),
-            manager_tx,
-            manager_rx: Mutex::new(Some(manager_rx)),
-            semaphore: Arc::new(Semaphore::new(concurrent)),
-            schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
-            exit_token: CancellationToken::new(),
-            http_client: None,
-        };
+        let semaphore = Arc::new(Semaphore::new(concurrent));
+        let exit_token = CancellationToken::new();
+
+        let mut jobs_map = HashMap::new();
+        let mut handles = JoinSet::new();
 
         if let Some(mirrors) = &cfg.mirrors {
-            let mut jobs_map = HashMap::new();
-            let mut handles = worker.job_handles.try_lock().expect("Failed to lock handles during init");
-            
             for m_cfg in mirrors {
                 if let Some(name) = &m_cfg.name {
-                    let provider = match Self::create_provider(name, m_cfg, &worker.cfg) {
+                    let provider = match Self::create_provider(name, m_cfg, &cfg) {
                         Ok(p) => p,
                         Err(e) => {
                             tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -95,16 +91,27 @@ impl Worker {
 
                     let (job, actor) = job::JobActor::new(
                         name.clone(),
-                        worker.manager_tx.clone(),
-                        Arc::clone(&worker.semaphore),
+                        manager_tx.clone(),
+                        Arc::clone(&semaphore),
                         provider,
                     );
                     jobs_map.insert(name.clone(), job);
                     handles.spawn(actor.run());
                 }
             }
-            worker.jobs = Arc::new(RwLock::new(jobs_map));
         }
+
+        let mut worker = Worker {
+            cfg: Arc::clone(&cfg),
+            jobs: Arc::new(RwLock::new(jobs_map)),
+            job_handles: Mutex::new(handles),
+            manager_tx,
+            manager_rx: Mutex::new(Some(manager_rx)),
+            semaphore,
+            schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            exit_token,
+            http_client: None,
+        };
 
         let ca = cfg.manager.as_ref().and_then(|m| m.ca_cert.as_ref()).filter(|s| !s.is_empty());
         match hustsync_internal::util::create_http_client(ca) {
@@ -369,34 +376,41 @@ impl Worker {
         let listen_addr = self.cfg.server.as_ref().and_then(|s| s.listen_addr.clone()).unwrap_or_else(|| "127.0.0.1".to_string());
         let listen_port = self.cfg.server.as_ref().and_then(|s| s.listen_port).unwrap_or(6000);
         let addr = format!("{}:{}", listen_addr, listen_port);
-        let socket_addr: std::net::SocketAddr = addr.parse().expect("Failed to parse worker address");
-
-        let is_tls = if let Some(server_cfg) = &self.cfg.server {
-            !server_cfg.ssl_cert.as_deref().unwrap_or("").is_empty() 
-            && !server_cfg.ssl_key.as_deref().unwrap_or("").is_empty()
-        } else {
-            false
+        let socket_addr: std::net::SocketAddr = match addr.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::error!("Failed to parse worker address '{}': {}", addr, e);
+                return;
+            }
         };
 
+        let tls_paths = self.cfg.server.as_ref().and_then(|s| {
+            let cert = s.ssl_cert.as_deref().filter(|c| !c.is_empty())?;
+            let key  = s.ssl_key.as_deref().filter(|k| !k.is_empty())?;
+            Some((cert.to_string(), key.to_string()))
+        });
+
         let exit_token_server = self.exit_token.clone();
-        
-        if is_tls {
-            let server_cfg = self.cfg.server.as_ref().unwrap();
-            let cert_path = server_cfg.ssl_cert.as_deref().unwrap();
-            let key_path = server_cfg.ssl_key.as_deref().unwrap();
-            
-            let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
-                cert_path,
-                key_path,
+
+        if let Some((cert_path, key_path)) = tls_paths {
+            let tls_config = match axum_server::tls_rustls::RustlsConfig::from_pem_file(
+                &cert_path,
+                &key_path,
             )
             .await
-            .expect("Failed to load worker TLS certificates");
+            {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    tracing::error!("Failed to load worker TLS certificates: {}", e);
+                    return;
+                }
+            };
 
             tracing::info!("Worker (HTTPS) listening on {}", addr);
-            
+
             let handle = axum_server::Handle::new();
             let handle_clone = handle.clone();
-            
+
             tokio::spawn(async move {
                 exit_token_server.cancelled().await;
                 handle_clone.graceful_shutdown(Some(Duration::from_secs(10)));
@@ -410,7 +424,13 @@ impl Worker {
                     .unwrap_or_else(|e| tracing::error!("Worker HTTPS server error: {}", e));
             });
         } else {
-            let listener = tokio::net::TcpListener::bind(&socket_addr).await.expect("Failed to bind worker HTTP server");
+            let listener = match tokio::net::TcpListener::bind(&socket_addr).await {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!("Failed to bind worker HTTP server on {}: {}", addr, e);
+                    return;
+                }
+            };
             tracing::info!("Worker (HTTP) listening on {}", addr);
             tokio::spawn(async move {
                 axum::serve(listener, app)

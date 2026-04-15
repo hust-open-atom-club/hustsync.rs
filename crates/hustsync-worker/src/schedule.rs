@@ -98,9 +98,11 @@ impl ScheduleQueue {
         let now = Instant::now();
         
         loop {
-            if let Some(peek) = self.heap.peek() {
-                if peek.sched_time <= now {
-                    let item = self.heap.pop().unwrap();
+            match self.heap.peek_mut() {
+                Some(peek) if peek.sched_time <= now => {
+                    // `PeekMut::pop` consumes the guard and removes the element,
+                    // replacing the second `heap.pop().unwrap()` that was here.
+                    let item = std::collections::binary_heap::PeekMut::pop(peek);
                     // Check if this is a stale entry (was removed/rescheduled)
                     if self.jobs_time.get(&item.job.name) == Some(&item.sched_time) {
                         self.jobs_time.remove(&item.job.name);
@@ -108,11 +110,8 @@ impl ScheduleQueue {
                         return Some(item.job);
                     }
                     // Stale entry, just drop it and continue checking
-                } else {
-                    break;
                 }
-            } else {
-                break;
+                _ => break,
             }
         }
         None
