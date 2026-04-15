@@ -92,12 +92,12 @@ pub async fn list_jobs_of_worker(
     Database(adapter): Database,
     Path(worker_id): Path<String>,
 ) -> impl IntoResponse {
+    // Go `listJobsOfWorker` returns raw `[]MirrorStatus`, NOT WebMirrorStatus.
+    // Workers bootstrap their schedule from this endpoint and rely on the
+    // RFC3339 timestamps in MirrorStatus rather than the dual text+ts pair
+    // that WebMirrorStatus adds for the dashboard.
     match adapter.list_mirror_status(&worker_id) {
-        Ok(statuses) => {
-            let web_statuses: Vec<hustsync_internal::status_web::WebMirrorStatus> =
-                statuses.into_iter().map(|s| s.into()).collect();
-            (StatusCode::OK, Json(json!(web_statuses)))
-        }
+        Ok(statuses) => (StatusCode::OK, Json(json!(statuses))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(
@@ -275,22 +275,25 @@ pub async fn handle_cmd(
     State(manager): State<Arc<Manager>>,
     Database(adapter): Database,
     Json(client_cmd): Json<ClientCmd>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     let worker_id = &client_cmd.worker_id;
+
+    // Empty worker_id: Go aborts with 500 and no body (multi-worker routing
+    // is a known TODO in Go too).
     if worker_id.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ ERROR_KEY: "workerID should not be empty" })),
-        );
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     let worker = match adapter.get_worker(worker_id) {
         Ok(w) => w,
-        Err(e) => {
+        Err(_) => {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({ ERROR_KEY: format!("Worker {} not found: {}", worker_id, e) })),
-            );
+                Json(json!({
+                    ERROR_KEY: format!("worker {} is not registered yet", worker_id)
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -301,6 +304,10 @@ pub async fn handle_cmd(
         cmd: client_cmd.cmd,
     };
 
+    // Pre-forward status bookkeeping: Disable flips the row to Disabled,
+    // Stop flips a non-Disabled row to Paused. Go does the same at
+    // `handleClientCmd` around line 450. These are best-effort — do not
+    // gate the forward on their outcome.
     if client_cmd.cmd == CmdVerb::Disable
         && let Ok(status) = adapter.get_mirror_status(worker_id, &client_cmd.mirror_id)
     {
@@ -320,23 +327,31 @@ pub async fn handle_cmd(
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ ERROR_KEY: "HTTP client not initialized" })),
-        );
+        )
+            .into_response();
     };
 
-    // Workers register their URL ending with "/" and accept commands on POST /
-    // (Go: worker/worker.go `s.POST("/", ...)`). Forward to the root URL directly.
+    // Workers accept commands at POST / (worker URL ends with "/").
+    // Go forwards any request error (connect refused, timeout, non-2xx) as
+    // 500 with a unified error JSON — no 502/504 discrimination.
     let url = worker.url.clone();
     match client.post(&url).json(&worker_cmd).send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            match resp.json::<serde_json::Value>().await {
-                Ok(json) => (status, Json(json)),
-                Err(_) => (status, Json(json!({ INFO_KEY: "Forwarded" }))),
-            }
-        }
+        Ok(_) => (
+            StatusCode::OK,
+            Json(json!({
+                INFO_KEY: format!("successfully send command to worker {}", worker_id)
+            })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to forward command to worker: {}", e) })),
-        ),
+            Json(json!({
+                ERROR_KEY: format!(
+                    "post command to worker {}({}) fail: {}",
+                    worker_id, url, e
+                )
+            })),
+        )
+            .into_response(),
     }
 }

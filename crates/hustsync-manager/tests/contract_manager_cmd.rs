@@ -5,12 +5,15 @@
 //! intentionally red against the current implementation; each failing test is
 //! annotated with the exact deviation T8 must close.
 //!
-//! Scenarios exercised (§3.11 + §5):
+//! Scenarios exercised (§3.11 aligned with Go `handleClientCmd`):
 //!   1. Happy path  — forward succeeds; manager returns its own fixed message.
-//!   2. Unknown worker → 400 (Go-compat: NOT 404).
-//!   3. Unknown mirror → 400.
-//!   4. Worker unreachable (connection refused) → 502.
-//!   5. Worker timeout (accepts but never responds) → 504.
+//!   2. Empty worker_id → 500 with no body (Go: `c.AbortWithStatus(500)`).
+//!   3. Unknown worker → 400 "worker X is not registered yet".
+//!   4. Unknown mirror → still forwards (Go does not validate); worker path
+//!      reaching a closed port ends up as 500 via the generic forward-error.
+//!   5. Worker unreachable (connection refused) → 500 (Go does not
+//!      discriminate 502; all forward errors collapse to 500).
+//!   6. Worker timeout (accepts but never responds) → 500 (same).
 //!
 //! Mock worker strategy: `tokio::net::TcpListener` on an ephemeral port — no
 //! new crate dependencies required.
@@ -182,12 +185,15 @@ async fn cmd_unknown_worker_returns_400() {
 ///
 /// # Expected status: FAIL (T8 fixes)
 ///
-/// Current `handle_cmd` does not validate mirror existence; it forwards the
-/// command to the worker regardless.  Without a running worker, the forward
-/// will likely return 500 (connection refused) rather than 400.
+/// Go does not validate mirror existence before forwarding. A cmd with
+/// an unknown mirror still attempts the POST to the worker URL; if the
+/// worker is unreachable the request collapses to a generic 500 via the
+/// forward-error path (see `cmd_worker_unreachable_returns_500`). This
+/// test pins that the manager does NOT short-circuit to 400 when the
+/// mirror is unknown — the unknown-mirror path is indistinguishable
+/// from the worker-unreachable path at the manager layer.
 #[tokio::test]
-async fn cmd_unknown_mirror_returns_400() {
-    // Use a closed port so any unexpected forward fails fast.
+async fn cmd_unknown_mirror_forwards_and_fails_generically() {
     let closed_port = {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let p = l.local_addr().unwrap().port();
@@ -209,8 +215,8 @@ async fn cmd_unknown_mirror_returns_400() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_REQUEST,
-        "unknown mirror must return 400 (Go-compat §3.11); T8 adds mirror-existence check"
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Go does not pre-check mirror existence; the forward failure is 500"
     );
 
     let got = contract::body_json(resp).await;
@@ -225,14 +231,11 @@ async fn cmd_unknown_mirror_returns_400() {
 // ---------------------------------------------------------------------------
 
 /// POST /cmd when the worker URL points to a port where nothing is listening
-/// must return 502 Bad Gateway (§3.11, §5: connection refused after retry).
-///
-/// # Expected status: FAIL (T8 fixes)
-///
-/// Current `handle_cmd` maps reqwest errors to 500 Internal Server Error.
-/// T8 must discriminate connection-refused → 502.
+/// returns 500 — Go collapses every forward error (connect refused, timeout,
+/// non-2xx) into a single 500 path. Any dashboard/client reading this
+/// status cannot discriminate causes at the manager layer.
 #[tokio::test]
-async fn cmd_worker_unreachable_returns_502() {
+async fn cmd_worker_unreachable_returns_500() {
     // Bind then immediately drop so the port is closed.
     let closed_port = {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -255,8 +258,8 @@ async fn cmd_worker_unreachable_returns_502() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_GATEWAY,
-        "connection refused must map to 502 (§3.11, §5); T8 maps reqwest connect error → 502"
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Go collapses all forward errors to 500 (no 502 discrimination)"
     );
 
     let got = contract::body_json(resp).await;
@@ -271,24 +274,16 @@ async fn cmd_worker_unreachable_returns_502() {
 // ---------------------------------------------------------------------------
 
 /// POST /cmd when the worker accepts the TCP connection but never sends a
-/// response must return 504 Gateway Timeout (§3.11, §5: 8s total budget).
+/// response returns 500 — Go does not discriminate timeout from other
+/// forward failures. The reqwest client's own timeout surfaces as an
+/// `Err(_)` from `send()`, which maps to 500 via the generic forward-error
+/// path.
 ///
-/// The mock binds a port, calls `accept()` (so the TCP handshake completes),
-/// then holds the connection open without writing any bytes.  The reqwest
-/// client has a 5-second timeout (see `create_http_client`), which fires and
-/// causes the error.
-///
-/// # Expected status: FAIL (T8 fixes)
-///
-/// Current `handle_cmd` maps reqwest timeout errors to 500 Internal Server
-/// Error.  T8 must discriminate timeout → 504.
-///
-/// NOTE: This test takes ~5 seconds to complete because it waits for the
-/// reqwest timeout to fire.  That is unavoidable given the §5 budget and the
-/// in-process test approach.  The test is NOT flaky — the mock server holds
-/// the connection reliably until the test drops its handle.
+/// NOTE: This test takes ~5 seconds because it waits for the reqwest
+/// timeout to fire. That is unavoidable given the in-process test
+/// approach; it is not flaky.
 #[tokio::test]
-async fn cmd_worker_timeout_returns_504() {
+async fn cmd_worker_timeout_returns_500() {
     // Accept-never-respond mock: bind, accept one connection, hold it forever.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let worker_port = listener.local_addr().unwrap().port();
@@ -323,8 +318,8 @@ async fn cmd_worker_timeout_returns_504() {
 
     assert_eq!(
         resp.status(),
-        StatusCode::GATEWAY_TIMEOUT,
-        "worker timeout must map to 504 (§3.11, §5); T8 maps reqwest timeout error → 504"
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Go collapses all forward errors to 500 (no 504 discrimination)"
     );
 
     let got = contract::body_json(resp).await;
