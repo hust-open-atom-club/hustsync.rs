@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
     Json,
-    extract::{Path, Request, State},
+    extract::{Request, State},
     middleware::Next,
     response::{IntoResponse, Response},
 };
