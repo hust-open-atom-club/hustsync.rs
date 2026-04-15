@@ -1,22 +1,21 @@
-//! Contract tests for `POST /cmd` — §3.11 of the HTTP contract.
+//! Contract tests for `POST /cmd` on the manager.
 //!
-//! These tests pin the *expected* Go-compatible behavior so that `protocol-contract`
-//! lane (T8) has a concrete failing target to fix against.  Some tests are
-//! intentionally red against the current implementation; each failing test is
-//! annotated with the exact deviation T8 must close.
+//! These tests pin the Go-compatible behavior for every `POST /cmd`
+//! path, aligned with Go `handleClientCmd`:
 //!
-//! Scenarios exercised (§3.11 aligned with Go `handleClientCmd`):
-//!   1. Happy path  — forward succeeds; manager returns its own fixed message.
-//!   2. Empty worker_id → 500 with no body (Go: `c.AbortWithStatus(500)`).
-//!   3. Unknown worker → 400 "worker X is not registered yet".
-//!   4. Unknown mirror → still forwards (Go does not validate); worker path
-//!      reaching a closed port ends up as 500 via the generic forward-error.
-//!   5. Worker unreachable (connection refused) → 500 (Go does not
-//!      discriminate 502; all forward errors collapse to 500).
-//!   6. Worker timeout (accepts but never responds) → 500 (same).
+//! 1. Happy path — forward succeeds; manager returns its own fixed
+//!    message, not the worker body passthrough.
+//! 2. Empty `worker_id` → 500 with no body (Go `c.AbortWithStatus(500)`).
+//! 3. Unknown worker → 400 `"worker X is not registered yet"`.
+//! 4. Unknown mirror → still forwards (Go does not validate); with a
+//!    closed worker port the request collapses to 500 via the generic
+//!    forward-error path.
+//! 5. Worker unreachable (connection refused) → 500 (Go does not
+//!    discriminate 502; all forward errors collapse to 500).
+//! 6. Worker timeout (accepts but never responds) → 500.
 //!
-//! Mock worker strategy: `tokio::net::TcpListener` on an ephemeral port — no
-//! new crate dependencies required.
+//! Mock worker strategy: `tokio::net::TcpListener` on an ephemeral port —
+//! no new crate dependencies required.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -75,7 +74,7 @@ fn cmd_body(worker_id: &str, mirror_id: &str) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// T7-1: happy path
+// happy path
 // ---------------------------------------------------------------------------
 
 /// POST /cmd happy path: manager forwards to worker and returns its own fixed
@@ -84,9 +83,9 @@ fn cmd_body(worker_id: &str, mirror_id: &str) -> Vec<u8> {
 /// The mock worker here accepts the TCP connection, reads the HTTP request, and
 /// responds with HTTP 200 + `{"msg": "OK"}` — the worker's own Go-compat body.
 /// The *manager* must NOT pass that body through; it must return the fixed
-/// message defined by §3.11.
+/// message defined by .
 ///
-/// # Expected status: FAIL (T8 fixes)
+/// # Previously failed against a stale implementation — kept as a parity checkpoint
 ///
 /// Current `handle_cmd` passes through whatever the worker returns, so `got`
 /// will equal `{"msg":"OK"}` instead of the expected fixed message.
@@ -103,7 +102,7 @@ async fn cmd_happy_path_returns_fixed_message() {
             // Drain the request headers (read until \r\n\r\n).
             let mut buf = vec![0u8; 4096];
             let _ = stream.read(&mut buf).await;
-            // Respond with HTTP 200 + worker's Go-compat body (§4.1).
+            // Respond with HTTP 200 + worker's Go-compat body.
             // Body is exactly 13 bytes: {"msg":"OK"} — no space after colon.
             let body = "{\"msg\":\"OK\"}";
             let response = format!(
@@ -136,7 +135,7 @@ async fn cmd_happy_path_returns_fixed_message() {
 }
 
 // ---------------------------------------------------------------------------
-// T7-2: unknown worker → 400
+// unknown worker → 400
 // ---------------------------------------------------------------------------
 
 /// POST /cmd with an unknown `worker_id` must return 400 (Go-compat).
@@ -146,8 +145,8 @@ async fn cmd_happy_path_returns_fixed_message() {
 /// # Expected status: PASS
 ///
 /// Current `handle_cmd` already returns `StatusCode::BAD_REQUEST` when
-/// `adapter.get_worker` fails.  The error message format may differ from
-/// the fixture — fixture pins the Go canonical shape; T8 can align the message.
+/// `adapter.get_worker` fails. The error message format may differ from
+/// the fixture — fixture pins the Go canonical shape.
 #[tokio::test]
 async fn cmd_unknown_worker_returns_400() {
     let (app, _dir) = contract::spawn_manager();
@@ -163,11 +162,11 @@ async fn cmd_unknown_worker_returns_400() {
     assert_eq!(
         resp.status(),
         StatusCode::BAD_REQUEST,
-        "unknown worker must return 400, not 404 (Go-compat §3.11)"
+        "unknown worker must return 400, not 404 (Go-compat)"
     );
 
     let got = contract::body_json(resp).await;
-    // The body must carry an "error" key (§2 envelope shape).
+    // The body must carry an "error" key ( envelope shape).
     assert!(
         got.get("error").is_some(),
         "error envelope must contain an \"error\" key; got: {got}"
@@ -175,15 +174,15 @@ async fn cmd_unknown_worker_returns_400() {
 }
 
 // ---------------------------------------------------------------------------
-// T7-3: unknown mirror → 400
+// unknown mirror → 400
 // ---------------------------------------------------------------------------
 
 /// POST /cmd with a valid worker but an unknown `mirror_id` must return 400.
 ///
-/// The worker is registered but has no mirrors.  Go returns 400 when the mirror
+/// The worker is registered but has no mirrors. Go returns 400 when the mirror
 /// does not exist on the manager side (before forwarding).
 ///
-/// # Expected status: FAIL (T8 fixes)
+/// # Previously failed against a stale implementation — kept as a parity checkpoint
 ///
 /// Go does not validate mirror existence before forwarding. A cmd with
 /// an unknown mirror still attempts the POST to the worker URL; if the
@@ -227,7 +226,7 @@ async fn cmd_unknown_mirror_forwards_and_fails_generically() {
 }
 
 // ---------------------------------------------------------------------------
-// T7-4: worker unreachable → 502
+// worker unreachable → 502
 // ---------------------------------------------------------------------------
 
 /// POST /cmd when the worker URL points to a port where nothing is listening
@@ -270,7 +269,7 @@ async fn cmd_worker_unreachable_returns_500() {
 }
 
 // ---------------------------------------------------------------------------
-// T7-5: worker timeout → 504
+// worker timeout → 504
 // ---------------------------------------------------------------------------
 
 /// POST /cmd when the worker accepts the TCP connection but never sends a
@@ -291,9 +290,9 @@ async fn cmd_worker_timeout_returns_500() {
 
     // Keep the handle alive for the duration of the test so the OS doesn't
     // close the connection (which would look like a refused or reset, not a
-    // timeout).  We drop it at the end of the test.
+    // timeout). We drop it at the end of the test.
     let accept_hold = tokio::spawn(async move {
-        // Accept the connection but never read or write.  The OS will RST the
+        // Accept the connection but never read or write. The OS will RST the
         // connection when the future is dropped, but by then the reqwest client
         // will have already timed out.
         let (_stream, _addr) = listener.accept().await.unwrap();

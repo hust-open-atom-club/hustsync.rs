@@ -61,7 +61,7 @@ mod tests {
         hustsync_config_parser::parse_config::<WorkerConfig>(&worker_path).unwrap();
     }
 
-    /// Spec 03 §2.3 — track-B hooks (cgroup/docker/zfs/btrfs) must
+    /// track-B hooks (cgroup/docker/zfs/btrfs) must
     /// error at parse time, never silently accepted. `deny_unknown_fields`
     /// on `MirrorConfig` is what enforces this; the test pins the
     /// rejection so a future struct change that relaxes the guard

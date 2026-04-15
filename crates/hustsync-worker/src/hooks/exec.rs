@@ -2,9 +2,13 @@
 //!
 //! Runs each configured shell command via `sh -c` with a standardised
 //! env block matching Go `worker/exec_post_hook.go` verbatim
-//! (`TUNASYNC_*`) plus the `HUSTSYNC_*` synonyms. Non-zero exit from one
-//! command is logged but does not abort the list; the next command
+//! (`TUNASYNC_*`) plus the `HUSTSYNC_*` synonyms. Non-zero exit from
+//! one command is logged but does not abort the list; the next command
 //! still runs.
+//!
+//! Invariant: `TUNASYNC_JOB_EXIT_STATUS` is the literal string
+//! `"success"` on the success hook and `"failure"` on the fail hook —
+//! do NOT change these spellings, operator scripts depend on them.
 
 use std::time::Duration;
 
@@ -14,8 +18,8 @@ use tokio::time::timeout;
 
 use super::{HookCtx, HookError, JobHook};
 
-/// Hard-coded per-command budget per Spec §4.1. Operator-tunable is
-/// track B.
+/// Hard-coded 30s per-command budget. Operator-tunable timeouts and
+/// per-status overrides are future extensions.
 const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct ExecPostHook {

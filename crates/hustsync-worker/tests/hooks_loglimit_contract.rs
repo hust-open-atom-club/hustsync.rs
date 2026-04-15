@@ -1,4 +1,4 @@
-//! Contract tests for `LogLimitHook` — `06 §4.2`.
+//! Contract tests for `LogLimitHook` — rotation, symlink, fail rename.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

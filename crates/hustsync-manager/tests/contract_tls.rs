@@ -1,8 +1,8 @@
-//! TLS contract smoke test for hustsync-manager (T9).
+//! TLS contract smoke test for hustsync-manager.
 //!
 //! Proves that the same Router that serves HTTP in the trivial-GET contract
-//! tests (T3) also works correctly behind the TLS shell provided by
-//! axum-server.  The test deliberately mirrors `get_ping_returns_pong` from
+//! tests also works correctly behind the TLS shell provided by
+//! axum-server. The test deliberately mirrors `get_ping_returns_pong` from
 //! contract_get.rs: if the response diverges, the TLS wrapper is introducing
 //! a change in behaviour, which is the property being guarded.
 //!
@@ -30,7 +30,7 @@ async fn tls_get_ping_matches_http_contract() {
 
     // Build a reqwest client that trusts the self-signed cert.
     // `add_root_certificate` keeps hostname verification active so the test
-    // also exercises that the cert's SAN covers 127.0.0.1.  The self-signed
+    // also exercises that the cert's SAN covers 127.0.0.1. The self-signed
     // cert is not trusted by any OS trust store, so the connection would fail
     // without this explicit trust anchor.
     let root_cert = reqwest::Certificate::from_der(&cert_der).expect("reqwest: parse DER cert");
@@ -57,7 +57,7 @@ async fn tls_get_ping_matches_http_contract() {
         .await
         .expect("TLS GET /ping response is not valid JSON");
 
-    // Compare against the same fixture used by the plain-HTTP T3 test so that
+    // Compare against the same fixture used by the plain-HTTP  test so that
     // any Router-level divergence introduced by the TLS layer is surfaced.
     let want = contract::load_fixture("ping/response.json");
     contract::assert_json_eq_masked(&got, &want, &[]);

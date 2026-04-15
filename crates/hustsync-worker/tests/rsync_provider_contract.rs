@@ -1,14 +1,14 @@
-// Contract tests for `RsyncProvider` — §3.1 / §3.2 / §3.3 / §7 of
-// docs/rust-port/05-provider-contract.md.
+// Contract tests for RsyncProvider argv, log parsing, and lifecycle;
+// verified against Go `worker/rsync_provider.go`.
 //
 // argv tests load JSON fixtures from tests/fixtures/rsync-argv/ to keep the
 // expected argument sequences in a single canonical place rather than
 // scattered across test bodies.
 //
-// § size-parsing (§3.3) is already covered by rsync_log_parity.rs — skipped
+// size-parsing is already covered by rsync_log_parity.rs — skipped
 // here to avoid duplication as directed by the plan.
 //
-// §7 timeout and terminate tests drive a real shell stub (`sh -c "sleep 99"`)
+// timeout and terminate tests drive a real shell stub (`sh -c "sleep 99"`)
 // instead of a live rsync daemon so no network access is needed and the tests
 // are deterministic.
 
@@ -70,7 +70,7 @@ struct FixtureConfig {
 
 /// Build a minimal `RsyncProviderConfig` from a fixture config, using safe
 /// dummy values for fields not covered by the fixture (log paths, interval,
-/// etc.).  The `env` map is passed in directly so the auth fixture's env
+/// etc.). The `env` map is passed in directly so the auth fixture's env
 /// assertions can be exercised separately.
 fn config_from_fixture(f: &ArgvFixture) -> RsyncProviderConfig {
     RsyncProviderConfig {
@@ -100,7 +100,7 @@ fn config_from_fixture(f: &ArgvFixture) -> RsyncProviderConfig {
 }
 
 // ---------------------------------------------------------------------------
-// §3.1  argv derivation — one test per fixture file
+// argv derivation — one test per fixture file
 //
 // IPv flag: Go rsync_provider.go emits `-6`/`-4` (short form). Spec has
 // been corrected to match; the Rust implementation follows suit. The
@@ -116,13 +116,13 @@ fn load_fixture(name: &str) -> ArgvFixture {
 /// Assert that `build_args()` returns exactly the expected argv for a fixture.
 ///
 /// The first element of the returned argv is the first *option* flag, not the
-/// binary name — `build_args()` omits the binary itself.  The fixture's
+/// binary name — `build_args()` omits the binary itself. The fixture's
 /// `expected_argv` starts with `"rsync"` (the binary), so we compare from
 /// index 1 onward.
 fn assert_argv(fixture_name: &str, expected: &[String], actual: &[String]) {
     assert_eq!(
         actual, expected,
-        "argv mismatch for fixture '{fixture_name}':\n  expected: {expected:?}\n  actual:   {actual:?}"
+        "argv mismatch for fixture '{fixture_name}':\n expected: {expected:?}\n actual: {actual:?}"
     );
 }
 
@@ -171,13 +171,13 @@ fn argv_auth_matches_fixture() {
 }
 
 // ---------------------------------------------------------------------------
-// §7  zero-timeout = disabled — must NOT inject --timeout=0 into argv
+// zero-timeout = disabled — must NOT inject --timeout=0 into argv
 // ---------------------------------------------------------------------------
 
 #[test]
 fn zero_rsync_timeout_falls_back_to_default_not_zero() {
     // rsync_timeout = Some(0) must be treated identically to None (default
-    // 120 s).  The Rust implementation uses `.filter(|&v| v > 0).unwrap_or(120)`.
+    // 120 s). The Rust implementation uses `.filter(|&v| v > 0).unwrap_or(120)`.
     let config = RsyncProviderConfig {
         name: "zero-timeout".to_string(),
         command: "rsync".to_string(),
@@ -216,7 +216,7 @@ fn zero_rsync_timeout_falls_back_to_default_not_zero() {
 }
 
 // ---------------------------------------------------------------------------
-// §7  Timeout enforcement — provider.run() returns ProviderError::Timeout
+// timeout enforcement — provider.run() returns ProviderError::Timeout
 //
 // We use `sh -c "sleep 99"` as the command (rsync_override_only with a
 // shell stub) so no rsync daemon is required and the test is deterministic.
@@ -277,7 +277,7 @@ async fn run_returns_timeout_error_when_deadline_exceeded() {
 }
 
 // ---------------------------------------------------------------------------
-// §7  Terminate mid-run — concurrent cancel → ProviderError::Terminated
+// terminate mid-run — concurrent cancel → ProviderError::Terminated
 // ---------------------------------------------------------------------------
 
 #[tokio::test]

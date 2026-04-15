@@ -1,8 +1,9 @@
 //! Always-on built-in hook that ensures `working_dir` exists with mode
-//! `0o755` before the sync runs. Never creates parents recursively —
-//! a missing parent is an operator mistake that should surface loudly.
+//! `0o755` before the sync runs. Never creates parents recursively — a
+//! missing parent is an operator mistake that should surface loudly.
 
 use async_trait::async_trait;
+use tokio::fs;
 
 use super::{HookCtx, HookError, JobHook};
 
@@ -30,12 +31,12 @@ impl JobHook for WorkingDirHook {
 
     async fn pre_job(&self, ctx: &mut HookCtx) -> Result<(), HookError> {
         let dir = &ctx.working_dir;
-        if dir.is_dir() {
+        if fs::metadata(dir).await.map(|m| m.is_dir()).unwrap_or(false) {
             return Ok(());
         }
-        // Refuse to create parents — Spec §4.3 says parent must exist.
+        // Parent MUST exist — refuse to create it recursively.
         if let Some(parent) = dir.parent()
-            && !parent.exists()
+            && fs::metadata(parent).await.is_err()
         {
             return Err(HookError::config(
                 HOOK_NAME,
@@ -45,12 +46,14 @@ impl JobHook for WorkingDirHook {
                 ),
             ));
         }
-        std::fs::create_dir(dir).map_err(|e| HookError::io(HOOK_NAME, e))?;
+        fs::create_dir(dir)
+            .await
+            .map_err(|e| HookError::io(HOOK_NAME, e))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let perm = std::fs::Permissions::from_mode(0o755);
-            let _ = std::fs::set_permissions(dir, perm);
+            let _ = fs::set_permissions(dir, perm).await;
         }
         Ok(())
     }

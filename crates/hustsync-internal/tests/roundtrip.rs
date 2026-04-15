@@ -3,32 +3,32 @@
 // Wire-type round-trip tests for hustsync-internal.
 //
 // Each test loads a committed fixture, deserializes it into the Rust type, re-serializes,
-// and asserts structural equality with the fixture as a serde_json::Value.  Raw-byte equality
+// and asserts structural equality with the fixture as a serde_json::Value. Raw-byte equality
 // is not required: JSON key order and insignificant whitespace are normalized away.
 // Timestamp fields are verified against their expected values via serde_json::Value
 // rather than string comparison so that UTC-offset notation differences (+0000 vs Z)
 // do not cause spurious failures in the chrono RFC3339 path.
 //
-// Fixture layout:  crates/hustsync-internal/tests/fixtures/<type>/<name>.json
+// Fixture layout: crates/hustsync-internal/tests/fixtures/<type>/<name>.json
 //
-// Wire-format notes (see docs/rust-port/02-http-contract.md §3.2 §3.4 §3.5 §3.8 §3.10 §3.11 §4.1):
+// Wire-format notes (verified against Go `internal/msg.go` and `internal/status_web.go`):
 //
-//  - MirrorStatus uses #[serde(rename_all = "kebab-case")].  Field names on the wire are
-//    therefore hyphenated: "error-msg", "last-update", "is-master", "next-scheduled".
-//    This diverges from Go tunasync (which uses snake_case) and from WebMirrorStatus
-//    (snake_case).  The divergence lives in src/ and is outside testing-qa's lane;
-//    these tests pin the *current* Rust behaviour so any future fix in src/ breaks
-//    them intentionally, prompting a fixture update.
+// - MirrorStatus uses #[serde(rename_all = "kebab-case")]. Field names on the wire are
+// therefore hyphenated: "error-msg", "last-update", "is-master", "next-scheduled".
+// This diverges from Go tunasync (which uses snake_case) and from WebMirrorStatus
+// (snake_case). The divergence lives in src/ and is outside testing-qa's lane;
+// these tests pin the *current* Rust behaviour so any future fix in src/ breaks
+// them intentionally, prompting a fixture update.
 //
-//  - WebMirrorStatus uses dual text ("YYYY-MM-DD HH:MM:SS ±ZZZZ") plus sibling *_ts
-//    Unix-second integer fields per §3.2.  Text timestamps include timezone offset from
-//    the serialized DateTime<Utc>, which chrono renders as "+0000" for UTC.
+// - WebMirrorStatus uses dual text ("YYYY-MM-DD HH:MM:SS ±ZZZZ") plus sibling *_ts
+// Unix-second integer fields. Text timestamps include timezone offset from
+// the serialized DateTime<Utc>, which chrono renders as "+0000" for UTC.
 //
-//  - MirrorSchedule serialises the name field as JSON key "name"
-//    (matches Go `MirrorSchedule.MirrorName` with json:"name").
+// - MirrorSchedule serialises the name field as JSON key "name"
+// (matches Go `MirrorSchedule.MirrorName` with json:"name").
 //
-//  - CmdVerb serialises as kebab-case strings per the enum attribute.
-//    WorkerCmd / ClientCmd use snake_case for their other fields.
+// - CmdVerb serialises as kebab-case strings per the enum attribute.
+// WorkerCmd / ClientCmd use snake_case for their other fields.
 
 use std::path::Path;
 
@@ -47,7 +47,7 @@ fn load_fixture(rel: &str) -> serde_json::Value {
 }
 
 /// Deserialize `fixture_rel` into `T`, re-serialize, and assert structural equality
-/// with the original fixture value.  Fields in `masked_keys` are removed from both
+/// with the original fixture value. Fields in `masked_keys` are removed from both
 /// sides before comparison (for non-deterministic values such as timestamps produced
 /// at runtime — not used by the present fixtures but kept for future tests).
 fn assert_roundtrip<T>(fixture_rel: &str, masked_keys: &[&str])
@@ -73,7 +73,7 @@ where
     let got = mask(reserialized, masked_keys);
     assert_eq!(
         got, want,
-        "round-trip mismatch for {fixture_rel}:\n  got  = {got}\n  want = {want}"
+        "round-trip mismatch for {fixture_rel}:\n got = {got}\n want = {want}"
     );
 }
 
@@ -81,23 +81,23 @@ where
 // msg types
 // ---------------------------------------------------------------------------
 
-/// §3.8 — MirrorStatus: worker → manager status push body.
+/// MirrorStatus: worker → manager status push body.
 /// Fixture keys are kebab-case because MirrorStatus carries
-/// #[serde(rename_all = "kebab-case")].  That diverges from Go wire
+/// #[serde(rename_all = "kebab-case")]. That diverges from Go wire
 /// format (snake_case); pinned here to make the divergence explicit.
 #[test]
 fn test_roundtrip_mirror_status() {
     assert_roundtrip::<MirrorStatus>("msg/mirror_status.json", &[]);
 }
 
-/// §3.4 / §3.5 — WorkerStatus: manager list-workers response element.
+/// WorkerStatus: manager list-workers response element.
 /// Uses snake_case throughout, matching Go wire format.
 #[test]
 fn test_roundtrip_worker_status() {
     assert_roundtrip::<WorkerStatus>("msg/worker_status.json", &[]);
 }
 
-/// §3.10 — MirrorSchedules: bulk schedule update body.
+/// MirrorSchedules: bulk schedule update body.
 /// MirrorSchedule.name serialises as JSON key "name", matching Go's
 /// `MirrorSchedule.MirrorName` with `json:"name"`.
 #[test]
@@ -105,13 +105,13 @@ fn test_roundtrip_mirror_schedules() {
     assert_roundtrip::<MirrorSchedules>("msg/mirror_schedules.json", &[]);
 }
 
-/// §4.1 — WorkerCmd: command forwarded from manager to worker.
+/// WorkerCmd: command forwarded from manager to worker.
 #[test]
 fn test_roundtrip_worker_cmd() {
     assert_roundtrip::<WorkerCmd>("msg/worker_cmd.json", &[]);
 }
 
-/// §3.11 — ClientCmd: command sent from operator (hustsynctl) to manager.
+/// ClientCmd: command sent from operator (hustsynctl) to manager.
 #[test]
 fn test_roundtrip_client_cmd() {
     assert_roundtrip::<ClientCmd>("msg/client_cmd.json", &[]);
@@ -121,7 +121,7 @@ fn test_roundtrip_client_cmd() {
 // status
 // ---------------------------------------------------------------------------
 
-/// §3.2 — SyncStatus: all seven valid values survive a round-trip.
+/// SyncStatus: all seven valid values survive a round-trip.
 /// The fixture is a JSON array; each element is deserialized and checked
 /// against its expected string representation.
 #[test]
@@ -149,7 +149,7 @@ fn test_roundtrip_sync_status_variants() {
 // status_web
 // ---------------------------------------------------------------------------
 
-/// §3.2 — WebMirrorStatus: dual text+ts timestamp fields.
+/// WebMirrorStatus: dual text+ts timestamp fields.
 /// Text format is "YYYY-MM-DD HH:MM:SS ±ZZZZ" (Go layout "2006-01-02 15:04:05 -0700").
 /// The *_ts fields are Unix-second integers.
 #[test]
@@ -158,7 +158,7 @@ fn test_roundtrip_web_mirror_status() {
 }
 
 /// Verify that text timestamps survive a round-trip preserving the exact string form
-/// that Go tunasync emits.  The fixture uses "+0000" (chrono's UTC offset rendering);
+/// that Go tunasync emits. The fixture uses "+0000" (chrono's UTC offset rendering);
 /// this test asserts the exact string value is preserved, not merely the instant.
 #[test]
 fn test_web_mirror_status_text_timestamp_format_preserved() {

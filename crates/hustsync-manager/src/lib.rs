@@ -29,10 +29,8 @@ pub enum ManagerError {
     #[error("http client error: {0}")]
     Http(#[from] reqwest::Error),
 
-    /// Placeholder until Slice E merges and provides a typed `ConfigError`.
-    // TODO: swap to #[from] ConfigError after E merges
     #[error("config error: {0}")]
-    Config(String),
+    Config(#[from] hustsync_config_parser::ConfigError),
 
     #[error("bind error: {0}")]
     Bind(String),

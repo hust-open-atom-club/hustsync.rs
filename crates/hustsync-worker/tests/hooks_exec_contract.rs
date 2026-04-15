@@ -1,4 +1,4 @@
-//! Contract tests for `ExecPostHook` — `06 §4.1`.
+//! Contract tests for `ExecPostHook` — env inject, order, timeout.
 //!
 //! Each test spawns the hook with a shell command that writes a marker
 //! file; assertions inspect the marker to verify the command ran with

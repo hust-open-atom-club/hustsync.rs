@@ -1,15 +1,15 @@
 //! Trivial GET contract tests for hustsync-manager.
 //!
 //! Each test drives the in-process router via `tower::ServiceExt::oneshot`
-//! and compares the response body against a committed fixture.  No real
+//! and compares the response body against a committed fixture. No real
 //! socket is bound; no external process is started.
 //!
 //! Fixture path convention: `tests/fixtures/http/<endpoint>/response.json`.
 //!
-//! Empty-list intentional divergence from Go (§7 of 09-migration-from-go.md):
+//! Empty-list intentional divergence from Go:
 //! Go serialises a nil slice as JSON `null`; Rust serialises an empty Vec as
-//! `[]`.  The `GET /jobs` and `GET /workers` fixtures contain `[]`, which is
-//! the Rust-defined contract.  Clients should treat both as "no items".
+//! `[]`. The `GET /jobs` and `GET /workers` fixtures contain `[]`, which is
+//! the Rust-defined contract. Clients should treat both as "no items".
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -28,7 +28,7 @@ use tower::ServiceExt;
 /// GET /ping returns 200 with `{"message": "pong"}`.
 ///
 /// The key is `"message"` (Go's `_infoKey` constant), not `"pong"`.
-/// See §3.1 of the HTTP contract.
+/// See.
 #[tokio::test]
 async fn get_ping_returns_pong() {
     let (app, _dir) = contract::spawn_manager();
@@ -58,7 +58,7 @@ async fn get_ping_returns_pong() {
 /// GET /jobs on a fresh manager (no mirrors registered) returns 200 + `[]`.
 ///
 /// Go would return `null` for a nil slice; Rust returns `[]` for an empty Vec.
-/// This divergence is intentional — see §7 of 09-migration-from-go.md.
+/// This divergence is intentional — Go emits `null`, Rust emits `[]`.
 #[tokio::test]
 async fn get_jobs_empty_returns_empty_array() {
     let (app, _dir) = contract::spawn_manager();
@@ -88,7 +88,7 @@ async fn get_jobs_empty_returns_empty_array() {
 /// DELETE /jobs/disabled on a fresh manager returns 200 + `{"message": "flushed"}`.
 ///
 /// There are no disabled jobs to flush, but the handler must still succeed and
-/// return the canonical Go-compatible shape (§3.3).
+/// return the canonical Go-compatible shape ().
 #[tokio::test]
 async fn delete_jobs_disabled_returns_flushed() {
     let (app, _dir) = contract::spawn_manager();
@@ -118,7 +118,7 @@ async fn delete_jobs_disabled_returns_flushed() {
 /// GET /workers on a fresh manager (no workers registered) returns 200 + `[]`.
 ///
 /// Go would return `null` for a nil slice; Rust returns `[]` for an empty Vec.
-/// This divergence is intentional — see §7 of 09-migration-from-go.md.
+/// This divergence is intentional — Go emits `null`, Rust emits `[]`.
 #[tokio::test]
 async fn get_workers_empty_returns_empty_array() {
     let (app, _dir) = contract::spawn_manager();

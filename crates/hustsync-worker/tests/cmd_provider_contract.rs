@@ -1,4 +1,4 @@
-// Contract tests for the cmd provider — spec §5 of 05-provider-contract.md.
+// Contract tests for the cmd provider (env, fail_on_match, size, terminate).
 //
 // All six contract points are exercised against real process forks so that
 // the env-injection, fail_on_match, size_pattern, terminate, and timeout
@@ -50,7 +50,7 @@ mod cmd_provider_contract {
 
     // ── 1. TUNASYNC_* env injection ──────────────────────────────────────────
 
-    /// §5.1: All five TUNASYNC_* variables must be present in the child's env.
+    /// All five TUNASYNC_* variables must be present in the child's env.
     /// A `sh -c 'env | grep TUNASYNC_'` command writes them to the log file;
     /// we count distinct TUNASYNC_-prefixed lines.
     #[tokio::test]
@@ -77,7 +77,7 @@ mod cmd_provider_contract {
             "expected ≥5 TUNASYNC_* lines, got {tunasync_count}; log:\n{log}"
         );
 
-        // Verify the exact variable names mandated by §5.1.
+        // Verify the exact Go-compat variable names.
         for var in &[
             "TUNASYNC_MIRROR_NAME",
             "TUNASYNC_WORKING_DIR",
@@ -91,7 +91,7 @@ mod cmd_provider_contract {
 
     // ── 2. HUSTSYNC_* dual-prefix injection ──────────────────────────────────
 
-    /// §5.1 (Rust-port extension): The five HUSTSYNC_* synonyms must also be
+    /// The five HUSTSYNC_* synonyms must also be
     /// set so that scripts written for hustsync.rs do not need a TUNASYNC_ shim.
     #[tokio::test]
     async fn hustsync_env_vars_are_injected() {
@@ -130,7 +130,7 @@ mod cmd_provider_contract {
 
     // ── 3. fail_on_match ─────────────────────────────────────────────────────
 
-    /// §5.2: When the log contains a line matching `fail_on_match`, `run()`
+    /// When the log contains a line matching `fail_on_match`, `run()`
     /// must return `ProviderError::Execution` even if the exit code was 0.
     #[tokio::test]
     async fn fail_on_match_turns_success_into_execution_error() {
@@ -155,8 +155,8 @@ mod cmd_provider_contract {
 
     // ── 4. size_pattern ──────────────────────────────────────────────────────
 
-    /// §5.3: After a successful run, capture group 1 of `size_pattern` is
-    /// returned by `data_size()`.  A single-match log verifies the extraction
+    /// After a successful run, capture group 1 of `size_pattern` is
+    /// returned by `data_size()`. A single-match log verifies the extraction
     /// without depending on first-vs-last ordering.
     #[tokio::test]
     async fn size_pattern_captures_match() {
@@ -183,7 +183,7 @@ mod cmd_provider_contract {
 
     // ── 5. terminate ─────────────────────────────────────────────────────────
 
-    /// §2.6: Cancelling via `ctx.cancel` while `sleep 99` is running must
+    /// Cancelling via `ctx.cancel` while `sleep 99` is running must
     /// cause `run()` to return `ProviderError::Terminated` within 10 s.
     /// The `CancellationToken` is the spec-mandated cancellation channel;
     /// callers (the job actor) cancel the token to stop a running provider.
@@ -228,7 +228,7 @@ mod cmd_provider_contract {
 
     // ── 6. zero-timeout = disabled ───────────────────────────────────────────
 
-    /// §1 (timeout() contract): `Duration::ZERO` means "no timeout". A fast
+    /// `Duration::ZERO` means "no timeout". A fast
     /// command (`echo hello`) must complete successfully — no spurious
     /// `Timeout` error is allowed.
     #[tokio::test]

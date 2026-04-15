@@ -1,6 +1,6 @@
 // Semantic-validation tests for provider config shapes.
 //
-// Each of the five validation rules (Spec 05 §3.5, §4.1, §5.4) has at
+// Each of the five validation rules has at
 // least two cases: one legal input that must be accepted and at least one
 // illegal input that must produce `ConfigError::InvalidValue`.
 #![allow(clippy::unwrap_used)]
@@ -230,7 +230,7 @@ fn reject_stage1_profile_unknown_value() {
 
 #[test]
 fn reject_stage1_profile_debian_oldstable() {
-    // Spec §4.1 explicitly calls out that `debian-oldstable` does not exist.
+    // debian-oldstable is not a valid profile; Go `worker/two_stage_rsync_provider.go` rejects it.
     let mirror = MirrorConfig {
         name: Some("deb-oldstable".into()),
         provider: Some("two-stage-rsync".into()),

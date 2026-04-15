@@ -39,11 +39,11 @@ async fn test_register_worker_api() {
     let app = create_test_app("test_register");
 
     let worker_json = json!({
-        "id": "test-worker-api",
-        "url": "http://127.0.0.1:8081",
-        "token": "test-token",
-        "last_online": "2023-01-01T00:00:00Z",
-        "last_register": "2023-01-01T00:00:00Z"
+    "id": "test-worker-api",
+    "url": "http://127.0.0.1:8081",
+    "token": "test-token",
+    "last_online": "2023-01-01T00:00:00Z",
+    "last_register": "2023-01-01T00:00:00Z"
     });
 
     let response = app
@@ -83,11 +83,11 @@ async fn test_update_job_status_logic() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "id": worker_id,
-                        "url": "http://127.0.0.1:8081",
-                        "token": "test-token",
-                        "last_online": "2023-01-01T00:00:00Z",
-                        "last_register": "2023-01-01T00:00:00Z"
+                    "id": worker_id,
+                    "url": "http://127.0.0.1:8081",
+                    "token": "test-token",
+                    "last_online": "2023-01-01T00:00:00Z",
+                    "last_register": "2023-01-01T00:00:00Z"
                     })
                     .to_string(),
                 ))
@@ -98,17 +98,17 @@ async fn test_update_job_status_logic() {
 
     let mirror_id = "debian";
     let status_success = json!({
-        "name": mirror_id,
-        "worker": worker_id,
-        "upstream": "http://deb.debian.org",
-        "size": "0",
-        "error_msg": "",
-        "last_update": "2023-01-01T00:00:00Z",
-        "last_started": "2023-01-01T00:00:00Z",
-        "last_ended": "2023-01-01T00:00:00Z",
-        "next_schedule": "2023-01-01T00:00:00Z",
-        "status": "success",
-        "is_master": true
+    "name": mirror_id,
+    "worker": worker_id,
+    "upstream": "http://deb.debian.org",
+    "size": "0",
+    "error_msg": "",
+    "last_update": "2023-01-01T00:00:00Z",
+    "last_started": "2023-01-01T00:00:00Z",
+    "last_ended": "2023-01-01T00:00:00Z",
+    "next_schedule": "2023-01-01T00:00:00Z",
+    "status": "success",
+    "is_master": true
     });
 
     let res = app
@@ -126,17 +126,17 @@ async fn test_update_job_status_logic() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let status_presync = json!({
-        "name": mirror_id,
-        "worker": worker_id,
-        "upstream": "http://deb.debian.org",
-        "size": "0",
-        "error_msg": "",
-        "last_update": "2023-01-01T00:00:00Z",
-        "last_started": "2023-01-01T00:00:00Z",
-        "last_ended": "2023-01-01T00:00:00Z",
-        "next_schedule": "2023-01-01T00:00:00Z",
-        "status": "pre-syncing",
-        "is_master": true
+    "name": mirror_id,
+    "worker": worker_id,
+    "upstream": "http://deb.debian.org",
+    "size": "0",
+    "error_msg": "",
+    "last_update": "2023-01-01T00:00:00Z",
+    "last_started": "2023-01-01T00:00:00Z",
+    "last_ended": "2023-01-01T00:00:00Z",
+    "next_schedule": "2023-01-01T00:00:00Z",
+    "status": "pre-syncing",
+    "is_master": true
     });
 
     let res = app
@@ -173,11 +173,11 @@ async fn test_list_query_apis() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "id": worker_id,
-                        "url": "http://127.0.0.1:8082",
-                        "token": "SUPER-SECRET-TOKEN",
-                        "last_online": "2023-01-01T00:00:00Z",
-                        "last_register": "2023-01-01T00:00:00Z"
+                    "id": worker_id,
+                    "url": "http://127.0.0.1:8082",
+                    "token": "SUPER-SECRET-TOKEN",
+                    "last_online": "2023-01-01T00:00:00Z",
+                    "last_register": "2023-01-01T00:00:00Z"
                     })
                     .to_string(),
                 ))
@@ -195,17 +195,17 @@ async fn test_list_query_apis() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "name": "archlinux",
-                        "worker": worker_id,
-                        "upstream": "http://mirrors.kernel.org",
-                        "size": "500GB",
-                        "error_msg": "",
-                        "last_update": "2023-01-01T00:00:00Z",
-                        "last_started": "2023-01-01T00:00:00Z",
-                        "last_ended": "2023-01-01T00:00:00Z",
-                        "next_schedule": "2023-01-01T00:00:00Z",
-                        "status": "success",
-                        "is_master": true
+                    "name": "archlinux",
+                    "worker": worker_id,
+                    "upstream": "http://mirrors.kernel.org",
+                    "size": "500GB",
+                    "error_msg": "",
+                    "last_update": "2023-01-01T00:00:00Z",
+                    "last_started": "2023-01-01T00:00:00Z",
+                    "last_ended": "2023-01-01T00:00:00Z",
+                    "next_schedule": "2023-01-01T00:00:00Z",
+                    "status": "success",
+                    "is_master": true
                     })
                     .to_string(),
                 ))
@@ -279,11 +279,11 @@ async fn test_flush_disabled_jobs() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "id": worker_id,
-                        "url": "http://127.0.0.1:8081",
-                        "token": "test-token",
-                        "last_online": "2023-01-01T00:00:00Z",
-                        "last_register": "2023-01-01T00:00:00Z"
+                    "id": worker_id,
+                    "url": "http://127.0.0.1:8081",
+                    "token": "test-token",
+                    "last_online": "2023-01-01T00:00:00Z",
+                    "last_register": "2023-01-01T00:00:00Z"
                     })
                     .to_string(),
                 ))
@@ -301,17 +301,17 @@ async fn test_flush_disabled_jobs() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "name": "job-active",
-                        "worker": worker_id,
-                        "upstream": "http://upstream",
-                        "size": "0",
-                        "error_msg": "",
-                        "last_update": "2023-01-01T00:00:00Z",
-                        "last_started": "2023-01-01T00:00:00Z",
-                        "last_ended": "2023-01-01T00:00:00Z",
-                        "next_schedule": "2023-01-01T00:00:00Z",
-                        "status": "success",
-                        "is_master": true
+                    "name": "job-active",
+                    "worker": worker_id,
+                    "upstream": "http://upstream",
+                    "size": "0",
+                    "error_msg": "",
+                    "last_update": "2023-01-01T00:00:00Z",
+                    "last_started": "2023-01-01T00:00:00Z",
+                    "last_ended": "2023-01-01T00:00:00Z",
+                    "next_schedule": "2023-01-01T00:00:00Z",
+                    "status": "success",
+                    "is_master": true
                     })
                     .to_string(),
                 ))
@@ -329,17 +329,17 @@ async fn test_flush_disabled_jobs() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "name": "job-disabled",
-                        "worker": worker_id,
-                        "upstream": "http://upstream",
-                        "size": "0",
-                        "error_msg": "",
-                        "last_update": "2023-01-01T00:00:00Z",
-                        "last_started": "2023-01-01T00:00:00Z",
-                        "last_ended": "2023-01-01T00:00:00Z",
-                        "next_schedule": "2023-01-01T00:00:00Z",
-                        "status": "disabled",
-                        "is_master": true
+                    "name": "job-disabled",
+                    "worker": worker_id,
+                    "upstream": "http://upstream",
+                    "size": "0",
+                    "error_msg": "",
+                    "last_update": "2023-01-01T00:00:00Z",
+                    "last_started": "2023-01-01T00:00:00Z",
+                    "last_ended": "2023-01-01T00:00:00Z",
+                    "next_schedule": "2023-01-01T00:00:00Z",
+                    "status": "disabled",
+                    "is_master": true
                     })
                     .to_string(),
                 ))
@@ -386,11 +386,11 @@ async fn test_handle_cmd_worker_not_found() {
     let app = create_test_app("test_cmd_not_found");
 
     let cmd_json = json!({
-        "options": {},
-        "args": [],
-        "mirror_id": "debian",
-        "worker_id": "non-existent-worker",
-        "cmd": "start"
+    "options": {},
+    "args": [],
+    "mirror_id": "debian",
+    "worker_id": "non-existent-worker",
+    "cmd": "start"
     });
 
     let res = app
@@ -444,19 +444,26 @@ async fn test_size_and_schedule_updates() {
         .unwrap();
 
     // Report initial status
-    let _ = app.clone().oneshot(
-        Request::builder()
-            .method("POST")
-            .uri(format!("/workers/{}/jobs/{}", worker_id, mirror_id))
-            .header("Content-Type", "application/json")
-            .body(Body::from(json!({
-                "name": mirror_id, "worker": worker_id, "upstream": "", "size": "0",
-                "error_msg": "", "last_update": "2023-01-01T00:00:00Z",
-                "last_started": "2023-01-01T00:00:00Z", "last_ended": "2023-01-01T00:00:00Z",
-                "next_schedule": "2023-01-01T00:00:00Z", "status": "success", "is_master": true
-            }).to_string()))
-            .unwrap(),
-    ).await.unwrap();
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workers/{}/jobs/{}", worker_id, mirror_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                    "name": mirror_id, "worker": worker_id, "upstream": "", "size": "0",
+                    "error_msg": "", "last_update": "2023-01-01T00:00:00Z",
+                    "last_started": "2023-01-01T00:00:00Z", "last_ended": "2023-01-01T00:00:00Z",
+                    "next_schedule": "2023-01-01T00:00:00Z", "status": "success", "is_master": true
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
     // 2. Update Size (Using the new specific size route)
     let res = app
@@ -484,9 +491,9 @@ async fn test_size_and_schedule_updates() {
                 .header("Content-Type", "application/json")
                 .body(Body::from(
                     json!({
-                        "schedules": [
-                            { "name": mirror_id, "next_schedule": future_time }
-                        ]
+                    "schedules": [
+                    { "name": mirror_id, "next_schedule": future_time }
+                    ]
                     })
                     .to_string(),
                 ))

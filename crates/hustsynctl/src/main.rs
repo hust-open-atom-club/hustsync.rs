@@ -18,8 +18,8 @@ struct CtlConfig {
     ca_cert: Option<String>,
 }
 
-fn load_config(path: &str, cfg: &mut CtlConfig, strict: bool) -> Result<()> {
-    match std::fs::read_to_string(path) {
+async fn load_config(path: &str, cfg: &mut CtlConfig, strict: bool) -> Result<()> {
+    match tokio::fs::read_to_string(path).await {
         Ok(content) => match toml::from_str::<CtlConfig>(&content) {
             Ok(parsed) => {
                 if let Some(addr) = parsed.manager_addr
@@ -195,17 +195,18 @@ async fn main() {
         ca_cert: None,
     };
 
-    let _ = load_config("/etc/hustsync/ctl.conf", &mut config, false);
+    let _ = load_config("/etc/hustsync/ctl.conf", &mut config, false).await;
     if let Ok(home) = std::env::var("HOME") {
         let _ = load_config(
             &format!("{}/.config/hustsync/ctl.conf", home),
             &mut config,
             false,
-        );
+        )
+        .await;
     }
 
     if let Some(c) = &cli.config
-        && let Err(e) = load_config(c, &mut config, true)
+        && let Err(e) = load_config(c, &mut config, true).await
     {
         eprintln!("Error loading explicit config: {}", e);
         exit(1);

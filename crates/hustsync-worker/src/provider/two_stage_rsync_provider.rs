@@ -21,9 +21,9 @@ use super::{MirrorProvider, ProviderError, ProviderType, RunContext};
 
 /// Stage-1 option sets keyed by profile name.
 ///
-/// Verbatim translation of `rsyncStage1Profiles` in
-/// `worker/two_stage_rsync_provider.go`. If the Go map grows, update this
-/// map and `05-provider-contract.md §4.1` in the same PR.
+/// Verbatim translation of `rsyncStage1Profiles` in Go
+/// `worker/two_stage_rsync_provider.go`. Keep in sync with Go when the
+/// upstream map grows.
 fn stage1_profiles() -> HashMap<&'static str, Vec<&'static str>> {
     let mut map = HashMap::new();
     map.insert(
@@ -62,7 +62,7 @@ fn stage1_profiles() -> HashMap<&'static str, Vec<&'static str>> {
 ///
 /// Both stages share most fields; only `stage1_profile` governs the
 /// stage-1 filter set. The stage-2 argv is the standard rsync base
-/// (§3.1) plus extra options — identical to `RsyncProvider`.
+/// plus `extra_options` — identical to `RsyncProvider`.
 pub struct TwoStageRsyncProviderConfig {
     pub name: String,
     pub command: String,
@@ -137,9 +137,9 @@ impl TwoStageRsyncProvider {
     /// Build argv for a single stage.
     ///
     /// Stage 1 uses the named profile's filter set (no `--delete`).
-    /// Stage 2 uses the standard rsync base plus extra_options (§3.1).
-    /// Both stages apply the timeout / IP / exclude-file options verbatim
-    /// to match Go's `Options(stage int)` method.
+    /// Stage 2 uses the standard rsync base plus `extra_options`.
+    /// Both stages apply the timeout / IP / exclude-file options
+    /// verbatim to match Go's `Options(stage int)` method.
     pub(crate) fn build_args_for_stage(&self, stage: u8) -> Result<Vec<String>, ProviderError> {
         let mut options: Vec<String> = match stage {
             1 => {
@@ -201,9 +201,7 @@ impl TwoStageRsyncProvider {
             options.push(format!("--timeout={}", timeo));
         }
 
-        // IP mode — Go uses short flags (-6/-4); spec §4 notes "verbatim Go"
-        // so we follow Go here (two-stage uses -6/-4, unlike rsync_provider
-        // which uses long form per §3.1).
+        // IP mode — short flags `-6` / `-4` to match Go verbatim.
         if self.config.use_ipv6 {
             options.push("-6".to_string());
         } else if self.config.use_ipv4 {
@@ -405,19 +403,27 @@ impl MirrorProvider for TwoStageRsyncProvider {
         create_dir_all(&self.config.working_dir).await?;
         create_dir_all(&self.config.log_dir).await?;
 
-        // Both stages append to the same log file (Go: prepareLogFile(stage > 1))
+        // Pre_exec hook may rotate the log path; honor `ctx.env`
+        // before opening the file handle. Fall back to config default.
+        let effective_log_file = ctx
+            .env
+            .get("TUNASYNC_LOG_FILE")
+            .cloned()
+            .unwrap_or_else(|| self.config.log_file.clone());
+
+        // Both stages append to the same log file; stage-2 output follows
+        // stage-1 without a separator to match Go's `prepareLogFile`.
         let mut log_file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(&self.config.log_file)
+            .open(&effective_log_file)
             .await?;
 
-        // Position at end so stage-2 appends after stage-1 output
         use tokio::io::AsyncSeekExt;
         log_file.seek(std::io::SeekFrom::End(0)).await?;
 
-        // Wrap the entire two-stage run in a single timeout budget (§4.2 rule 4)
+        // Wrap the entire two-stage run in a single timeout budget.
         let run_body = async {
             // Stage 1: quick sync of metadata-critical files
             self.run_stage(1, &mut log_file, &ctx).await?;
@@ -441,7 +447,7 @@ impl MirrorProvider for TwoStageRsyncProvider {
         self.running_pgid.store(0, Ordering::Release);
 
         if result.is_ok() {
-            let size = extract_size_from_rsync_log(&self.config.log_file).unwrap_or_default();
+            let size = extract_size_from_rsync_log(&effective_log_file).unwrap_or_default();
             if !size.is_empty() {
                 let mut size_guard = self.data_size.lock().await;
                 *size_guard = Some(size);

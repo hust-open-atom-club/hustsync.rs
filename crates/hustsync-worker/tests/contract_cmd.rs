@@ -1,13 +1,13 @@
 // Contract tests for the worker `POST /` command endpoint.
 //
-// Spec §4.1 of docs/rust-port/02-http-contract.md defines the expected
-// response shape for each command path.  These tests exercise the handler
+// Go `worker/worker.go` defines the expected
+// response shape for each command path. These tests exercise the handler
 // in-process via `tower::ServiceExt::oneshot` so no TCP port is needed.
 //
 // AppState is constructed by hand:
-//   - `jobs`: Arc<RwLock<HashMap>> — empty for unknown-mirror / invalid-cmd
-//     cases; populated with one `MirrorJob` for the happy-path case.
-//   - `schedule_queue`: Arc<Mutex<ScheduleQueue>> — freshly allocated, empty.
+// - `jobs`: Arc<RwLock<HashMap>> — empty for unknown-mirror / invalid-cmd
+// cases; populated with one `MirrorJob` for the happy-path case.
+// - `schedule_queue`: Arc<Mutex<ScheduleQueue>> — freshly allocated, empty.
 //
 // The `MirrorJob` for the happy-path case is built directly from its public
 // fields (no provider needed) with a live mpsc channel so `send_ctrl` does

@@ -1,4 +1,4 @@
-//! Contract tests for the two-stage rsync provider — `05 §4.1–§4.3`.
+//! Contract tests for the two-stage rsync provider — stage sequencing + terminate.
 //!
 //! A shell script at `tests/fixtures/bin/fake_rsync.sh` stands in for rsync.
 //! It detects the stage by argv (`--delete` → stage 2) and exits with a
@@ -7,12 +7,12 @@
 //! intercept a running stage.
 //!
 //! Scenarios:
-//!   1. stage-1 exit 23 → whole run fails, stage 2 does not start
-//!   2. stage-1 exit 24 → whole run fails, stage 2 does not start
-//!   3. stage-1 success + stage-2 success → run succeeds
-//!   4. stage-1 success + stage-2 failure → run fails
-//!   5. cancel mid-stage-1 via `ctx.cancel` → `ProviderError::Terminated`
-//!   6. unknown `stage1_profile` → rejected at `new()`
+//! 1. stage-1 exit 23 → whole run fails, stage 2 does not start
+//! 2. stage-1 exit 24 → whole run fails, stage 2 does not start
+//! 3. stage-1 success + stage-2 success → run succeeds
+//! 4. stage-1 success + stage-2 failure → run fails
+//! 5. cancel mid-stage-1 via `ctx.cancel` → `ProviderError::Terminated`
+//! 6. unknown `stage1_profile` → rejected at `new()`
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

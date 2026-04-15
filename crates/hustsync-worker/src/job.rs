@@ -154,7 +154,8 @@ impl JobActor {
 
     /// Run `post_*` hooks LIFO over the first `count` hooks (config
     /// order, reversed). Errors from post-hooks are logged but never
-    /// surface back to the caller — Spec §3.2.
+    /// surface back to the caller: the sync's success / fail outcome
+    /// is fixed by the time post-hooks run.
     async fn run_post(
         phase: PostPhase,
         hooks: &[Arc<dyn crate::hooks::JobHook>],
@@ -241,7 +242,7 @@ impl JobActor {
             None
         };
 
-        // 2. pre_job — once, outside the retry loop (§3 pipeline).
+        // 2. pre_job — runs once before the retry loop.
         let mut hook_ctx = Self::make_hook_ctx(&name, &provider, 0);
         let pre_job_count = match Self::run_pre(PrePhase::PreJob, &hooks, &mut hook_ctx).await {
             Ok(n) => n,

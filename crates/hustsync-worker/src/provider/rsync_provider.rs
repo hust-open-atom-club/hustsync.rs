@@ -192,7 +192,15 @@ impl MirrorProvider for RsyncProvider {
         create_dir_all(&self.config.working_dir).await?;
         create_dir_all(&self.config.log_dir).await?;
 
-        let mut log_file = File::create(&self.config.log_file).await?;
+        // Loglimit (or any pre_exec hook) may have rotated the log path;
+        // honor it before opening the file handle.
+        let effective_log_file = ctx
+            .env
+            .get("TUNASYNC_LOG_FILE")
+            .cloned()
+            .unwrap_or_else(|| self.config.log_file.clone());
+
+        let mut log_file = File::create(&effective_log_file).await?;
         let std_out_log = log_file.try_clone().await?.into_std().await;
         let std_err_log = log_file.try_clone().await?.into_std().await;
 
@@ -220,7 +228,7 @@ impl MirrorProvider for RsyncProvider {
             .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
             .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
             .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
-            .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
+            .env("HUSTSYNC_LOG_FILE", &effective_log_file);
 
         // Per-mirror config env
         for (k, v) in &self.config.env {
@@ -329,7 +337,7 @@ impl MirrorProvider for RsyncProvider {
         self.running_pgid.store(0, Ordering::Release);
 
         if result.is_ok() {
-            let size = extract_size_from_rsync_log(&self.config.log_file).unwrap_or_default();
+            let size = extract_size_from_rsync_log(&effective_log_file).unwrap_or_default();
             if !size.is_empty() {
                 let mut size_guard = self.data_size.lock().await;
                 *size_guard = Some(size);

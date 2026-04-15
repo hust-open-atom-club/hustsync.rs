@@ -142,8 +142,18 @@ impl MirrorProvider for CmdProvider {
         create_dir_all(&self.config.working_dir).await?;
         create_dir_all(&self.config.log_dir).await?;
 
+        // Loglimit hook (or any other pre_exec hook) may redirect the log
+        // file to a rotated timestamped path; honor it via ctx.env before
+        // opening the file handle. Falls back to the config default when
+        // no hook has set it.
+        let effective_log_file = ctx
+            .env
+            .get("TUNASYNC_LOG_FILE")
+            .cloned()
+            .unwrap_or_else(|| self.config.log_file.clone());
+
         // Setup log file
-        let log_file = File::create(&self.config.log_file).await?;
+        let log_file = File::create(&effective_log_file).await?;
         let std_out_log = log_file.into_std().await;
         let std_err_log = std_out_log.try_clone()?;
 
@@ -167,12 +177,12 @@ impl MirrorProvider for CmdProvider {
             .env("TUNASYNC_WORKING_DIR", &self.config.working_dir)
             .env("TUNASYNC_UPSTREAM_URL", &self.config.upstream_url)
             .env("TUNASYNC_LOG_DIR", &self.config.log_dir)
-            .env("TUNASYNC_LOG_FILE", &self.config.log_file)
+            .env("TUNASYNC_LOG_FILE", &effective_log_file)
             .env("HUSTSYNC_MIRROR_NAME", &self.config.name)
             .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
             .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
             .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
-            .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
+            .env("HUSTSYNC_LOG_FILE", &effective_log_file);
 
         // Per-mirror config env
         for (k, v) in &self.config.env {
@@ -260,7 +270,7 @@ impl MirrorProvider for CmdProvider {
 
         // If execution succeeded, check logs for patterns
         if result.is_ok() {
-            let log_content = tokio::fs::read_to_string(&self.config.log_file)
+            let log_content = tokio::fs::read_to_string(&effective_log_file)
                 .await
                 .unwrap_or_default();
 

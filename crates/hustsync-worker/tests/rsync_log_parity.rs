@@ -2,13 +2,13 @@
 //
 // These tests prove that the Rust implementations match the Go originals in
 // tunasync/internal/util.go:
-//   - ExtractSizeFromRsyncLog  → extract_size_from_rsync_log
-//   - TranslateRsyncErrorCode  → translate_rsync_exit_status
+// - ExtractSizeFromRsyncLog → extract_size_from_rsync_log
+// - TranslateRsyncErrorCode → translate_rsync_exit_status
 //
 // Each assertion is derived from the Go source behaviour:
-//   * ExtractSizeFromLog returns the first capture group of the *last* match.
-//   * TranslateRsyncErrorCode formats "rsync error: <msg>" for known codes;
-//     returns an empty string for unknown codes.
+// * ExtractSizeFromLog returns the first capture group of the *last* match.
+// * TranslateRsyncErrorCode formats "rsync error: <msg>" for known codes;
+// returns an empty string for unknown codes.
 //
 // Fixtures live under tests/fixtures/rsync-logs/.
 
@@ -24,7 +24,7 @@ fn fixture_path(name: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// extract_size_from_rsync_log — §3.3 of docs/rust-port/05-provider-contract.md
+// extract_size_from_rsync_log — against Go `internal/util.go` behaviour
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -50,8 +50,8 @@ fn extract_size_human_returns_verbatim_suffix() {
 #[test]
 fn extract_size_multi_total_returns_last_match() {
     // success-multi-total.log has two "Total file size:" lines:
-    //   first  → 100 bytes
-    //   second → 55.2M bytes
+    // first → 100 bytes
+    // second → 55.2M bytes
     // Last match must win, per Go's FindAllSubmatch-last semantics.
     let result = hustsync_internal::util::extract_size_from_rsync_log(&fixture_path(
         "success-multi-total.log",
@@ -79,7 +79,7 @@ fn extract_size_empty_log_returns_empty() {
 }
 
 // ---------------------------------------------------------------------------
-// translate_rsync_exit_status — §3.4 exit-code table
+// translate_rsync_exit_status — Go `internal/util.go` exit-code table
 // ---------------------------------------------------------------------------
 //
 // The Go map in tunasync/internal/util.go lists exactly these codes.
@@ -164,7 +164,7 @@ fn translate_unknown_exit_code_returns_code_but_no_message() {
 #[test]
 fn translate_three_spot_check_exit_codes() {
     // Spot-check a representive trio: 0 (success), 23 (partial), 35 (timeout).
-    // These three appear explicitly in the plan §4.1 T2 acceptance criteria.
+    // Three spot-check codes to sanity-check the full table.
     let checks: &[(i32, &str)] = &[
         (0, "Success"),
         (23, "Partial transfer due to error"),

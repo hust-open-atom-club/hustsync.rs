@@ -27,8 +27,9 @@ pub mod two_stage_rsync_provider;
 /// job-actor's responsibility, matching Go tunasync behaviour where the retry
 /// loop runs outside provider.Run().
 ///
-/// `env` contains hook-injected variables (see `06-job-lifecycle-and-hooks.md`
-/// §4). Providers layer it on top of standard env vars so hook overrides win.
+/// `env` contains hook-injected variables (e.g. the rotated
+/// `TUNASYNC_LOG_FILE` from the loglimit hook). Providers layer it on
+/// top of their standard env vars so hook overrides win.
 #[derive(Debug, Clone, Default)]
 pub struct RunContext {
     pub cancel: CancellationToken,
