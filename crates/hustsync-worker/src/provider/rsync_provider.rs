@@ -106,9 +106,9 @@ impl RsyncProvider {
             }
 
             if self.config.use_ipv6 {
-                options.push("-6".to_string());
+                options.push("--ipv6".to_string());
             } else if self.config.use_ipv4 {
-                options.push("-4".to_string());
+                options.push("--ipv4".to_string());
             }
 
             if let Some(exclude_file) = &self.config.exclude_file {
@@ -467,7 +467,7 @@ mod tests {
         let provider = RsyncProvider::new(config).unwrap();
         let args = provider.build_args();
 
-        assert!(args.contains(&"-6".to_string()));
+        assert!(args.contains(&"--ipv6".to_string()));
         assert!(args.contains(&"--exclude-from".to_string()));
         assert!(args.contains(&"/tmp/exclude.txt".to_string()));
         assert!(args.contains(&"--bwlimit=1000".to_string()));
