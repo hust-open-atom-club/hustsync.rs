@@ -1,0 +1,5 @@
+[term]
+quiet = true
+
+[alias]
+lint = "clippy --workspace --all-targets --message-format=short -- -D warnings"
