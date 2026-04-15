@@ -14,7 +14,7 @@ pub struct AppState {
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/cmd", post(handle_cmd))
+        .route("/", post(handle_cmd))
         .with_state(state)
 }
 
@@ -34,10 +34,7 @@ async fn handle_cmd(
                 return (StatusCode::OK, Json(json!({"msg": "Reload triggered"})));
             }
             _ => {
-                return (
-                    StatusCode::NOT_ACCEPTABLE,
-                    Json(json!({"msg": "Invalid Command"})),
-                );
+                return (StatusCode::OK, Json(json!({"msg": "Invalid Command"})));
             }
         }
     }
@@ -47,8 +44,8 @@ async fn handle_cmd(
         let jobs = state.jobs.read().await;
         let Some(job) = jobs.get(&cmd.mirror_id) else {
             return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"msg": format!("Mirror ``{}'' not found", cmd.mirror_id)})),
+                StatusCode::OK,
+                Json(json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)})),
             );
         };
 
@@ -75,10 +72,7 @@ async fn handle_cmd(
             CmdVerb::Disable => crate::job::CtrlAction::Disable,
             CmdVerb::Ping => crate::job::CtrlAction::Ping,
             _ => {
-                return (
-                    StatusCode::NOT_ACCEPTABLE,
-                    Json(json!({"msg": "Invalid Command"})),
-                );
+                return (StatusCode::OK, Json(json!({"msg": "Invalid Command"})));
             }
         }
     };
@@ -87,8 +81,8 @@ async fn handle_cmd(
     let jobs = state.jobs.read().await;
     let Some(job) = jobs.get(&cmd.mirror_id) else {
         return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"msg": format!("Mirror ``{}'' not found", cmd.mirror_id)})),
+            StatusCode::OK,
+            Json(json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)})),
         );
     };
 

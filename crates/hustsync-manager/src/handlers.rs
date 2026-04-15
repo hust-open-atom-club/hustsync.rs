@@ -319,7 +319,9 @@ pub async fn handle_cmd(
         );
     };
 
-    let url = format!("{}/cmd", worker.url.trim_end_matches('/'));
+    // Workers register their URL ending with "/" and accept commands on POST /
+    // (Go: worker/worker.go `s.POST("/", ...)`). Forward to the root URL directly.
+    let url = worker.url.clone();
     match client.post(&url).json(&worker_cmd).send().await {
         Ok(resp) => {
             let status = resp.status();
