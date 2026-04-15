@@ -1,0 +1,12 @@
+No PEM or DER certificate files are committed here.
+
+TLS certificates for the contract smoke test (T9) are generated in-memory
+at test time using the `rcgen` crate.  This avoids:
+
+  - Secret-scanner false positives on committed private keys.
+  - Cert expiry causing test failures over time.
+  - Any dependency on openssl tooling in the CI environment.
+
+The in-memory path is: rcgen::generate_simple_self_signed -> serialize to
+PEM bytes -> feed into axum_server::tls_rustls::RustlsConfig::from_pem and
+reqwest::Certificate::from_pem.  No disk I/O, no file rotation needed.

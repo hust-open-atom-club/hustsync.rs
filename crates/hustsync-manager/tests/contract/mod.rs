@@ -16,11 +16,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, dead_code)]
 
 use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use hustsync_config_parser::{ManagerConfig, ManagerFileConfig, ManagerServerConfig};
 use hustsync_manager::Manager;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
+use tokio::task::JoinHandle;
 
 // ---------------------------------------------------------------------------
 // Router construction
@@ -58,14 +61,84 @@ pub fn spawn_manager() -> (Router, TempDir) {
     (router, dir)
 }
 
-/// Placeholder for the TLS-capable spawn used by T9.
+/// Start a real TLS listener backed by a self-signed certificate generated
+/// in memory via `rcgen`.
 ///
-/// Binding an actual socket with a self-signed cert is deferred to T9.
-/// This stub is declared here so downstream slices can `use` the symbol
-/// without compilation errors; calling it panics until T9 fills it in.
-#[allow(dead_code)]
-pub fn spawn_manager_tls() -> ! {
-    panic!("spawn_manager_tls is not yet implemented — see T9 in the M2 plan")
+/// Returns `(addr, handle, cert_der)` where:
+/// - `addr` — the ephemeral socket address the server is actually listening on.
+/// - `handle` — a `JoinHandle` for the server task; drop or abort it after the
+///   test to release the port.
+/// - `cert_der` — the DER-encoded self-signed certificate so callers can
+///   construct a `reqwest::Certificate` that trusts only this server.
+///
+/// No PEM or DER files are written to disk.  Certificate generation, TLS
+/// configuration, and trust anchoring all happen in memory, which keeps the
+/// test environment hermetic and avoids secret-scanner false positives.
+pub async fn spawn_manager_tls() -> (SocketAddr, JoinHandle<()>, Vec<u8>) {
+    // ------------------------------------------------------------------ cert
+    // Generate a self-signed cert valid for 127.0.0.1 and localhost so that
+    // reqwest's hostname verification passes when we connect to the server.
+    let certified_key =
+        rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string(), "localhost".to_string()])
+            .expect("rcgen: generate self-signed cert");
+
+    let cert_pem = certified_key.cert.pem().into_bytes();
+    let key_pem = certified_key.key_pair.serialize_pem().into_bytes();
+    // Keep the DER bytes for the reqwest trust anchor; we clone before moving.
+    let cert_der = certified_key.cert.der().to_vec();
+
+    // --------------------------------------------------------------- manager
+    let dir = TempDir::new().expect("create tempdir for TLS manager");
+    let db_path = dir.path().join("test.db");
+
+    let config = Arc::new(ManagerConfig {
+        debug: false,
+        server: ManagerServerConfig {
+            addr: "127.0.0.1".to_string(),
+            port: 0,
+            ssl_cert: String::new(),
+            ssl_key: String::new(),
+        },
+        files: ManagerFileConfig {
+            status_file: String::new(),
+            db_type: "redb".to_string(),
+            db_file: db_path.to_string_lossy().into_owned(),
+            ca_cert: String::new(),
+        },
+    });
+
+    let manager = Manager::new(config).expect("spawn_manager_tls: Manager::new failed");
+    let router = Arc::new(manager).make_router();
+
+    // --------------------------------------------------------------- socket
+    // Bind to port 0 first so the OS picks a free port; then hand the fd to
+    // axum-server so the actual port is known before we return.
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port for TLS manager");
+    listener
+        .set_nonblocking(true)
+        .expect("set_nonblocking on TLS listener");
+    let addr = listener
+        .local_addr()
+        .expect("get local addr of TLS listener");
+
+    // ------------------------------------------------------------------ TLS
+    let tls_config = RustlsConfig::from_pem(cert_pem, key_pem)
+        .await
+        .expect("RustlsConfig::from_pem failed");
+
+    // ----------------------------------------------------------------- serve
+    let handle = tokio::spawn(async move {
+        // `_dir` is moved in so the tempdir lives as long as the server task.
+        let _dir = dir;
+        axum_server::from_tcp_rustls(listener, tls_config)
+            .expect("from_tcp_rustls: failed to create server")
+            .serve(router.into_make_service())
+            .await
+            .expect("TLS server error");
+    });
+
+    (addr, handle, cert_der)
 }
 
 // ---------------------------------------------------------------------------
