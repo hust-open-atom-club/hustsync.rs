@@ -1,0 +1,7 @@
+{
+  "cmd": "start",
+  "worker_id": "mirror-01",
+  "mirror_id": "archlinux",
+  "args": [],
+  "options": {}
+}
