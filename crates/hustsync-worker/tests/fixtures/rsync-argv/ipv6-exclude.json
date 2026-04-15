@@ -1,0 +1,31 @@
+{
+  "config": {
+    "name": "ipv6-mirror",
+    "upstream": "rsync://[2001:db8::1]/repo/",
+    "working_dir": "/srv/mirror/ipv6repo",
+    "provider": "rsync",
+    "use_ipv6": true,
+    "exclude_file": "/etc/hustsync/excludes/ipv6-mirror.txt"
+  },
+  "expected_argv": [
+    "rsync",
+    "-aHvh",
+    "--no-o",
+    "--no-g",
+    "--stats",
+    "--filter",
+    "risk .~tmp~/",
+    "--exclude",
+    ".~tmp~/",
+    "--delete",
+    "--delete-after",
+    "--delay-updates",
+    "--safe-links",
+    "--timeout=120",
+    "-6",
+    "--exclude-from",
+    "/etc/hustsync/excludes/ipv6-mirror.txt",
+    "rsync://[2001:db8::1]/repo/",
+    "/srv/mirror/ipv6repo"
+  ]
+}

@@ -1,0 +1,21 @@
+receiving incremental file list
+./
+large-archive.tar.gz
+big-dataset.bin
+
+Number of files: 3 (reg: 2, dir: 1)
+Number of created files: 2
+Number of deleted files: 0
+Number of regular files transferred: 2
+Total file size: 234.56G bytes
+Total transferred file size: 234.56G bytes
+Literal data: 234.56G bytes
+Matched data: 0 bytes
+File list size: 89
+File list generation time: 0.003 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 2,103
+Total bytes received: 251,867,250,688
+
+sent 2,103 bytes  received 251,867,250,688 bytes  4,199,454,196.83 bytes/sec
+total size is 251,867,250,688  speedup is 1.00

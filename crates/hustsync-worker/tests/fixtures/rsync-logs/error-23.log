@@ -1,0 +1,13 @@
+receiving incremental file list
+./
+file-ok.txt
+file-perm-denied.bin
+
+rsync: [receiver] open "/dest/file-perm-denied.bin" (in mirror): Permission denied (13)
+
+Number of files: 3 (reg: 2, dir: 1)
+Number of created files: 1
+Number of deleted files: 0
+Number of regular files transferred: 1
+
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1338) [sender=3.2.7]

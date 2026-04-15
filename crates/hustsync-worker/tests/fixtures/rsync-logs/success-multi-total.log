@@ -1,0 +1,39 @@
+receiving incremental file list
+
+Number of files: 2 (reg: 1, dir: 1)
+Number of created files: 0
+Number of deleted files: 0
+Number of regular files transferred: 1
+Total file size: 100 bytes
+Total transferred file size: 100 bytes
+Literal data: 100 bytes
+Matched data: 0 bytes
+File list size: 42
+File list generation time: 0.001 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 350
+Total bytes received: 1,200
+
+sent 350 bytes  received 1,200 bytes  1,033.33 bytes/sec
+total size is 100  speedup is 0.06
+
+receiving incremental file list
+doc1.txt
+doc2.txt
+
+Number of files: 3 (reg: 2, dir: 1)
+Number of created files: 2
+Number of deleted files: 0
+Number of regular files transferred: 2
+Total file size: 55.2M bytes
+Total transferred file size: 55.2M bytes
+Literal data: 55.2M bytes
+Matched data: 0 bytes
+File list size: 75
+File list generation time: 0.001 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 850
+Total bytes received: 57,936,691
+
+sent 850 bytes  received 57,936,691 bytes  38,624,360.67 bytes/sec
+total size is 55.2M  speedup is 0.95

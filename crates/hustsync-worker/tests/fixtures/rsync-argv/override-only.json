@@ -1,0 +1,17 @@
+{
+  "config": {
+    "name": "override-mirror",
+    "upstream": "rsync://mirrors.example.com/override/",
+    "working_dir": "/srv/mirror/override",
+    "provider": "rsync",
+    "rsync_override_only": true,
+    "rsync_override": ["-avz", "--checksum"]
+  },
+  "expected_argv": [
+    "rsync",
+    "-avz",
+    "--checksum",
+    "rsync://mirrors.example.com/override/",
+    "/srv/mirror/override"
+  ]
+}

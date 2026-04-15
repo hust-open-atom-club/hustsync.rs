@@ -1,0 +1,26 @@
+{
+  "config": {
+    "name": "test-mirror",
+    "upstream": "rsync://mirrors.example.com/test/",
+    "working_dir": "/srv/mirror/test",
+    "provider": "rsync"
+  },
+  "expected_argv": [
+    "rsync",
+    "-aHvh",
+    "--no-o",
+    "--no-g",
+    "--stats",
+    "--filter",
+    "risk .~tmp~/",
+    "--exclude",
+    ".~tmp~/",
+    "--delete",
+    "--delete-after",
+    "--delay-updates",
+    "--safe-links",
+    "--timeout=120",
+    "rsync://mirrors.example.com/test/",
+    "/srv/mirror/test"
+  ]
+}

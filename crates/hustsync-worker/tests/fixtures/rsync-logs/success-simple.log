@@ -1,0 +1,22 @@
+receiving incremental file list
+./
+file1.txt
+file2.txt
+file3.bin
+
+Number of files: 4 (reg: 3, dir: 1)
+Number of created files: 0
+Number of deleted files: 0
+Number of regular files transferred: 3
+Total file size: 1234 bytes
+Total transferred file size: 1234 bytes
+Literal data: 1234 bytes
+Matched data: 0 bytes
+File list size: 101
+File list generation time: 0.001 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 1,398
+Total bytes received: 34,109
+
+sent 1,398 bytes  received 34,109 bytes  23,671.33 bytes/sec
+total size is 1234  speedup is 0.03
