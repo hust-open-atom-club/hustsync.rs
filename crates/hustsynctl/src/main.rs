@@ -529,13 +529,18 @@ async fn rm_worker(base_url: &str, client: &Client, worker_id: &str) -> Result<(
         .send()
         .await
         .with_context(|| format!("DELETE {}", url))?;
-    if resp.status().is_success() {
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err_text = resp.text().await.unwrap_or_default();
+        bail!("Failed with status: {} {}", status, err_text);
+    }
+
+    let body: HashMap<String, String> = resp.json().await.unwrap_or_default();
+    if body.get("message").map(String::as_str) == Some("deleted") {
         println!("Successfully removed the worker");
         Ok(())
     } else {
-        let status = resp.status();
-        let err_text = resp.text().await.unwrap_or_default();
-        bail!("Failed with status: {} {}", status, err_text)
+        bail!("Failed to remove the worker")
     }
 }
 
