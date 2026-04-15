@@ -14,6 +14,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hustsync-internal = { path = "../hustsync-internal" }
 toml = "0.8"
 tera = "1.19.1"
+anyhow = "1.0.102"
 
 [lints]
 workspace = true
