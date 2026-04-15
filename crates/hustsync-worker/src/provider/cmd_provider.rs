@@ -161,8 +161,14 @@ impl MirrorProvider for CmdProvider {
             cmd.process_group(0);
         }
 
-        // Set standard hustsync env vars
-        cmd.env("HUSTSYNC_MIRROR_NAME", &self.config.name)
+        // Inject both TUNASYNC_* (Go parity for existing mirror scripts) and
+        // HUSTSYNC_* (Rust-port canonical names).  Both sets must stay in sync.
+        cmd.env("TUNASYNC_MIRROR_NAME", &self.config.name)
+            .env("TUNASYNC_WORKING_DIR", &self.config.working_dir)
+            .env("TUNASYNC_UPSTREAM_URL", &self.config.upstream_url)
+            .env("TUNASYNC_LOG_DIR", &self.config.log_dir)
+            .env("TUNASYNC_LOG_FILE", &self.config.log_file)
+            .env("HUSTSYNC_MIRROR_NAME", &self.config.name)
             .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
             .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
             .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
