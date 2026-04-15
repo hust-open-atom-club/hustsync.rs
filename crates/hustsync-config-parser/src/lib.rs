@@ -328,3 +328,127 @@ where
     let config: T = toml::from_str(&content)?;
     Ok(config)
 }
+
+// ---------------------------------------------------------------------------
+// Provider semantic validation
+// ---------------------------------------------------------------------------
+
+const VALID_STAGE1_PROFILES: &[&str] = &["debian", "debian-oldstyle"];
+
+/// True when `upstream` begins `scheme://<host>...` and `<host>` contains a
+/// colon without enclosing brackets (bare IPv6 literal).
+fn contains_unbracketed_ipv6(upstream: &str) -> bool {
+    let Some(pos) = upstream.find("://") else {
+        return false;
+    };
+    let after_scheme = &upstream[pos + 3..];
+    if after_scheme.starts_with('[') {
+        return false;
+    }
+    let host_part = after_scheme.split('/').next().unwrap_or("");
+    host_part.contains(':')
+}
+
+/// Run the semantic validation pass over every mirror declared in `cfg`.
+///
+/// Rules enforced (from the spec):
+///
+/// 1. `rsync`/`two-stage-rsync` upstream must end with `/`.
+/// 2. `rsync_override_only = true` requires a non-empty `rsync_override`.
+/// 3. Bare IPv6 literals in upstream must be bracketed (`[…]`).
+/// 4. `size_pattern`, when set, must compile and have exactly one capture group.
+/// 5. `stage1_profile`, when set, must be one of the known profiles.
+pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
+    let Some(mirrors) = cfg.mirrors.as_deref() else {
+        return Ok(());
+    };
+    for (idx, mirror) in mirrors.iter().enumerate() {
+        let label = mirror
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("mirrors[{idx}]"));
+        validate_mirror(mirror, &label)?;
+    }
+    Ok(())
+}
+
+fn validate_mirror(mirror: &MirrorConfig, label: &str) -> Result<(), ConfigError> {
+    let provider = mirror.provider.as_deref().unwrap_or("rsync");
+    let is_rsync_family = matches!(provider, "rsync" | "two-stage-rsync");
+
+    if is_rsync_family {
+        if let Some(upstream) = mirror.upstream.as_deref() {
+            if !upstream.ends_with('/') {
+                return Err(ConfigError::InvalidValue {
+                    field: format!("mirrors.{label}.upstream"),
+                    reason: format!("rsync upstream must end with `/`, e.g. `{upstream}/`"),
+                });
+            }
+            if contains_unbracketed_ipv6(upstream) {
+                return Err(ConfigError::InvalidValue {
+                    field: format!("mirrors.{label}.upstream"),
+                    reason: format!(
+                        "IPv6 literal in upstream must be bracketed, \
+                         e.g. `rsync://[fe80::1]/path/` (got `{upstream}`)"
+                    ),
+                });
+            }
+        }
+
+        if mirror.rsync_override_only == Some(true) {
+            let override_empty = mirror
+                .rsync_override
+                .as_ref()
+                .map(|v| v.is_empty())
+                .unwrap_or(true);
+            if override_empty {
+                return Err(ConfigError::InvalidValue {
+                    field: format!("mirrors.{label}.rsync_override_only"),
+                    reason: "`rsync_override_only = true` requires `rsync_override` to be \
+                             a non-empty list of rsync arguments"
+                        .into(),
+                });
+            }
+        }
+
+        if let Some(profile) = mirror.stage1_profile.as_deref()
+            && !VALID_STAGE1_PROFILES.contains(&profile)
+        {
+            return Err(ConfigError::InvalidValue {
+                field: format!("mirrors.{label}.stage1_profile"),
+                reason: format!(
+                    "unknown stage1_profile `{profile}`; valid values are: {}",
+                    VALID_STAGE1_PROFILES.join(", ")
+                ),
+            });
+        }
+    }
+
+    if let Some(pattern) = mirror.size_pattern.as_deref() {
+        match regex::Regex::new(pattern) {
+            Err(e) => {
+                return Err(ConfigError::InvalidValue {
+                    field: format!("mirrors.{label}.size_pattern"),
+                    reason: format!("regex does not compile: {e}"),
+                });
+            }
+            Ok(re) => {
+                // captures_len() = 1 (whole match) + explicit groups; exactly
+                // one capture group means captures_len() == 2.
+                let groups = re.captures_len();
+                if groups != 2 {
+                    return Err(ConfigError::InvalidValue {
+                        field: format!("mirrors.{label}.size_pattern"),
+                        reason: format!(
+                            "`size_pattern` must have exactly 1 capture group, \
+                             but found {} (e.g. `([0-9]+[KMGTP]?)`)",
+                            groups.saturating_sub(1)
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
