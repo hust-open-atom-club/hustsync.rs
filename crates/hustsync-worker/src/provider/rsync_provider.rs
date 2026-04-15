@@ -101,7 +101,9 @@ impl RsyncProvider {
 
         if !self.config.rsync_override_only {
             if !self.config.rsync_no_timeout {
-                let timeo = self.config.rsync_timeout.unwrap_or(120);
+                // Go newRsyncProvider: timeo := 120; if c.rsyncTimeoutValue > 0 { timeo = ... }
+                // Zero means "use default 120"; it does NOT emit --timeout=0.
+                let timeo = self.config.rsync_timeout.filter(|&v| v > 0).unwrap_or(120);
                 options.push(format!("--timeout={}", timeo));
             }
 
