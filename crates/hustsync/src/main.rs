@@ -1,9 +1,12 @@
-use std::{error::Error, io, path::PathBuf, sync::Arc};
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+use std::{path::PathBuf, sync::Arc};
+
+use anyhow::{Context, Result};
 use clap::{Args, Parser, ValueHint::FilePath};
+use hustsync_config_parser::{WorkerConfig, parse_config};
 use hustsync_manager::Manager;
 use tracing::{info, warn};
-use hustsync_config_parser::{ManagerConfig, WorkerConfig, parse_config};
 use hustsync_worker::Worker;
 
 #[derive(Parser, Debug)]
@@ -83,7 +86,7 @@ struct WorkerArgs {
     pid_file: Option<PathBuf>,
 }
 
-async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> {
+async fn start_manager(manager_args: ManagerArgs) -> Result<()> {
     hustsync_internal::logger::init_logger(
         manager_args.verbose,
         manager_args.debug,
@@ -97,7 +100,7 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
             std::process::exit(1);
         }
     };
-    
+
     // Override with command-line arguments
     if let Some(addr) = manager_args.addr {
         config.server.addr = addr;
@@ -122,7 +125,6 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
     }
 
     let config = Arc::new(config);
-    //? SET WEB FRAMEWORK TO DEBUG MODE
 
     let manager = match Manager::new(config) {
         Ok(m) => m,
@@ -132,18 +134,21 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<(), Box<dyn Error>> 
         }
     };
     info!("Run hustsync manager server.");
-    
-    Arc::new(manager).run().await?;
+
+    Arc::new(manager)
+        .run()
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .with_context(|| "manager start")?;
     Ok(())
 }
 
-async fn start_worker(worker_args: WorkerArgs) -> Result<(), Box<dyn Error>> {
+async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
     hustsync_internal::logger::init_logger(
         worker_args.verbose,
         worker_args.debug,
         worker_args.with_systemd,
     );
-    //? SET WEB FRAMEWORK TO DEBUG MODE
 
     let config_path = worker_args.config.unwrap_or_else(|| PathBuf::from("worker.conf"));
 
@@ -156,18 +161,20 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<(), Box<dyn Error>> {
     };
 
     info!("Initializing HustSync Worker...");
-    
+
     let worker = Worker::new(config);
-    worker.run().await;
+    worker
+        .run()
+        .await;
 
     Ok(())
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Manager(m) => start_manager(m).await,
-        Commands::Worker(w) => start_worker(w).await,
+        Commands::Manager(m) => start_manager(m).await.with_context(|| "manager start"),
+        Commands::Worker(w) => start_worker(w).await.with_context(|| "worker start"),
     }
 }

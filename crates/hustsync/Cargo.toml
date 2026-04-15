@@ -12,6 +12,7 @@ hustsync-manager = { path = "../hustsync-manager" }
 hustsync-worker = { version = "0.1.0", path = "../hustsync-worker" }
 tokio = { version = "1.50.0", features = ["full"] }
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
+anyhow = "1.0.102"
 
 [lints]
 workspace = true

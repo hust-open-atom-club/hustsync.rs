@@ -859,6 +859,7 @@ dependencies = [
 name = "hustsync"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "hustsync-config-parser",
  "hustsync-internal",
