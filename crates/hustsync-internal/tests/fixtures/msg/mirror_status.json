@@ -3,11 +3,11 @@
   "worker": "mirror-01",
   "upstream": "rsync://rsync.archlinux.org/archlinux/",
   "size": "100G",
-  "error-msg": "",
-  "last-update": "2026-04-15T12:00:00Z",
-  "last-started": "2026-04-15T11:58:00Z",
-  "last-ended": "2026-04-15T12:00:00Z",
-  "next-scheduled": "2026-04-15T14:00:00Z",
+  "error_msg": "",
+  "last_update": "2026-04-15T12:00:00Z",
+  "last_started": "2026-04-15T11:58:00Z",
+  "last_ended": "2026-04-15T12:00:00Z",
+  "next_schedule": "2026-04-15T14:00:00Z",
   "status": "success",
-  "is-master": true
+  "is_master": true
 }

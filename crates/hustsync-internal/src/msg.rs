@@ -8,17 +8,17 @@ use serde::Serialize;
 use crate::status::SyncStatus;
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub struct MirrorStatus {
     pub name: String,
     pub worker: String,
     pub upstream: String,
     pub size: String,
-    // TODO 错误不一定存在，考虑改成 Option<String>
     pub error_msg: String,
     pub last_update: DateTime<Utc>,
     pub last_started: DateTime<Utc>,
     pub last_ended: DateTime<Utc>,
+    #[serde(rename = "next_schedule")]
     pub next_scheduled: DateTime<Utc>,
     pub status: SyncStatus,
     pub is_master: bool,

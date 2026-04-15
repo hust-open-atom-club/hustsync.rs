@@ -102,13 +102,13 @@ async fn test_update_job_status_logic() {
         "worker": worker_id,
         "upstream": "http://deb.debian.org",
         "size": "0",
-        "error-msg": "",
-        "last-update": "2023-01-01T00:00:00Z",
-        "last-started": "2023-01-01T00:00:00Z",
-        "last-ended": "2023-01-01T00:00:00Z",
-        "next-scheduled": "2023-01-01T00:00:00Z",
+        "error_msg": "",
+        "last_update": "2023-01-01T00:00:00Z",
+        "last_started": "2023-01-01T00:00:00Z",
+        "last_ended": "2023-01-01T00:00:00Z",
+        "next_schedule": "2023-01-01T00:00:00Z",
         "status": "success",
-        "is-master": true
+        "is_master": true
     });
 
     let res = app
@@ -130,13 +130,13 @@ async fn test_update_job_status_logic() {
         "worker": worker_id,
         "upstream": "http://deb.debian.org",
         "size": "0",
-        "error-msg": "",
-        "last-update": "2023-01-01T00:00:00Z",
-        "last-started": "2023-01-01T00:00:00Z",
-        "last-ended": "2023-01-01T00:00:00Z",
-        "next-scheduled": "2023-01-01T00:00:00Z",
+        "error_msg": "",
+        "last_update": "2023-01-01T00:00:00Z",
+        "last_started": "2023-01-01T00:00:00Z",
+        "last_ended": "2023-01-01T00:00:00Z",
+        "next_schedule": "2023-01-01T00:00:00Z",
         "status": "pre-syncing",
-        "is-master": true
+        "is_master": true
     });
 
     let res = app
@@ -156,7 +156,7 @@ async fn test_update_job_status_logic() {
         .await
         .unwrap();
     let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_ne!(res_json["last-started"], "2023-01-01T00:00:00Z");
+    assert_ne!(res_json["last_started"], "2023-01-01T00:00:00Z");
 }
 
 #[tokio::test]
@@ -199,13 +199,13 @@ async fn test_list_query_apis() {
                         "worker": worker_id,
                         "upstream": "http://mirrors.kernel.org",
                         "size": "500GB",
-                        "error-msg": "",
-                        "last-update": "2023-01-01T00:00:00Z",
-                        "last-started": "2023-01-01T00:00:00Z",
-                        "last-ended": "2023-01-01T00:00:00Z",
-                        "next-scheduled": "2023-01-01T00:00:00Z",
+                        "error_msg": "",
+                        "last_update": "2023-01-01T00:00:00Z",
+                        "last_started": "2023-01-01T00:00:00Z",
+                        "last_ended": "2023-01-01T00:00:00Z",
+                        "next_schedule": "2023-01-01T00:00:00Z",
                         "status": "success",
-                        "is-master": true
+                        "is_master": true
                     })
                     .to_string(),
                 ))
@@ -305,13 +305,13 @@ async fn test_flush_disabled_jobs() {
                         "worker": worker_id,
                         "upstream": "http://upstream",
                         "size": "0",
-                        "error-msg": "",
-                        "last-update": "2023-01-01T00:00:00Z",
-                        "last-started": "2023-01-01T00:00:00Z",
-                        "last-ended": "2023-01-01T00:00:00Z",
-                        "next-scheduled": "2023-01-01T00:00:00Z",
+                        "error_msg": "",
+                        "last_update": "2023-01-01T00:00:00Z",
+                        "last_started": "2023-01-01T00:00:00Z",
+                        "last_ended": "2023-01-01T00:00:00Z",
+                        "next_schedule": "2023-01-01T00:00:00Z",
                         "status": "success",
-                        "is-master": true
+                        "is_master": true
                     })
                     .to_string(),
                 ))
@@ -333,13 +333,13 @@ async fn test_flush_disabled_jobs() {
                         "worker": worker_id,
                         "upstream": "http://upstream",
                         "size": "0",
-                        "error-msg": "",
-                        "last-update": "2023-01-01T00:00:00Z",
-                        "last-started": "2023-01-01T00:00:00Z",
-                        "last-ended": "2023-01-01T00:00:00Z",
-                        "next-scheduled": "2023-01-01T00:00:00Z",
+                        "error_msg": "",
+                        "last_update": "2023-01-01T00:00:00Z",
+                        "last_started": "2023-01-01T00:00:00Z",
+                        "last_ended": "2023-01-01T00:00:00Z",
+                        "next_schedule": "2023-01-01T00:00:00Z",
                         "status": "disabled",
-                        "is-master": true
+                        "is_master": true
                     })
                     .to_string(),
                 ))
@@ -411,7 +411,13 @@ async fn test_handle_cmd_worker_not_found() {
         .await
         .unwrap();
     let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(res_json["error"].as_str().unwrap().contains("not found"));
+    // Go-compat: unknown worker yields `"worker <id> is not registered yet"`.
+    assert!(
+        res_json["error"]
+            .as_str()
+            .unwrap()
+            .contains("is not registered yet")
+    );
 }
 
 #[tokio::test]
@@ -445,9 +451,9 @@ async fn test_size_and_schedule_updates() {
             .header("Content-Type", "application/json")
             .body(Body::from(json!({
                 "name": mirror_id, "worker": worker_id, "upstream": "", "size": "0",
-                "error-msg": "", "last-update": "2023-01-01T00:00:00Z",
-                "last-started": "2023-01-01T00:00:00Z", "last-ended": "2023-01-01T00:00:00Z",
-                "next-scheduled": "2023-01-01T00:00:00Z", "status": "success", "is-master": true
+                "error_msg": "", "last_update": "2023-01-01T00:00:00Z",
+                "last_started": "2023-01-01T00:00:00Z", "last_ended": "2023-01-01T00:00:00Z",
+                "next_schedule": "2023-01-01T00:00:00Z", "status": "success", "is_master": true
             }).to_string()))
             .unwrap(),
     ).await.unwrap();

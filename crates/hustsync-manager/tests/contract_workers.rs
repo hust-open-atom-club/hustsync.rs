@@ -255,7 +255,7 @@ async fn update_job_status_pre_syncing() {
     );
     // last-started is refreshed from Utc::now() — it must differ from the epoch
     // sentinel we sent in the fixture.
-    let last_started = got["last-started"]
+    let last_started = got["last_started"]
         .as_str()
         .expect("last-started must be a string");
     assert_ne!(
@@ -296,14 +296,14 @@ async fn update_job_status_success() {
     let got = contract::body_json(resp).await;
     assert_eq!(got["status"], "success");
 
-    let last_update = got["last-update"]
+    let last_update = got["last_update"]
         .as_str()
         .expect("last-update must be a string");
     assert_ne!(
         last_update, "1970-01-01T00:00:00Z",
         "last-update must be set to now on success"
     );
-    let last_ended = got["last-ended"]
+    let last_ended = got["last_ended"]
         .as_str()
         .expect("last-ended must be a string");
     assert_ne!(
@@ -327,7 +327,7 @@ async fn update_job_status_failed() {
     let got = contract::body_json(resp).await;
     assert_eq!(got["status"], "failed");
 
-    let last_ended = got["last-ended"]
+    let last_ended = got["last_ended"]
         .as_str()
         .expect("last-ended must be a string");
     assert_ne!(
@@ -335,7 +335,7 @@ async fn update_job_status_failed() {
         "last-ended must be set to now on failed"
     );
     assert_eq!(
-        got["error-msg"], "rsync exit code 23",
+        got["error_msg"], "rsync exit code 23",
         "error-msg must be preserved from the request body"
     );
 }
@@ -352,13 +352,13 @@ async fn update_job_status_empty_name_rejected() {
         "worker": "w-badname",
         "upstream": "",
         "size": "",
-        "error-msg": "",
-        "last-update": "1970-01-01T00:00:00Z",
-        "last-started": "1970-01-01T00:00:00Z",
-        "last-ended": "1970-01-01T00:00:00Z",
-        "next-scheduled": "1970-01-01T00:00:00Z",
+        "error_msg": "",
+        "last_update": "1970-01-01T00:00:00Z",
+        "last_started": "1970-01-01T00:00:00Z",
+        "last_ended": "1970-01-01T00:00:00Z",
+        "next_schedule": "1970-01-01T00:00:00Z",
         "status": "syncing",
-        "is-master": false
+        "is_master": false
     });
 
     let resp = update_job(app, "w-badname", "irrelevant", bad_body).await;
@@ -391,13 +391,13 @@ async fn update_mirror_size_happy_path() {
         "worker": "w-size",
         "upstream": "rsync://mirror.example.com/ubuntu/",
         "size": "0",
-        "error-msg": "",
-        "last-update": "1970-01-01T00:00:00Z",
-        "last-started": "1970-01-01T00:00:00Z",
-        "last-ended": "1970-01-01T00:00:00Z",
-        "next-scheduled": "1970-01-01T00:00:00Z",
+        "error_msg": "",
+        "last_update": "1970-01-01T00:00:00Z",
+        "last_started": "1970-01-01T00:00:00Z",
+        "last_ended": "1970-01-01T00:00:00Z",
+        "next_schedule": "1970-01-01T00:00:00Z",
         "status": "success",
-        "is-master": false
+        "is_master": false
     });
     let init_resp = update_job(app.clone(), "w-size", "ubuntu", init_body).await;
     assert_eq!(
@@ -453,13 +453,13 @@ async fn update_schedules_happy_path() {
         "worker": "w-sched",
         "upstream": "",
         "size": "0",
-        "error-msg": "",
-        "last-update": "1970-01-01T00:00:00Z",
-        "last-started": "1970-01-01T00:00:00Z",
-        "last-ended": "1970-01-01T00:00:00Z",
-        "next-scheduled": "1970-01-01T00:00:00Z",
+        "error_msg": "",
+        "last_update": "1970-01-01T00:00:00Z",
+        "last_started": "1970-01-01T00:00:00Z",
+        "last_ended": "1970-01-01T00:00:00Z",
+        "next_schedule": "1970-01-01T00:00:00Z",
         "status": "success",
-        "is-master": false
+        "is_master": false
     });
     let init_resp = update_job(app.clone(), "w-sched", "debian", init_body).await;
     assert_eq!(
