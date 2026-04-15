@@ -78,7 +78,7 @@ impl RsyncProvider {
         })
     }
 
-    pub(crate) fn build_args(&self) -> Vec<String> {
+    pub fn build_args(&self) -> Vec<String> {
         let mut options = if let Some(overridden) = &self.config.rsync_override {
             overridden.clone()
         } else {
