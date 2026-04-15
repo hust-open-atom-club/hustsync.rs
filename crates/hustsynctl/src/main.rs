@@ -191,7 +191,7 @@ async fn main() {
 
     let mut config = CtlConfig {
         manager_addr: Some("localhost".to_string()),
-        manager_port: Some(12345),
+        manager_port: Some(14242),
         ca_cert: None,
     };
 
