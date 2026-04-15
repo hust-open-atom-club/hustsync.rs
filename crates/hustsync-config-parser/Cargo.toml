@@ -11,3 +11,6 @@ toml = "0.9"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
