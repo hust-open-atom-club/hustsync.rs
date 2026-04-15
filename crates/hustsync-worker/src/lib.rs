@@ -56,6 +56,18 @@ pub struct Worker {
 
 impl Worker {
     pub fn new(mut cfg: WorkerConfig) -> Self {
+        // Ignore SIGPIPE process-wide: a broken pipe from an rsync (or other)
+        // child must not terminate the worker. Providers already observe
+        // child exit status and surface errors through ProviderError.
+        #[cfg(unix)]
+        // SAFETY: SIG_IGN is async-signal-safe; Worker::new runs before any
+        // other thread exists, so installing a process-wide disposition here
+        // is race-free.
+        unsafe {
+            use nix::sys::signal::{SigHandler, Signal, signal as nix_signal};
+            let _ = nix_signal(Signal::SIGPIPE, SigHandler::SigIgn);
+        }
+
         if let Some(ref mut global) = cfg.global
             && let Some(ref mut retry) = global.retry
             && retry.retry.unwrap_or(0) == 0
