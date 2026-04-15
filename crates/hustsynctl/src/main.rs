@@ -93,6 +93,10 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Enable trace-level logging
+    #[arg(long)]
+    debug: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -184,7 +188,13 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
-    let log_level = if cli.verbose { "debug" } else { "info" };
+    let log_level = if cli.debug {
+        "trace"
+    } else if cli.verbose {
+        "debug"
+    } else {
+        "info"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(format!("hustsynctl={}", log_level))
         .init();
