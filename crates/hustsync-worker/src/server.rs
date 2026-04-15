@@ -32,7 +32,10 @@ async fn handle_cmd(
                 return (StatusCode::OK, Json(json!({"msg": "Reload triggered"})));
             }
             _ => {
-                return (StatusCode::OK, Json(json!({"msg": "Invalid Command"})));
+                return (
+                    StatusCode::NOT_ACCEPTABLE,
+                    Json(json!({"msg": "Invalid Command"})),
+                );
             }
         }
     }
@@ -42,10 +45,8 @@ async fn handle_cmd(
         let jobs = state.jobs.read().await;
         let Some(job) = jobs.get(&cmd.mirror_id) else {
             return (
-                StatusCode::OK,
-                Json(
-                    json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)}),
-                ),
+                StatusCode::NOT_FOUND,
+                Json(json!({"msg": format!("Mirror ``{}'' not found", cmd.mirror_id)})),
             );
         };
 
@@ -72,7 +73,10 @@ async fn handle_cmd(
             CmdVerb::Disable => crate::job::CtrlAction::Disable,
             CmdVerb::Ping => crate::job::CtrlAction::Ping,
             _ => {
-                return (StatusCode::OK, Json(json!({"msg": "Invalid Command"})));
+                return (
+                    StatusCode::NOT_ACCEPTABLE,
+                    Json(json!({"msg": "Invalid Command"})),
+                );
             }
         }
     };

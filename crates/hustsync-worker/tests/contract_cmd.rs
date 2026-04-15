@@ -117,28 +117,28 @@ mod contract_cmd {
         assert_eq!(body["msg"], "OK");
     }
 
-    /// Unknown mirror_id → 200 {"msg": "Mirror 'foo' is not configured on this worker"}
+    /// Unknown mirror_id → 404 with Go's verbatim TeX-quote message.
     #[tokio::test]
-    async fn test_unknown_mirror_returns_not_configured() {
+    async fn test_unknown_mirror_returns_not_found() {
         let state = empty_state();
 
         let (status, body) = post_cmd(state, worker_cmd("foo", CmdVerb::Start)).await;
 
-        assert_eq!(status, 200);
-        assert_eq!(body["msg"], "Mirror 'foo' is not configured on this worker");
+        assert_eq!(status, 404);
+        assert_eq!(body["msg"], "Mirror ``foo'' not found");
     }
 
-    /// Job-level command with an unrecognised verb (Reload on a mirror) → 200 {"msg": "Invalid Command"}
+    /// Job-level command with an unrecognised verb (Reload on a mirror) → 406.
     #[tokio::test]
-    async fn test_invalid_command_verb_returns_invalid_command() {
+    async fn test_invalid_command_verb_returns_not_acceptable() {
         let (state, _rx) = state_with_job("archlinux");
 
         // Reload is a worker-level verb (mirror_id must be empty to reach the
-        // Reload branch).  When mirror_id is non-empty the job-level `_ =>`
-        // arm fires, producing "Invalid Command".
+        // Reload branch). When mirror_id is non-empty the job-level `_ =>`
+        // arm fires, producing 406 "Invalid Command".
         let (status, body) = post_cmd(state, worker_cmd("archlinux", CmdVerb::Reload)).await;
 
-        assert_eq!(status, 200);
+        assert_eq!(status, 406);
         assert_eq!(body["msg"], "Invalid Command");
     }
 
