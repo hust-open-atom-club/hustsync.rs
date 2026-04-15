@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 pub mod cmd_provider;
 pub mod rsync_provider;
+pub mod two_stage_rsync_provider;
 
 /// Execution context passed into every `run()` call.
 ///
