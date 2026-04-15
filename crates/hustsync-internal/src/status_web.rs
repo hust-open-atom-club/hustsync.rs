@@ -38,8 +38,7 @@ pub mod web_time_format {
         D: Deserializer<'de>,
     {
         let ts = i64::deserialize(deserializer)?;
-        DateTime::from_timestamp(ts, 0)
-            .ok_or_else(|| serde::de::Error::custom("Invalid timestamp"))
+        DateTime::from_timestamp(ts, 0).ok_or_else(|| serde::de::Error::custom("Invalid timestamp"))
     }
 }
 
@@ -49,43 +48,43 @@ pub struct WebMirrorStatus {
     pub name: String,
     pub upstream: String,
     pub size: String,
-    
+
     #[serde(with = "web_time_format_text")]
     pub last_update: DateTime<Utc>,
     #[serde(with = "web_time_format_ts")]
     pub last_update_ts: DateTime<Utc>,
-    
+
     #[serde(with = "web_time_format_text")]
     pub last_started: DateTime<Utc>,
     #[serde(with = "web_time_format_ts")]
     pub last_started_ts: DateTime<Utc>,
-    
+
     #[serde(with = "web_time_format_text")]
     pub last_ended: DateTime<Utc>,
     #[serde(with = "web_time_format_ts")]
     pub last_ended_ts: DateTime<Utc>,
-    
+
     #[serde(rename = "next_schedule")]
     #[serde(with = "web_time_format_text")]
     pub next_schedule: DateTime<Utc>,
     #[serde(rename = "next_schedule_ts")]
     #[serde(with = "web_time_format_ts")]
     pub next_schedule_ts: DateTime<Utc>,
-    
+
     pub status: SyncStatus,
     pub is_master: bool,
 }
 
 pub mod web_time_format_text {
     use super::*;
-    pub use web_time_format::serialize_text as serialize;
     pub use web_time_format::deserialize_text as deserialize;
+    pub use web_time_format::serialize_text as serialize;
 }
 
 pub mod web_time_format_ts {
     use super::*;
-    pub use web_time_format::serialize_ts as serialize;
     pub use web_time_format::deserialize_ts as deserialize;
+    pub use web_time_format::serialize_ts as serialize;
 }
 
 impl From<MirrorStatus> for WebMirrorStatus {
@@ -109,6 +108,7 @@ impl From<MirrorStatus> for WebMirrorStatus {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use chrono::{Duration, TimeZone, Utc};
@@ -135,14 +135,14 @@ mod tests {
         };
 
         let b = serde_json::to_value(&m).expect("serialize should succeed");
-        
+
         // Check text format: "YYYY-MM-DD HH:MM:SS ±ZZZZ"
         // Note: Utc in chrono formats +0000
         assert_eq!(b["last_update"], "2016-04-16 23:08:10 +0000");
-        
+
         // Check timestamp format: integer
         assert_eq!(b["last_update_ts"], t.timestamp());
-        
+
         assert_eq!(b["next_schedule"], "2016-04-16 23:08:10 +0000");
         assert_eq!(b["next_schedule_ts"], t.timestamp());
     }

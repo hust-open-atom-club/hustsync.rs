@@ -4,10 +4,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::fs;
-use std::io;
 use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
+
+use crate::error::InternalError;
 
 pub fn format_path(path: &str, name: &str) -> String {
     path.replace("{{.Name}}", name)
@@ -41,12 +42,12 @@ fn rsync_exit_values_map() -> HashMap<i32, &'static str> {
     m
 }
 
-pub fn get_tls_certificate<P: AsRef<Path>>(ca_file: P) -> io::Result<Certificate> {
+pub fn get_tls_certificate<P: AsRef<Path>>(ca_file: P) -> Result<Certificate, InternalError> {
     let pem = fs::read(ca_file)?;
-    Certificate::from_pem(&pem).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    Certificate::from_pem(&pem).map_err(|e| InternalError::Tls(e.to_string()))
 }
 
-pub fn create_http_client(ca_file: Option<&String>) -> Result<Client, Box<dyn std::error::Error>> {
+pub fn create_http_client(ca_file: Option<&String>) -> Result<Client, InternalError> {
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(5))
         .pool_idle_timeout(Duration::from_secs(20));
@@ -56,17 +57,23 @@ pub fn create_http_client(ca_file: Option<&String>) -> Result<Client, Box<dyn st
         builder = builder.add_root_certificate(cert);
     }
 
-    Ok(builder.build()?)
+    builder
+        .build()
+        .map_err(|e| InternalError::Tls(e.to_string()))
 }
 
-pub async fn post_json<T: Serialize>(
+pub async fn post_json<T: Serialize + Sync>(
     url: &str,
     obj: &T,
     client: Option<&Client>,
-) -> Result<Response, Box<dyn std::error::Error>> {
-    let c = match client {
+) -> Result<Response, InternalError> {
+    let owned;
+    let c: &Client = match client {
         Some(c) => c,
-        None => &create_http_client(None)?,
+        None => {
+            owned = create_http_client(None)?;
+            &owned
+        }
     };
 
     let resp = c
@@ -81,15 +88,22 @@ pub async fn post_json<T: Serialize>(
 pub async fn get_json<T: DeserializeOwned>(
     url: &str,
     client: Option<&Client>,
-) -> Result<T, Box<dyn std::error::Error>> {
-    let c = match client {
+) -> Result<T, InternalError> {
+    let owned;
+    let c: &Client = match client {
         Some(c) => c,
-        None => &create_http_client(None)?,
+        None => {
+            owned = create_http_client(None)?;
+            &owned
+        }
     };
 
     let resp = c.get(url).send().await?;
     if !resp.status().is_success() {
-        return Err(format!("HTTP status code is not 200: {}", resp.status()).into());
+        return Err(InternalError::HttpStatus(format!(
+            "HTTP status code is not 200: {}",
+            resp.status()
+        )));
     }
     let parsed = resp.json::<T>().await?;
     Ok(parsed)
@@ -98,9 +112,11 @@ pub async fn get_json<T: DeserializeOwned>(
 pub fn find_all_submatch_in_file(
     file_name: &str,
     re: &Regex,
-) -> Result<Vec<Vec<Vec<u8>>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Vec<Vec<u8>>>, InternalError> {
     if file_name == "/dev/null" {
-        return Err("invalid log file".into());
+        return Err(InternalError::InvalidPath(
+            "log file path /dev/null is not valid".to_owned(),
+        ));
     }
     let content = fs::read(file_name)?;
     let content_str = String::from_utf8_lossy(&content);
@@ -140,8 +156,9 @@ pub fn extract_size_from_log(log_file: &str, re: &Regex) -> String {
     String::new()
 }
 
-pub fn extract_size_from_rsync_log(log_file: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let re = Regex::new(r"(?m)^Total file size: ([0-9\.]+[KMGTP]?) bytes")?;
+pub fn extract_size_from_rsync_log(log_file: &str) -> Result<String, InternalError> {
+    let re = Regex::new(r"(?m)^Total file size: ([0-9\.]+[KMGTP]?) bytes")
+        .map_err(|e| InternalError::LogParse(e.to_string()))?;
     Ok(extract_size_from_log(log_file, &re))
 }
 
@@ -157,6 +174,7 @@ pub fn translate_rsync_exit_status(status: &ExitStatus) -> (Option<i32>, Option<
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use std::env;
@@ -180,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_extract_size_from_rsync_log_basic() {
-        let real_log = r#"
+        let real_log = r"
 Number of files: 998,470 (reg: 925,484, dir: 58,892, link: 14,094)
 Number of created files: 1,049 (reg: 1,049)
 Number of deleted files: 1,277 (reg: 1,277)
@@ -197,7 +215,7 @@ Total bytes received: 823.25M
 
 sent 7.55M bytes  received 823.25M bytes  5.11M bytes/sec
 total size is 1.33T  speedup is 1,604.11
-"#;
+";
         let path = write_temp_file(real_log);
         let res = extract_size_from_rsync_log(path.to_str().unwrap()).unwrap();
         let _ = fs::remove_file(&path);
@@ -206,11 +224,11 @@ total size is 1.33T  speedup is 1,604.11
 
     #[test]
     fn test_extract_size_from_rsync_log_multiple_matches_uses_last() {
-        let log = r#"
+        let log = r"
 Total file size: 123M bytes
 some other lines
 Total file size: 2.5G bytes
-"#;
+";
         let path = write_temp_file(log);
         let res = extract_size_from_rsync_log(path.to_str().unwrap()).unwrap();
         let _ = fs::remove_file(&path);
@@ -219,10 +237,10 @@ Total file size: 2.5G bytes
 
     #[test]
     fn test_extract_size_from_rsync_log_no_match_returns_empty() {
-        let log = r#"
+        let log = r"
 This log does not contain the expected line.
 Total transferred file size: 99M bytes
-"#;
+";
         let path = write_temp_file(log);
         let res = extract_size_from_rsync_log(path.to_str().unwrap()).unwrap();
         let _ = fs::remove_file(&path);
