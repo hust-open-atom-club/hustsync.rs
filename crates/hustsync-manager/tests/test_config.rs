@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use hustsync_config_parser::ManagerConfig;
 use std::fs;
@@ -28,15 +29,9 @@ ca_cert = ""
 fn toml_decoding_should_work() {
     let cfg_blob = make_cfg_blob();
     let cfg: ManagerConfig = toml::from_str(cfg_blob).expect("decode toml");
-    assert_eq!(
-        cfg.server.addr,
-        "0.0.0.0"
-    );
+    assert_eq!(cfg.server.addr, "0.0.0.0");
     assert_eq!(cfg.server.port, 5000);
-    assert_eq!(
-        cfg.files.db_file,
-        "/var/lib/hustsync/hustsync.db"
-    );
+    assert_eq!(cfg.files.db_file, "/var/lib/hustsync/hustsync.db");
 }
 
 // TODO 创建 clap 应用以测试更完整的加载流程

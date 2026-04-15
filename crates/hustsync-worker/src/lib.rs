@@ -1,31 +1,31 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+use chrono::Utc;
+use hustsync_config_parser::WorkerConfig;
+use hustsync_internal::msg::WorkerStatus;
+use hustsync_internal::status::SyncStatus;
+use reqwest::Client;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{RwLock, mpsc, Semaphore, Mutex};
+use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
-use reqwest::Client;
-use hustsync_config_parser::WorkerConfig;
-use hustsync_internal::status::SyncStatus;
-use hustsync_internal::msg::WorkerStatus;
-use chrono::Utc;
 
-mod server;
 pub mod error;
 pub mod job;
 pub mod provider;
 pub mod schedule;
+mod server;
 
 pub use error::{HookError, WorkerError};
 
+use hustsync_internal::util::format_path;
 pub use job::MirrorJob;
 use provider::{
-    MirrorProvider, 
+    MirrorProvider,
     cmd_provider::{CmdProvider, CmdProviderConfig},
-    rsync_provider::{RsyncProvider, RsyncProviderConfig}
+    rsync_provider::{RsyncProvider, RsyncProviderConfig},
 };
-use hustsync_internal::util::format_path;
 use schedule::ScheduleQueue;
 
 pub struct JobMessage {
@@ -44,7 +44,7 @@ pub struct Worker {
     pub cfg: Arc<WorkerConfig>,
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
     pub job_handles: Mutex<JoinSet<()>>,
-    
+
     pub manager_tx: mpsc::Sender<JobMessage>,
     pub manager_rx: Mutex<Option<mpsc::Receiver<JobMessage>>>,
     pub semaphore: Arc<Semaphore>,
@@ -64,10 +64,8 @@ impl Worker {
         }
 
         let cfg = Arc::new(cfg);
-        
-        let concurrent = cfg.global.as_ref()
-            .and_then(|g| g.concurrent)
-            .unwrap_or(10) as usize;
+
+        let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
 
@@ -112,7 +110,11 @@ impl Worker {
             http_client: None,
         };
 
-        let ca = cfg.manager.as_ref().and_then(|m| m.ca_cert.as_ref()).filter(|s| !s.is_empty());
+        let ca = cfg
+            .manager
+            .as_ref()
+            .and_then(|m| m.ca_cert.as_ref())
+            .filter(|s| !s.is_empty());
         match hustsync_internal::util::create_http_client(ca) {
             Ok(client) => worker.http_client = Some(client),
             Err(e) => tracing::error!("Error initializing HTTP client: {}", e),
@@ -122,12 +124,29 @@ impl Worker {
     }
 
     async fn fetch_job_status(&self) -> Vec<hustsync_internal::msg::MirrorStatus> {
-        let Some(manager_cfg) = &self.cfg.manager else { return vec![]; };
-        let api_base = manager_cfg.api_base.as_deref().unwrap_or("http://localhost:12345");
-        let root = api_base.split(',').next().unwrap_or("http://localhost:12345");
-        let url = format!("{}/workers/{}/jobs", root.trim_end_matches('/'), self.name());
+        let Some(manager_cfg) = &self.cfg.manager else {
+            return vec![];
+        };
+        let api_base = manager_cfg
+            .api_base
+            .as_deref()
+            .unwrap_or("http://localhost:12345");
+        let root = api_base
+            .split(',')
+            .next()
+            .unwrap_or("http://localhost:12345");
+        let url = format!(
+            "{}/workers/{}/jobs",
+            root.trim_end_matches('/'),
+            self.name()
+        );
 
-        match hustsync_internal::util::get_json::<Vec<hustsync_internal::msg::MirrorStatus>>(&url, self.http_client.as_ref()).await {
+        match hustsync_internal::util::get_json::<Vec<hustsync_internal::msg::MirrorStatus>>(
+            &url,
+            self.http_client.as_ref(),
+        )
+        .await
+        {
             Ok(statuses) => statuses,
             Err(e) => {
                 tracing::error!("Failed to fetch job status from manager: {}", e);
@@ -142,30 +161,43 @@ impl Worker {
         g_cfg: &WorkerConfig,
     ) -> Result<Box<dyn MirrorProvider>, provider::ProviderError> {
         let global = g_cfg.global.as_ref();
-        
-        let interval = m_cfg.retry.as_ref().and_then(|r| r.interval)
+
+        let interval = m_cfg
+            .retry
+            .as_ref()
+            .and_then(|r| r.interval)
             .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.interval)))
             .unwrap_or(120);
 
-        let retry = m_cfg.retry.as_ref().and_then(|r| r.retry)
+        let retry = m_cfg
+            .retry
+            .as_ref()
+            .and_then(|r| r.retry)
             .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.retry)))
             .unwrap_or(2);
 
-        let timeout = m_cfg.retry.as_ref().and_then(|r| r.timeout)
+        let timeout = m_cfg
+            .retry
+            .as_ref()
+            .and_then(|r| r.timeout)
             .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.timeout)))
             .unwrap_or(3600);
 
-        let log_dir_base = m_cfg.log_dir.as_deref()
+        let log_dir_base = m_cfg
+            .log_dir
+            .as_deref()
             .or_else(|| global.and_then(|g| g.log_dir.as_deref()))
             .unwrap_or("/tmp/hustsync/log/{{.Name}}");
-        
+
         let log_dir = format_path(log_dir_base, name);
         let log_file = format!("{}/latest.log", log_dir.trim_end_matches('/'));
 
-        let mirror_dir_base = m_cfg.mirror_dir.as_deref()
+        let mirror_dir_base = m_cfg
+            .mirror_dir
+            .as_deref()
             .or_else(|| global.and_then(|g| g.mirror_dir.as_deref()))
             .unwrap_or("/tmp/hustsync");
-        
+
         let mirror_dir = format_path(mirror_dir_base, name);
 
         let is_master = m_cfg.role.as_deref() != Some("slave");
@@ -201,7 +233,9 @@ impl Worker {
                     password: m_cfg.password.clone(),
                     exclude_file: m_cfg.exclude_file.clone(),
                     rsync_options: m_cfg.rsync_options.clone().unwrap_or_default(),
-                    global_options: global.and_then(|g| g.rsync_options.clone()).unwrap_or_default(),
+                    global_options: global
+                        .and_then(|g| g.rsync_options.clone())
+                        .unwrap_or_default(),
                     rsync_override: m_cfg.rsync_override.clone(),
                     rsync_override_only: m_cfg.rsync_override_only.unwrap_or(false),
                     rsync_no_timeout: m_cfg.rsync_no_timeout.unwrap_or(false),
@@ -222,26 +256,36 @@ impl Worker {
             }
             "two-stage-rsync" => {
                 // TODO: implement two-stage-rsync provider
-                tracing::error!("Provider type 'two-stage-rsync' for mirror '{}' is not implemented yet!", name);
+                tracing::error!(
+                    "Provider type 'two-stage-rsync' for mirror '{}' is not implemented yet!",
+                    name
+                );
                 Err(provider::ProviderError::UnknownType(p_type.to_string()))
             }
             _ => {
-                tracing::error!("Provider type '{}' for mirror '{}' is unknown!", p_type, name);
+                tracing::error!(
+                    "Provider type '{}' for mirror '{}' is unknown!",
+                    p_type,
+                    name
+                );
                 Err(provider::ProviderError::UnknownType(p_type.to_string()))
             }
         }
     }
 
     pub fn name(&self) -> String {
-        self.cfg.global.as_ref()
+        self.cfg
+            .global
+            .as_ref()
             .and_then(|g| g.name.clone())
             .unwrap_or_else(|| "default_worker".to_string())
     }
 
     pub fn url(&self) -> String {
         let proto = if let Some(server) = &self.cfg.server {
-            if server.ssl_cert.as_deref().unwrap_or("").is_empty() 
-               && server.ssl_key.as_deref().unwrap_or("").is_empty() {
+            if server.ssl_cert.as_deref().unwrap_or("").is_empty()
+                && server.ssl_key.as_deref().unwrap_or("").is_empty()
+            {
                 "http"
             } else {
                 "https"
@@ -250,11 +294,17 @@ impl Worker {
             "http"
         };
 
-        let hostname = self.cfg.server.as_ref()
+        let hostname = self
+            .cfg
+            .server
+            .as_ref()
             .and_then(|s| s.hostname.clone())
             .unwrap_or_else(|| "localhost".to_string());
-            
-        let port = self.cfg.server.as_ref()
+
+        let port = self
+            .cfg
+            .server
+            .as_ref()
             .and_then(|s| s.listen_port)
             .unwrap_or(6000);
 
@@ -267,8 +317,15 @@ impl Worker {
             return;
         };
 
-        let api_base = manager_cfg.api_base.as_deref().unwrap_or("http://localhost:12345");
-        let api_bases: Vec<&str> = api_base.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let api_base = manager_cfg
+            .api_base
+            .as_deref()
+            .unwrap_or("http://localhost:12345");
+        let api_bases: Vec<&str> = api_base
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
 
         let msg = WorkerStatus {
             id: self.name(),
@@ -278,7 +335,9 @@ impl Worker {
             last_register: Utc::now(),
         };
 
-        let Some(client) = &self.http_client else { return; };
+        let Some(client) = &self.http_client else {
+            return;
+        };
 
         for root in api_bases {
             let url = format!("{}/workers", root.trim_end_matches('/'));
@@ -291,7 +350,9 @@ impl Worker {
                     break;
                 }
                 retries -= 1;
-                if retries > 0 { tokio::time::sleep(Duration::from_secs(1)).await; }
+                if retries > 0 {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
             }
         }
     }
@@ -301,7 +362,10 @@ impl Worker {
     async fn bootstrap_queue(&self, initial_statuses: Vec<hustsync_internal::msg::MirrorStatus>) {
         let mut queue = self.schedule_queue.lock().await;
         let jobs = self.jobs.read().await;
-        let mut unset = jobs.keys().map(|k| (k.clone(), true)).collect::<HashMap<String, bool>>();
+        let mut unset = jobs
+            .keys()
+            .map(|k| (k.clone(), true))
+            .collect::<HashMap<String, bool>>();
 
         for s in initial_statuses {
             if let Some(job) = jobs.get(&s.name) {
@@ -343,11 +407,18 @@ impl Worker {
             drop(jobs);
 
             let sched_msg = hustsync_internal::msg::MirrorSchedules { schedules: s };
-            let api_base = manager_cfg.api_base.as_deref().unwrap_or("http://localhost:12345");
+            let api_base = manager_cfg
+                .api_base
+                .as_deref()
+                .unwrap_or("http://localhost:12345");
             let worker_name = self.name();
 
             for root in api_base.split(',').map(|str| str.trim()) {
-                let url = format!("{}/workers/{}/schedules", root.trim_end_matches('/'), worker_name);
+                let url = format!(
+                    "{}/workers/{}/schedules",
+                    root.trim_end_matches('/'),
+                    worker_name
+                );
                 tokio::spawn({
                     let client = client.clone();
                     let url = url.clone();
@@ -428,10 +499,16 @@ impl Worker {
             schedule_queue: Arc::clone(&self.schedule_queue),
         });
         let app = server::make_http_server(app_state);
-        let listen_addr = self.cfg.server.as_ref()
+        let listen_addr = self
+            .cfg
+            .server
+            .as_ref()
             .and_then(|s| s.listen_addr.clone())
             .unwrap_or_else(|| "127.0.0.1".to_string());
-        let listen_port = self.cfg.server.as_ref()
+        let listen_port = self
+            .cfg
+            .server
+            .as_ref()
             .and_then(|s| s.listen_port)
             .unwrap_or(6000);
         let addr = format!("{}:{}", listen_addr, listen_port);
@@ -481,7 +558,9 @@ impl Worker {
 
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                let (Some(client), Some(manager_cfg)) = (&http_client, &cfg.manager) else { continue };
+                let (Some(client), Some(manager_cfg)) = (&http_client, &cfg.manager) else {
+                    continue;
+                };
 
                 // Skip Failed reports for paused/disabled jobs (mirrors Go behaviour).
                 {
@@ -516,7 +595,10 @@ impl Worker {
                     is_master: msg.is_master,
                 };
 
-                let api_base = manager_cfg.api_base.as_deref().unwrap_or("http://localhost:12345");
+                let api_base = manager_cfg
+                    .api_base
+                    .as_deref()
+                    .unwrap_or("http://localhost:12345");
                 for root in api_base.split(',').map(|s| s.trim()) {
                     let url = format!(
                         "{}/workers/{}/jobs/{}",

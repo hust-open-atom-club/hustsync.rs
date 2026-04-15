@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use regex::Regex;
+use tokio::fs::{File, create_dir_all};
 use tokio::process::Command;
 use tokio::time::timeout;
-use tokio::fs::{File, create_dir_all};
 
 #[cfg(unix)]
 use nix::sys::signal::{self, Signal};
@@ -156,9 +156,9 @@ impl MirrorProvider for CmdProvider {
         }
 
         tracing::info!("Starting command provider for {}", self.config.name);
-        
+
         let mut spawned_child = cmd.spawn()?;
-        
+
         // Record the PID so terminate() can kill it without locks
         if let Some(pid) = spawned_child.id() {
             self.running_pgid.store(pid, Ordering::Release);
@@ -170,7 +170,10 @@ impl MirrorProvider for CmdProvider {
                 if status.success() {
                     Ok(())
                 } else {
-                    Err(ProviderError::Execution(format!("Command exited with status: {}", status)))
+                    Err(ProviderError::Execution(format!(
+                        "Command exited with status: {}",
+                        status
+                    )))
                 }
             }
             Ok(Err(e)) => Err(ProviderError::Io(e)),
@@ -189,12 +192,16 @@ impl MirrorProvider for CmdProvider {
 
         // If execution succeeded, check logs for patterns
         if result.is_ok() {
-            let log_content = tokio::fs::read_to_string(&self.config.log_file).await.unwrap_or_default();
-            
+            let log_content = tokio::fs::read_to_string(&self.config.log_file)
+                .await
+                .unwrap_or_default();
+
             if let Some(fail_regex) = &self.fail_on_match
                 && fail_regex.is_match(&log_content)
             {
-                return Err(ProviderError::Execution("Fail-on-match regex matched log output".into()));
+                return Err(ProviderError::Execution(
+                    "Fail-on-match regex matched log output".into(),
+                ));
             }
 
             if let Some(size_regex) = &self.size_pattern
@@ -213,7 +220,7 @@ impl MirrorProvider for CmdProvider {
         let pid = self.running_pgid.load(Ordering::Acquire);
         if pid != 0 {
             tracing::warn!("Terminating command provider for {}", self.config.name);
-            
+
             #[cfg(unix)]
             {
                 // Send SIGKILL to the entire process group (negative PID)
@@ -243,10 +250,14 @@ impl MirrorProvider for CmdProvider {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::collections::HashMap;
+    use tempfile::tempdir;
 
-    fn setup_provider(name: &str, command: &str, timeout_secs: u64) -> (CmdProvider, tempfile::TempDir) {
+    fn setup_provider(
+        name: &str,
+        command: &str,
+        timeout_secs: u64,
+    ) -> (CmdProvider, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let log_file = dir.path().join("test.log");
         let config = CmdProviderConfig {
@@ -272,27 +283,36 @@ mod tests {
         let (provider, _dir): (CmdProvider, _) = setup_provider("test_echo", "echo hello_world", 5);
         let res: Result<(), ProviderError> = provider.run().await;
         assert!(res.is_ok());
-        
-        let log: String = tokio::fs::read_to_string(&provider.config.log_file).await.unwrap();
+
+        let log: String = tokio::fs::read_to_string(&provider.config.log_file)
+            .await
+            .unwrap();
         assert!(log.contains("hello_world"));
     }
 
     #[tokio::test]
     async fn test_cmd_env_vars() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5);
-        provider.config.env.insert("TEST_VAR".to_string(), "env_works".to_string());
+        let (mut provider, _dir): (CmdProvider, _) =
+            setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5);
+        provider
+            .config
+            .env
+            .insert("TEST_VAR".to_string(), "env_works".to_string());
         let _: Result<(), ProviderError> = provider.run().await;
-        
-        let log: String = tokio::fs::read_to_string(&provider.config.log_file).await.unwrap();
+
+        let log: String = tokio::fs::read_to_string(&provider.config.log_file)
+            .await
+            .unwrap();
         assert!(log.contains("env_works"));
     }
 
     #[tokio::test]
     async fn test_cmd_size_extraction() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_size", "echo 'Total size: 1.23G'", 5);
+        let (mut provider, _dir): (CmdProvider, _) =
+            setup_provider("test_size", "echo 'Total size: 1.23G'", 5);
         provider.size_pattern = Some(Regex::new(r"Total size: ([0-9\.]+[KMG])").unwrap());
         let _: Result<(), ProviderError> = provider.run().await;
-        
+
         assert_eq!(provider.data_size().unwrap(), "1.23G");
     }
 
@@ -301,7 +321,7 @@ mod tests {
         // Sleep for 10s but timeout is 1s
         let (provider, _dir): (CmdProvider, _) = setup_provider("test_timeout", "sleep 10", 1);
         let res: Result<(), ProviderError> = provider.run().await;
-        
+
         match res {
             Err(ProviderError::Timeout) => (),
             _ => panic!("Expected timeout error, got {:?}", res),
@@ -310,10 +330,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_fail_on_match() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_fail", "echo 'ERROR: disk full'", 5);
+        let (mut provider, _dir): (CmdProvider, _) =
+            setup_provider("test_fail", "echo 'ERROR: disk full'", 5);
         provider.fail_on_match = Some(Regex::new("ERROR").unwrap());
         let res: Result<(), ProviderError> = provider.run().await;
-        
+
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Fail-on-match"));
     }
@@ -327,11 +348,11 @@ mod tests {
             "sh -c 'sleep 100 & sleep 100'",
             1, // timeout quickly
         );
-        
+
         let res: Result<(), ProviderError> = provider.run().await;
         assert!(matches!(res, Err(ProviderError::Timeout)));
-        
-        // At this point, thanks to process_group(0) and kill(-pid), 
+
+        // At this point, thanks to process_group(0) and kill(-pid),
         // there should be no "sleep 100" processes left related to this test.
     }
 }

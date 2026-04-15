@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, ValueHint::FilePath};
 use hustsync_config_parser::{WorkerConfig, parse_config};
 use hustsync_manager::Manager;
-use tracing::{info, warn};
 use hustsync_worker::Worker;
+use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -86,6 +86,7 @@ struct WorkerArgs {
     pid_file: Option<PathBuf>,
 }
 
+#[allow(clippy::cognitive_complexity)]
 async fn start_manager(manager_args: ManagerArgs) -> Result<()> {
     hustsync_internal::logger::init_logger(
         manager_args.verbose,
@@ -150,7 +151,9 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
         worker_args.with_systemd,
     );
 
-    let config_path = worker_args.config.unwrap_or_else(|| PathBuf::from("worker.conf"));
+    let config_path = worker_args
+        .config
+        .unwrap_or_else(|| PathBuf::from("worker.conf"));
 
     let config: WorkerConfig = match parse_config(&config_path) {
         Ok(cfg) => cfg,
@@ -163,9 +166,7 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
     info!("Initializing HustSync Worker...");
 
     let worker = Worker::new(config);
-    worker
-        .run()
-        .await;
+    worker.run().await;
 
     Ok(())
 }

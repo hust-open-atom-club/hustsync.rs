@@ -1,4 +1,3 @@
-use tracing::{debug, error, info, trace, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::ManagerError;
@@ -10,28 +9,8 @@ pub fn init_tracing(default_level: &str) -> Result<(), ManagerError> {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_thread_names(true)
-        .with_target(false) // fixed target ("hustsync") in helper logs
+        .with_target(false)
         .init();
 
     Ok(())
-}
-
-pub fn info_hustsync(msg: &str) {
-    info!(target: "hustsync", "{}", msg);
-}
-
-pub fn debug_hustsync(msg: &str) {
-    debug!(target: "hustsync", "{}", msg);
-}
-
-pub fn trace_hustsync(msg: &str) {
-    trace!(target: "hustsync", "{}", msg);
-}
-
-pub fn warn_hustsync(msg: &str) {
-    warn!(target: "hustsync", "{}", msg);
-}
-
-pub fn error_hustsync(msg: &str) {
-    error!(target: "hustsync", "{}", msg);
 }

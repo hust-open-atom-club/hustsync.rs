@@ -299,10 +299,11 @@ pub fn make_db_adapter(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use hustsync_internal::status::SyncStatus;
+    use tempfile::NamedTempFile;
 
     fn setup_test_db() -> (Box<dyn DbAdapterTrait>, NamedTempFile) {
         let tmp_file = NamedTempFile::new().unwrap();
@@ -315,7 +316,7 @@ mod tests {
     #[test]
     fn test_worker_operations() {
         let (db, _tmp) = setup_test_db();
-        
+
         let worker = WorkerStatus {
             id: "test-worker-1".to_string(),
             url: "http://localhost:8080".to_string(),
@@ -346,7 +347,7 @@ mod tests {
     #[test]
     fn test_mirror_status_operations() {
         let (db, _tmp) = setup_test_db();
-        
+
         let mirror = MirrorStatus {
             name: "debian".to_string(),
             worker: "worker-1".to_string(),
@@ -362,7 +363,8 @@ mod tests {
         };
 
         // Update/Create
-        db.update_mirror_status("worker-1", "debian", mirror).unwrap();
+        db.update_mirror_status("worker-1", "debian", mirror)
+            .unwrap();
 
         // Get
         let m = db.get_mirror_status("worker-1", "debian").unwrap();
@@ -379,4 +381,3 @@ mod tests {
         assert_eq!(all_statuses.len(), 1);
     }
 }
-

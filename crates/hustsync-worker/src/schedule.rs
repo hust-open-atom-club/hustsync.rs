@@ -34,7 +34,9 @@ impl PartialOrd for ScheduledJob {
 impl Ord for ScheduledJob {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reverse ordering for Min-Heap (earliest time first)
-        other.sched_time.cmp(&self.sched_time)
+        other
+            .sched_time
+            .cmp(&self.sched_time)
             .then_with(|| self.job.name.cmp(&other.job.name))
     }
 }
@@ -42,7 +44,7 @@ impl Ord for ScheduledJob {
 pub struct ScheduleQueue {
     heap: BinaryHeap<ScheduledJob>,
     // Store exact scheduled time by job name for O(1) existence and removal check logic
-    jobs_time: HashMap<String, Instant>, 
+    jobs_time: HashMap<String, Instant>,
 }
 
 impl Default for ScheduleQueue {
@@ -79,7 +81,7 @@ impl ScheduleQueue {
         // Convert UTC to tokio Instant for heap operations
         let now_utc = chrono::Utc::now();
         let diff = real_time.signed_duration_since(now_utc);
-        
+
         let sched_time = if diff.num_milliseconds() <= 0 {
             Instant::now()
         } else {
@@ -87,7 +89,10 @@ impl ScheduleQueue {
         };
 
         if self.jobs_time.contains_key(&job.name) {
-            tracing::warn!("Job {} already scheduled, removing the existing one (lazy delete)", job.name);
+            tracing::warn!(
+                "Job {} already scheduled, removing the existing one (lazy delete)",
+                job.name
+            );
         }
 
         self.jobs_time.insert(job.name.clone(), sched_time);
@@ -102,7 +107,7 @@ impl ScheduleQueue {
 
     pub fn pop_if_ready(&mut self) -> Option<MirrorJob> {
         let now = Instant::now();
-        
+
         loop {
             match self.heap.peek_mut() {
                 Some(peek) if peek.sched_time <= now => {
@@ -133,9 +138,9 @@ impl ScheduleQueue {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
+    use tokio::sync::mpsc;
     use tokio::time::Duration;
 
     fn create_dummy_job(name: &str) -> MirrorJob {
@@ -153,7 +158,7 @@ mod tests {
     async fn test_schedule_order() {
         let mut queue = ScheduleQueue::new();
         let now = chrono::Utc::now();
-        
+
         let job1 = create_dummy_job("job1");
         let job2 = create_dummy_job("job2");
         let job3 = create_dummy_job("job3");
@@ -163,7 +168,7 @@ mod tests {
         queue.add_job(now + chrono::Duration::seconds(5), job1);
         queue.add_job(now + chrono::Duration::seconds(15), job3);
 
-        // Advance time manually is tricky with tokio::time, 
+        // Advance time manually is tricky with tokio::time,
         // but our add_job uses chrono for calculation.
         // For testing, let's just use immediate jobs.
         let job_now = create_dummy_job("immediate");
@@ -181,7 +186,7 @@ mod tests {
     async fn test_lazy_removal() {
         let mut queue = ScheduleQueue::new();
         let now = chrono::Utc::now();
-        
+
         let job1 = create_dummy_job("to_be_removed");
         queue.add_job(now - chrono::Duration::seconds(10), job1);
 
@@ -196,12 +201,12 @@ mod tests {
     async fn test_reschedule_updates_time() {
         let mut queue = ScheduleQueue::new();
         let now = chrono::Utc::now();
-        
+
         let job1 = create_dummy_job("job1");
-        
+
         // Schedule for 10s later
         queue.add_job(now + chrono::Duration::seconds(10), job1.clone());
-        
+
         // Re-schedule for now
         queue.add_job(now - chrono::Duration::seconds(1), job1);
 

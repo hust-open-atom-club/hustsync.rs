@@ -25,6 +25,7 @@ pub struct Manager {
 }
 
 impl Manager {
+    #[allow(clippy::cognitive_complexity)]
     pub fn new(config: Arc<ManagerConfig>) -> Result<Self, ManagerError> {
         let mut manager = Manager {
             config: Arc::clone(&config),
@@ -112,12 +113,12 @@ impl Manager {
             .parse()
             .map_err(|e: std::net::AddrParseError| ManagerError::Bind(e.to_string()))?;
 
-        let app = self.clone().make_router().layer(
-            TimeoutLayer::with_status_code(
+        let app = Arc::clone(&self)
+            .make_router()
+            .layer(TimeoutLayer::with_status_code(
                 axum::http::StatusCode::REQUEST_TIMEOUT,
                 Duration::from_secs(10),
-            ),
-        );
+            ));
 
         let is_tls =
             !self.config.server.ssl_cert.is_empty() && !self.config.server.ssl_key.is_empty();

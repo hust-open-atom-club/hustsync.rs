@@ -1,9 +1,8 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::{sleep, Duration};
 use hustsync_internal::status::SyncStatus;
-use tokio::sync::Mutex;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::sync::mpsc;
+use tokio::time::{Duration, sleep};
 
 use crate::JobMessage;
 use crate::provider::{MirrorProvider, ProviderError};
@@ -43,7 +42,10 @@ impl MirrorJob {
         self.state.store(state, Ordering::Release);
     }
 
-    pub async fn send_ctrl(&self, action: CtrlAction) -> Result<(), mpsc::error::SendError<CtrlAction>> {
+    pub async fn send_ctrl(
+        &self,
+        action: CtrlAction,
+    ) -> Result<(), mpsc::error::SendError<CtrlAction>> {
         self.tx.send(action).await
     }
 }
@@ -96,24 +98,27 @@ impl JobActor {
     }
 
     async fn report_status(
-        manager_tx: &mpsc::Sender<JobMessage>, 
-        name: &str, 
-        status: SyncStatus, 
-        msg: String, 
+        manager_tx: &mpsc::Sender<JobMessage>,
+        name: &str,
+        status: SyncStatus,
+        msg: String,
         schedule: bool,
         provider: &Arc<dyn MirrorProvider>,
     ) {
-        let _ = manager_tx.send(JobMessage {
-            status,
-            name: name.to_string(),
-            msg,
-            schedule,
-            upstream: provider.upstream().to_string(),
-            size: provider.data_size(),
-            is_master: provider.is_master(),
-        }).await;
+        let _ = manager_tx
+            .send(JobMessage {
+                status,
+                name: name.to_string(),
+                msg,
+                schedule,
+                upstream: provider.upstream().to_string(),
+                size: provider.data_size(),
+                is_master: provider.is_master(),
+            })
+            .await;
     }
 
+    #[allow(clippy::cognitive_complexity)]
     async fn run_sync_loop(
         name: String,
         provider: Arc<dyn MirrorProvider>,
@@ -125,7 +130,12 @@ impl JobActor {
         // 1. Acquire semaphore (Concurrency control)
         let _permit = if !force {
             tracing::debug!("Job {} waiting for semaphore...", name);
-            Some(semaphore.acquire_owned().await.map_err(|_| ProviderError::Execution("Semaphore closed".into()))?)
+            Some(
+                semaphore
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| ProviderError::Execution("Semaphore closed".into()))?,
+            )
         } else {
             tracing::info!("Job {} bypassing semaphore (ForceStart)", name);
             None
@@ -139,38 +149,67 @@ impl JobActor {
                 sleep(Duration::from_secs(2)).await;
             }
 
-            Self::report_status(&manager_tx, &name, SyncStatus::PreSyncing, "".into(), false, &provider).await;
-            Self::report_status(&manager_tx, &name, SyncStatus::Syncing, "".into(), false, &provider).await;
+            Self::report_status(
+                &manager_tx,
+                &name,
+                SyncStatus::PreSyncing,
+                "".into(),
+                false,
+                &provider,
+            )
+            .await;
+            Self::report_status(
+                &manager_tx,
+                &name,
+                SyncStatus::Syncing,
+                "".into(),
+                false,
+                &provider,
+            )
+            .await;
 
             // 3. Actual Run
             match provider.run().await {
                 Ok(_) => {
                     tracing::info!("Job {} sync succeeded", name);
                     let is_ready = state.load(Ordering::Acquire) == STATE_READY;
-                    Self::report_status(&manager_tx, &name, SyncStatus::Success, "".into(), is_ready, &provider).await;
+                    Self::report_status(
+                        &manager_tx,
+                        &name,
+                        SyncStatus::Success,
+                        "".into(),
+                        is_ready,
+                        &provider,
+                    )
+                    .await;
                     return Ok(());
                 }
                 Err(e) => {
                     tracing::warn!("Job {} sync failed: {}", name, e);
-                    
+
                     let current_state = state.load(Ordering::Acquire);
                     if current_state == STATE_PAUSED || current_state == STATE_DISABLED {
-                        tracing::info!("Job {} was terminated by user (state {}), not reporting as Failed.", name, current_state);
+                        tracing::info!(
+                            "Job {} was terminated by user (state {}), not reporting as Failed.",
+                            name,
+                            current_state
+                        );
                         return Err(ProviderError::Terminated);
                     }
 
                     let is_last_retry = i == retries - 1;
                     let is_ready = current_state == STATE_READY;
-                    
+
                     Self::report_status(
-                        &manager_tx, 
-                        &name, 
-                        SyncStatus::Failed, 
-                        e.to_string(), 
+                        &manager_tx,
+                        &name,
+                        SyncStatus::Failed,
+                        e.to_string(),
                         is_last_retry && is_ready,
                         &provider,
-                    ).await;
-                    
+                    )
+                    .await;
+
                     if let ProviderError::Terminated = e {
                         return Err(e);
                     }
@@ -195,6 +234,7 @@ impl JobActor {
         RunningJob { done }
     }
 
+    #[allow(clippy::cognitive_complexity)]
     pub async fn run(mut self) {
         tracing::debug!("Job actor {} started", self.name);
 

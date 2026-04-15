@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::time::Duration;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::process::Command;
-use tokio::time::timeout;
 use tokio::fs::{File, create_dir_all};
+use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 #[cfg(unix)]
 use nix::sys::signal::{self, Signal};
@@ -53,7 +53,9 @@ pub struct RsyncProvider {
 impl RsyncProvider {
     pub fn new(mut config: RsyncProviderConfig) -> Result<Self, ProviderError> {
         if !config.upstream_url.ends_with('/') {
-            return Err(ProviderError::Execution("rsync upstream URL should end with /".into()));
+            return Err(ProviderError::Execution(
+                "rsync upstream URL should end with /".into(),
+            ));
         }
         if config.rsync_override_only && config.rsync_override.is_none() {
             return Err(ProviderError::Execution(
@@ -498,9 +500,10 @@ mod tests {
         let res = RsyncProvider::new(config);
         match res {
             Ok(_) => panic!("expected config validation error"),
-            Err(err) => assert!(err
-                .to_string()
-                .contains("rsync_override_only is set but no rsync_override provided")),
+            Err(err) => assert!(
+                err.to_string()
+                    .contains("rsync_override_only is set but no rsync_override provided")
+            ),
         }
     }
 }

@@ -61,7 +61,7 @@ pub trait MirrorProvider: Send + Sync {
 
     /// Data size from last sync (if known/extracted)
     fn data_size(&self) -> Option<String>;
-    
+
     /// Is this a master mirror node?
     fn is_master(&self) -> bool;
 }

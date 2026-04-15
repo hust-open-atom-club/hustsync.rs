@@ -1,6 +1,6 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use serde::Deserialize;
@@ -22,18 +22,18 @@ fn load_config(path: &str, cfg: &mut CtlConfig, strict: bool) -> Result<()> {
     match std::fs::read_to_string(path) {
         Ok(content) => match toml::from_str::<CtlConfig>(&content) {
             Ok(parsed) => {
-                if let Some(addr) = parsed.manager_addr {
-                    if !addr.is_empty() {
-                        cfg.manager_addr = Some(addr);
-                    }
+                if let Some(addr) = parsed.manager_addr
+                    && !addr.is_empty()
+                {
+                    cfg.manager_addr = Some(addr);
                 }
                 if let Some(port) = parsed.manager_port {
                     cfg.manager_port = Some(port);
                 }
-                if let Some(ca) = parsed.ca_cert {
-                    if !ca.is_empty() {
-                        cfg.ca_cert = Some(ca);
-                    }
+                if let Some(ca) = parsed.ca_cert
+                    && !ca.is_empty()
+                {
+                    cfg.ca_cert = Some(ca);
                 }
                 Ok(())
             }
@@ -59,10 +59,9 @@ fn load_config(path: &str, cfg: &mut CtlConfig, strict: bool) -> Result<()> {
     }
 }
 
-// hustsync_internal helpers return Box<dyn Error> (not Send+Sync), so they
-// cannot use anyhow::Context directly.  This bridge converts them so callers
-// can chain .with_context() after the map_err.
-fn box_err(e: Box<dyn std::error::Error>) -> anyhow::Error {
+// hustsync_internal now returns typed InternalError; this bridge preserves
+// the display chain for .with_context().
+fn box_err(e: hustsync_internal::InternalError) -> anyhow::Error {
     anyhow!("{:#}", e)
 }
 
@@ -205,25 +204,25 @@ async fn main() {
         );
     }
 
-    if let Some(c) = &cli.config {
-        if let Err(e) = load_config(c, &mut config, true) {
-            eprintln!("Error loading explicit config: {}", e);
-            exit(1);
-        }
+    if let Some(c) = &cli.config
+        && let Err(e) = load_config(c, &mut config, true)
+    {
+        eprintln!("Error loading explicit config: {}", e);
+        exit(1);
     }
 
-    if let Some(m) = cli.manager {
-        if !m.is_empty() {
-            config.manager_addr = Some(m);
-        }
+    if let Some(m) = cli.manager
+        && !m.is_empty()
+    {
+        config.manager_addr = Some(m);
     }
     if let Some(p) = cli.port {
         config.manager_port = Some(p);
     }
-    if let Some(ca) = cli.ca_cert {
-        if !ca.is_empty() {
-            config.ca_cert = Some(ca);
-        }
+    if let Some(ca) = cli.ca_cert
+        && !ca.is_empty()
+    {
+        config.ca_cert = Some(ca);
     }
 
     // Both fields are initialised above with hardcoded defaults; they can only
@@ -365,16 +364,18 @@ async fn main() {
             )
             .await
         }
-        Commands::Reload { worker } => send_cmd(
-            &base_url,
-            &client,
-            CmdVerb::Reload,
-            Some(worker),
-            None,
-            None,
-            HashMap::new(),
-        )
-        .await,
+        Commands::Reload { worker } => {
+            send_cmd(
+                &base_url,
+                &client,
+                CmdVerb::Reload,
+                Some(worker),
+                None,
+                None,
+                HashMap::new(),
+            )
+            .await
+        }
     };
 
     if let Err(e) = result {
@@ -396,7 +397,9 @@ async fn list_workers(base_url: &str, client: &Client) -> Result<()> {
 
 fn try_migrate_go_template(tpl: &str) -> String {
     if tpl.contains("{{.") {
-        tracing::warn!("Detected Go-style template syntax '{{{{.FieldName}}}}'. Automatically migrating to Tera syntax '{{{{field_name}}}}'. Please update your scripts.");
+        tracing::warn!(
+            "Detected Go-style template syntax '{{{{.FieldName}}}}'. Automatically migrating to Tera syntax '{{{{field_name}}}}'. Please update your scripts."
+        );
         tpl.replace("{{.", "{{")
     } else {
         tpl.to_string()
@@ -413,11 +416,10 @@ async fn list_jobs(
 ) -> Result<()> {
     if all {
         let url = format!("{}/jobs", base_url);
-        let mut jobs: Vec<WebMirrorStatus> =
-            hustsync_internal::util::get_json(&url, Some(client))
-                .await
-                .map_err(box_err)
-                .with_context(|| format!("GET {}", url))?;
+        let mut jobs: Vec<WebMirrorStatus> = hustsync_internal::util::get_json(&url, Some(client))
+            .await
+            .map_err(box_err)
+            .with_context(|| format!("GET {}", url))?;
 
         if let Some(s) = status {
             let filter_statuses: Vec<String> =
@@ -447,7 +449,8 @@ async fn list_jobs(
                     tera::Context::from_serialize(&job).context("building template context")?;
                 println!(
                     "{}",
-                    tera.render("job_fmt", &context).context("rendering template")?
+                    tera.render("job_fmt", &context)
+                        .context("rendering template")?
                 );
             }
         } else {
@@ -479,7 +482,8 @@ async fn list_jobs(
                     tera::Context::from_serialize(&job).context("building template context")?;
                 println!(
                     "{}",
-                    tera.render("job_fmt", &context).context("rendering template")?
+                    tera.render("job_fmt", &context)
+                        .context("rendering template")?
                 );
             }
         } else {
