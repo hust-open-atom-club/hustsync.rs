@@ -191,19 +191,18 @@ impl MirrorProvider for CmdProvider {
         if result.is_ok() {
             let log_content = tokio::fs::read_to_string(&self.config.log_file).await.unwrap_or_default();
             
-            if let Some(fail_regex) = &self.fail_on_match {
-                if fail_regex.is_match(&log_content) {
-                    return Err(ProviderError::Execution("Fail-on-match regex matched log output".into()));
-                }
+            if let Some(fail_regex) = &self.fail_on_match
+                && fail_regex.is_match(&log_content)
+            {
+                return Err(ProviderError::Execution("Fail-on-match regex matched log output".into()));
             }
 
-            if let Some(size_regex) = &self.size_pattern {
-                if let Some(captures) = size_regex.captures(&log_content) {
-                    if let Some(m) = captures.get(1) {
-                        let mut size_guard = self.data_size.lock().await;
-                        *size_guard = Some(m.as_str().to_string());
-                    }
-                }
+            if let Some(size_regex) = &self.size_pattern
+                && let Some(captures) = size_regex.captures(&log_content)
+                && let Some(m) = captures.get(1)
+            {
+                let mut size_guard = self.data_size.lock().await;
+                *size_guard = Some(m.as_str().to_string());
             }
         }
 
@@ -241,12 +240,13 @@ impl MirrorProvider for CmdProvider {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::collections::HashMap;
 
-    async fn setup_provider(name: &str, command: &str, timeout_secs: u64) -> (CmdProvider, tempfile::TempDir) {
+    fn setup_provider(name: &str, command: &str, timeout_secs: u64) -> (CmdProvider, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let log_file = dir.path().join("test.log");
         let config = CmdProviderConfig {
@@ -269,7 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_basic_execution() {
-        let (provider, _dir): (CmdProvider, _) = setup_provider("test_echo", "echo hello_world", 5).await;
+        let (provider, _dir): (CmdProvider, _) = setup_provider("test_echo", "echo hello_world", 5);
         let res: Result<(), ProviderError> = provider.run().await;
         assert!(res.is_ok());
         
@@ -279,7 +279,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_env_vars() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5).await;
+        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5);
         provider.config.env.insert("TEST_VAR".to_string(), "env_works".to_string());
         let _: Result<(), ProviderError> = provider.run().await;
         
@@ -289,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_size_extraction() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_size", "echo 'Total size: 1.23G'", 5).await;
+        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_size", "echo 'Total size: 1.23G'", 5);
         provider.size_pattern = Some(Regex::new(r"Total size: ([0-9\.]+[KMG])").unwrap());
         let _: Result<(), ProviderError> = provider.run().await;
         
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn test_cmd_timeout() {
         // Sleep for 10s but timeout is 1s
-        let (provider, _dir): (CmdProvider, _) = setup_provider("test_timeout", "sleep 10", 1).await;
+        let (provider, _dir): (CmdProvider, _) = setup_provider("test_timeout", "sleep 10", 1);
         let res: Result<(), ProviderError> = provider.run().await;
         
         match res {
@@ -310,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_fail_on_match() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_fail", "echo 'ERROR: disk full'", 5).await;
+        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_fail", "echo 'ERROR: disk full'", 5);
         provider.fail_on_match = Some(Regex::new("ERROR").unwrap());
         let res: Result<(), ProviderError> = provider.run().await;
         
@@ -325,8 +325,8 @@ mod tests {
         let (provider, _dir): (CmdProvider, _) = setup_provider(
             "test_pgid",
             "sh -c 'sleep 100 & sleep 100'",
-            1 // timeout quickly
-        ).await;
+            1, // timeout quickly
+        );
         
         let res: Result<(), ProviderError> = provider.run().await;
         assert!(matches!(res, Err(ProviderError::Timeout)));
