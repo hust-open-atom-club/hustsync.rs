@@ -33,7 +33,9 @@ mod contract_cmd {
 
     /// Build a minimal `MirrorJob` with a live channel whose receiver is
     /// returned so the test can drain it and prevent the channel from closing.
-    fn make_mirror_job(name: &str) -> (MirrorJob, mpsc::Receiver<hustsync_worker::job::CtrlAction>) {
+    fn make_mirror_job(
+        name: &str,
+    ) -> (MirrorJob, mpsc::Receiver<hustsync_worker::job::CtrlAction>) {
         let (tx, rx) = mpsc::channel(32);
         let job = MirrorJob {
             name: name.to_string(),
@@ -57,7 +59,10 @@ mod contract_cmd {
     /// Returns the state and the channel receiver so the test keeps it alive.
     fn state_with_job(
         name: &str,
-    ) -> (Arc<AppState>, mpsc::Receiver<hustsync_worker::job::CtrlAction>) {
+    ) -> (
+        Arc<AppState>,
+        mpsc::Receiver<hustsync_worker::job::CtrlAction>,
+    ) {
         let (job, rx) = make_mirror_job(name);
         let mut jobs = HashMap::new();
         jobs.insert(name.to_string(), job);
@@ -83,12 +88,7 @@ mod contract_cmd {
         let response = router.oneshot(request).await.unwrap();
         let status = response.status().as_u16();
 
-        let bytes = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
         let json: Value = serde_json::from_slice(&bytes).unwrap();
 
         (status, json)
@@ -125,10 +125,7 @@ mod contract_cmd {
         let (status, body) = post_cmd(state, worker_cmd("foo", CmdVerb::Start)).await;
 
         assert_eq!(status, 200);
-        assert_eq!(
-            body["msg"],
-            "Mirror 'foo' is not configured on this worker"
-        );
+        assert_eq!(body["msg"], "Mirror 'foo' is not configured on this worker");
     }
 
     /// Job-level command with an unrecognised verb (Reload on a mirror) → 200 {"msg": "Invalid Command"}
