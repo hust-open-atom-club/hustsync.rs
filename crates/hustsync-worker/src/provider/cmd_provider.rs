@@ -4,12 +4,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use regex::Regex;
-use tokio::process::{Command, Child};
+use tokio::process::Command;
 use tokio::time::timeout;
 use tokio::fs::{File, create_dir_all};
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 #[cfg(unix)]
 use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
@@ -271,7 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_basic_execution() {
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_echo", "echo hello_world", 5).await;
+        let (provider, _dir): (CmdProvider, _) = setup_provider("test_echo", "echo hello_world", 5).await;
         let res: Result<(), ProviderError> = provider.run().await;
         assert!(res.is_ok());
         
@@ -301,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn test_cmd_timeout() {
         // Sleep for 10s but timeout is 1s
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider("test_timeout", "sleep 10", 1).await;
+        let (provider, _dir): (CmdProvider, _) = setup_provider("test_timeout", "sleep 10", 1).await;
         let res: Result<(), ProviderError> = provider.run().await;
         
         match res {
@@ -324,9 +322,9 @@ mod tests {
     #[tokio::test]
     async fn test_process_group_kill() {
         // Run a shell script that spawns a long-running grandchild
-        let (mut provider, _dir): (CmdProvider, _) = setup_provider(
-            "test_pgid", 
-            "sh -c 'sleep 100 & sleep 100'", 
+        let (provider, _dir): (CmdProvider, _) = setup_provider(
+            "test_pgid",
+            "sh -c 'sleep 100 & sleep 100'",
             1 // timeout quickly
         ).await;
         
