@@ -930,6 +930,7 @@ dependencies = [
  "axum-server",
  "chrono",
  "futures",
+ "http-body-util",
  "hustsync-config-parser",
  "hustsync-internal",
  "nix",
@@ -942,6 +943,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
 ]
 
