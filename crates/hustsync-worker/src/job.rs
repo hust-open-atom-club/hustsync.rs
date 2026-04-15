@@ -118,6 +118,19 @@ impl JobActor {
             .await;
     }
 
+    /// Narrow shim between the retry loop and the provider trait.
+    ///
+    /// Collects every call-site parameter that the provider contract's
+    /// `RunContext` will carry (attempt index, cancellation token, env
+    /// overrides) in one function so that when the trait signature grows
+    /// the diff is contained here.
+    async fn invoke_provider(
+        provider: &dyn MirrorProvider,
+        _attempt: u32,
+    ) -> Result<(), ProviderError> {
+        provider.run().await
+    }
+
     #[allow(clippy::cognitive_complexity)]
     async fn run_sync_loop(
         name: String,
@@ -169,7 +182,7 @@ impl JobActor {
             .await;
 
             // 3. Actual Run
-            match provider.run().await {
+            match Self::invoke_provider(provider.as_ref(), i).await {
                 Ok(_) => {
                     tracing::info!("Job {} sync succeeded", name);
                     let is_ready = state.load(Ordering::Acquire) == STATE_READY;
