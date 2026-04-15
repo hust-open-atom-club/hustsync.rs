@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -16,7 +17,7 @@ use nix::unistd::Pid;
 
 use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
 
-use super::{MirrorProvider, ProviderError, ProviderType};
+use super::{MirrorProvider, ProviderError, ProviderType, RunContext};
 
 pub struct RsyncProviderConfig {
     pub name: String,
@@ -53,12 +54,12 @@ pub struct RsyncProvider {
 impl RsyncProvider {
     pub fn new(mut config: RsyncProviderConfig) -> Result<Self, ProviderError> {
         if !config.upstream_url.ends_with('/') {
-            return Err(ProviderError::Execution(
+            return Err(ProviderError::Config(
                 "rsync upstream URL should end with /".into(),
             ));
         }
         if config.rsync_override_only && config.rsync_override.is_none() {
-            return Err(ProviderError::Execution(
+            return Err(ProviderError::Config(
                 "rsync_override_only is set but no rsync_override provided".into(),
             ));
         }
@@ -77,7 +78,7 @@ impl RsyncProvider {
         })
     }
 
-    fn build_args(&self) -> Vec<String> {
+    pub(crate) fn build_args(&self) -> Vec<String> {
         let mut options = if let Some(overridden) = &self.config.rsync_override {
             overridden.clone()
         } else {
@@ -153,11 +154,27 @@ impl MirrorProvider for RsyncProvider {
         self.config.timeout
     }
 
-    fn working_dir(&self) -> &str {
-        &self.config.working_dir
+    fn working_dir(&self) -> &Path {
+        Path::new(&self.config.working_dir)
     }
 
-    async fn run(&self) -> Result<(), ProviderError> {
+    fn log_dir(&self) -> &Path {
+        Path::new(&self.config.log_dir)
+    }
+
+    fn log_file(&self) -> &Path {
+        Path::new(&self.config.log_file)
+    }
+
+    async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
+        if ctx.attempt > 1 {
+            tracing::debug!(
+                "Rsync provider {} re-entering on attempt {}",
+                self.config.name,
+                ctx.attempt
+            );
+        }
+
         let _run_guard = self.run_lock.lock().await;
 
         if self.running_pgid.load(Ordering::Acquire) != 0 {
@@ -186,7 +203,6 @@ impl MirrorProvider for RsyncProvider {
 
         #[cfg(unix)]
         {
-            // Use a new process group for the rsync process
             cmd.process_group(0);
         }
 
@@ -204,7 +220,13 @@ impl MirrorProvider for RsyncProvider {
             .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
             .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
 
+        // Per-mirror config env
         for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
+
+        // Hook-injected env wins over everything above
+        for (k, v) in &ctx.env {
             cmd.env(k, v);
         }
 
@@ -222,34 +244,83 @@ impl MirrorProvider for RsyncProvider {
             self.running_pgid.store(pid, Ordering::Release);
         } else {
             self.running_pgid.store(0, Ordering::Release);
-            return Err(ProviderError::Execution(
-                "failed to determine rsync process id".into(),
-            ));
+            return Err(ProviderError::Execution {
+                code: -1,
+                msg: "failed to determine rsync process id".into(),
+            });
         }
 
-        let result = match timeout(self.config.timeout, spawned_child.wait()).await {
-            Ok(Ok(status)) => {
-                if status.success() {
-                    Ok(())
-                } else {
-                    let (_code, msg) = translate_rsync_exit_status(&status);
-                    if let Some(ref m) = msg {
-                        use tokio::io::AsyncWriteExt;
-                        let _ = log_file.write_all(m.as_bytes()).await;
-                        let _ = log_file.write_all(b"\n").await;
+        let result = if self.config.timeout == Duration::ZERO {
+            // Timeout disabled — still honour cancellation
+            tokio::select! {
+                wait_res = spawned_child.wait() => {
+                    match wait_res {
+                        Ok(status) => {
+                            if status.success() {
+                                Ok(())
+                            } else {
+                                let (code, msg) = translate_rsync_exit_status(&status);
+                                let code = code.unwrap_or(-1);
+                                if let Some(ref m) = msg {
+                                    use tokio::io::AsyncWriteExt;
+                                    let _ = log_file.write_all(m.as_bytes()).await;
+                                    let _ = log_file.write_all(b"\n").await;
+                                }
+                                let msg = msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
+                                tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
+                                Err(ProviderError::Execution { code, msg })
+                            }
+                        }
+                        Err(e) => Err(ProviderError::Io(e)),
                     }
-                    let error_msg =
-                        msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                    tracing::error!("Rsync failed for {}: {}", self.config.name, error_msg);
-                    Err(ProviderError::Execution(error_msg))
+                }
+                _ = ctx.cancel.cancelled() => {
+                    tracing::warn!("Rsync provider {} cancelled", self.config.name);
+                    let _ = self.terminate().await;
+                    let _ = spawned_child.wait().await;
+                    Err(ProviderError::Terminated)
                 }
             }
-            Ok(Err(e)) => Err(ProviderError::Io(e)),
-            Err(_) => {
-                tracing::warn!("Timeout occurred for {}", self.config.name);
-                let _ = self.terminate().await;
-                let _ = spawned_child.wait().await;
-                Err(ProviderError::Timeout)
+        } else {
+            match timeout(self.config.timeout, async {
+                tokio::select! {
+                    wait_res = spawned_child.wait() => wait_res.map(Some),
+                    _ = ctx.cancel.cancelled() => Ok(None),
+                }
+            })
+            .await
+            {
+                Ok(Ok(Some(status))) => {
+                    if status.success() {
+                        Ok(())
+                    } else {
+                        let (code, msg) = translate_rsync_exit_status(&status);
+                        let code = code.unwrap_or(-1);
+                        if let Some(ref m) = msg {
+                            use tokio::io::AsyncWriteExt;
+                            let _ = log_file.write_all(m.as_bytes()).await;
+                            let _ = log_file.write_all(b"\n").await;
+                        }
+                        let msg =
+                            msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
+                        tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
+                        Err(ProviderError::Execution { code, msg })
+                    }
+                }
+                Ok(Ok(None)) => {
+                    // cancelled
+                    tracing::warn!("Rsync provider {} cancelled", self.config.name);
+                    let _ = self.terminate().await;
+                    let _ = spawned_child.wait().await;
+                    Err(ProviderError::Terminated)
+                }
+                Ok(Err(e)) => Err(ProviderError::Io(e)),
+                Err(_elapsed) => {
+                    tracing::warn!("Timeout occurred for {}", self.config.name);
+                    let _ = self.terminate().await;
+                    let _ = spawned_child.wait().await;
+                    Err(ProviderError::Timeout(self.config.timeout))
+                }
             }
         };
 
@@ -281,12 +352,8 @@ impl MirrorProvider for RsyncProvider {
         Ok(())
     }
 
-    fn data_size(&self) -> Option<String> {
-        if let Ok(guard) = self.data_size.try_lock() {
-            guard.clone()
-        } else {
-            None
-        }
+    async fn data_size(&self) -> Option<String> {
+        self.data_size.lock().await.clone()
     }
 
     fn is_master(&self) -> bool {

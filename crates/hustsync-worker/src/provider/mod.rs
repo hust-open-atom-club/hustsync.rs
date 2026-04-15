@@ -1,26 +1,49 @@
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 
 pub mod cmd_provider;
 pub mod rsync_provider;
 
+/// Execution context passed into every `run()` call.
+///
+/// `cancel` carries the operator cancellation signal — providers must select on
+/// it and return `ProviderError::Terminated` promptly (within 10 s).
+///
+/// `attempt` is 1-based and is available for logging only: providers SHOULD log
+/// it at DEBUG level on re-entry (`attempt > 1`) and MUST NOT change sync
+/// behaviour based on it. The retry policy (count, backoff) is entirely the
+/// job-actor's responsibility, matching Go tunasync behaviour where the retry
+/// loop runs outside provider.Run().
+///
+/// `env` contains hook-injected variables (see `06-job-lifecycle-and-hooks.md`
+/// §4). Providers layer it on top of standard env vars so hook overrides win.
+#[derive(Debug, Clone, Default)]
+pub struct RunContext {
+    pub cancel: CancellationToken,
+    pub attempt: u32,
+    pub env: HashMap<String, String>,
+}
+
 #[derive(Error, Debug)]
 pub enum ProviderError {
-    #[error("IO error: {0}")]
+    #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Command execution failed: {0}")]
-    Execution(String),
-    #[error("Timeout")]
-    Timeout,
-    #[error("Regex error: {0}")]
+    #[error("execution failed (exit code {code}): {msg}")]
+    Execution { code: i32, msg: String },
+    #[error("timeout after {0:?}")]
+    Timeout(Duration),
+    #[error("regex: {0}")]
     Regex(#[from] regex::Error),
-    #[error("Already running")]
+    #[error("already running")]
     AlreadyRunning,
-    #[error("Terminated")]
+    #[error("terminated by operator")]
     Terminated,
-    #[error("Unknown provider type: {0}")]
-    UnknownType(String),
+    #[error("config: {0}")]
+    Config(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,20 +70,26 @@ pub trait MirrorProvider: Send + Sync {
     /// Number of retries on failure
     fn retry(&self) -> u32;
 
-    /// Max duration for a single sync attempt
+    /// Max duration for a single sync attempt. Duration::ZERO means disabled.
     fn timeout(&self) -> Duration;
 
     /// The working directory for the job
-    fn working_dir(&self) -> &str;
+    fn working_dir(&self) -> &Path;
+
+    /// The directory where log files are written
+    fn log_dir(&self) -> &Path;
+
+    /// The path to the log file for this sync
+    fn log_file(&self) -> &Path;
 
     /// Execute the sync process
-    async fn run(&self) -> Result<(), ProviderError>;
+    async fn run(&self, ctx: RunContext) -> Result<(), ProviderError>;
 
-    /// Terminate the running process early
+    /// Terminate the running process early. No-op if not running.
     async fn terminate(&self) -> Result<(), ProviderError>;
 
     /// Data size from last sync (if known/extracted)
-    fn data_size(&self) -> Option<String>;
+    async fn data_size(&self) -> Option<String>;
 
     /// Is this a master mirror node?
     fn is_master(&self) -> bool;

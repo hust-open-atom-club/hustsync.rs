@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
 
-use super::{MirrorProvider, ProviderError, ProviderType};
+use super::{MirrorProvider, ProviderError, ProviderType, RunContext};
 
 use tokio::sync::Mutex;
 
@@ -53,10 +54,10 @@ impl CmdProvider {
         }
 
         let cmd_args = shlex::split(&config.command)
-            .ok_or_else(|| ProviderError::Execution("Failed to parse command with shlex".into()))?;
+            .ok_or_else(|| ProviderError::Config("Failed to parse command with shlex".into()))?;
 
         if cmd_args.is_empty() {
-            return Err(ProviderError::Execution("Command is empty".into()));
+            return Err(ProviderError::Config("Command is empty".into()));
         }
 
         let fail_on_match = match &config.fail_on_match {
@@ -106,11 +107,27 @@ impl MirrorProvider for CmdProvider {
         self.config.timeout
     }
 
-    fn working_dir(&self) -> &str {
-        &self.config.working_dir
+    fn working_dir(&self) -> &Path {
+        Path::new(&self.config.working_dir)
     }
 
-    async fn run(&self) -> Result<(), ProviderError> {
+    fn log_dir(&self) -> &Path {
+        Path::new(&self.config.log_dir)
+    }
+
+    fn log_file(&self) -> &Path {
+        Path::new(&self.config.log_file)
+    }
+
+    async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
+        if ctx.attempt > 1 {
+            tracing::debug!(
+                "Cmd provider {} re-entering on attempt {}",
+                self.config.name,
+                ctx.attempt
+            );
+        }
+
         // Prevent concurrent runs of the same provider instance
         if self.running_pgid.load(Ordering::Acquire) != 0 {
             return Err(ProviderError::AlreadyRunning);
@@ -151,7 +168,13 @@ impl MirrorProvider for CmdProvider {
             .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
             .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
 
+        // Per-mirror config env
         for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
+
+        // Hook-injected env wins over everything above
+        for (k, v) in &ctx.env {
             cmd.env(k, v);
         }
 
@@ -164,26 +187,65 @@ impl MirrorProvider for CmdProvider {
             self.running_pgid.store(pid, Ordering::Release);
         }
 
-        // Wait for the process to complete with a timeout
-        let result = match timeout(self.config.timeout, spawned_child.wait()).await {
-            Ok(Ok(status)) => {
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(ProviderError::Execution(format!(
-                        "Command exited with status: {}",
-                        status
-                    )))
+        // Wait for the process to complete, respecting both timeout and cancellation
+        let result = if self.config.timeout == Duration::ZERO {
+            tokio::select! {
+                wait_res = spawned_child.wait() => {
+                    match wait_res {
+                        Ok(status) => {
+                            if status.success() {
+                                Ok(())
+                            } else {
+                                Err(ProviderError::Execution {
+                                    code: status.code().unwrap_or(-1),
+                                    msg: format!("Command exited with status: {}", status),
+                                })
+                            }
+                        }
+                        Err(e) => Err(ProviderError::Io(e)),
+                    }
+                }
+                _ = ctx.cancel.cancelled() => {
+                    tracing::warn!("Cmd provider {} cancelled", self.config.name);
+                    let _ = self.terminate().await;
+                    let _ = spawned_child.wait().await;
+                    Err(ProviderError::Terminated)
                 }
             }
-            Ok(Err(e)) => Err(ProviderError::Io(e)),
-            Err(_) => {
-                // Timeout occurred, kill the child explicitly
-                tracing::warn!("Timeout occurred for {}", self.config.name);
-                let _ = self.terminate().await;
-                // Wait for it to actually die after sending the signal
-                let _ = spawned_child.wait().await;
-                Err(ProviderError::Timeout)
+        } else {
+            match timeout(self.config.timeout, async {
+                tokio::select! {
+                    wait_res = spawned_child.wait() => wait_res.map(Some),
+                    _ = ctx.cancel.cancelled() => Ok(None),
+                }
+            })
+            .await
+            {
+                Ok(Ok(Some(status))) => {
+                    if status.success() {
+                        Ok(())
+                    } else {
+                        Err(ProviderError::Execution {
+                            code: status.code().unwrap_or(-1),
+                            msg: format!("Command exited with status: {}", status),
+                        })
+                    }
+                }
+                Ok(Ok(None)) => {
+                    tracing::warn!("Cmd provider {} cancelled", self.config.name);
+                    let _ = self.terminate().await;
+                    let _ = spawned_child.wait().await;
+                    Err(ProviderError::Terminated)
+                }
+                Ok(Err(e)) => Err(ProviderError::Io(e)),
+                Err(_elapsed) => {
+                    // Timeout occurred, kill the child explicitly
+                    tracing::warn!("Timeout occurred for {}", self.config.name);
+                    let _ = self.terminate().await;
+                    // Wait for it to actually die after sending the signal
+                    let _ = spawned_child.wait().await;
+                    Err(ProviderError::Timeout(self.config.timeout))
+                }
             }
         };
 
@@ -199,9 +261,10 @@ impl MirrorProvider for CmdProvider {
             if let Some(fail_regex) = &self.fail_on_match
                 && fail_regex.is_match(&log_content)
             {
-                return Err(ProviderError::Execution(
-                    "Fail-on-match regex matched log output".into(),
-                ));
+                return Err(ProviderError::Execution {
+                    code: -1,
+                    msg: "Fail-on-match regex matched log output".into(),
+                });
             }
 
             if let Some(size_regex) = &self.size_pattern
@@ -233,12 +296,8 @@ impl MirrorProvider for CmdProvider {
         Ok(())
     }
 
-    fn data_size(&self) -> Option<String> {
-        if let Ok(guard) = self.data_size.try_lock() {
-            guard.clone()
-        } else {
-            None // Should rarely happen, only if being updated right now
-        }
+    async fn data_size(&self) -> Option<String> {
+        self.data_size.lock().await.clone()
     }
 
     fn is_master(&self) -> bool {
@@ -280,8 +339,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_basic_execution() {
-        let (provider, _dir): (CmdProvider, _) = setup_provider("test_echo", "echo hello_world", 5);
-        let res: Result<(), ProviderError> = provider.run().await;
+        let (provider, _dir) = setup_provider("test_echo", "echo hello_world", 5);
+        let res = provider.run(RunContext::default()).await;
         assert!(res.is_ok());
 
         let log: String = tokio::fs::read_to_string(&provider.config.log_file)
@@ -292,13 +351,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_env_vars() {
-        let (mut provider, _dir): (CmdProvider, _) =
-            setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5);
+        let (mut provider, _dir) = setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5);
         provider
             .config
             .env
             .insert("TEST_VAR".to_string(), "env_works".to_string());
-        let _: Result<(), ProviderError> = provider.run().await;
+        let _ = provider.run(RunContext::default()).await;
 
         let log: String = tokio::fs::read_to_string(&provider.config.log_file)
             .await
@@ -308,32 +366,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_cmd_size_extraction() {
-        let (mut provider, _dir): (CmdProvider, _) =
-            setup_provider("test_size", "echo 'Total size: 1.23G'", 5);
+        let (mut provider, _dir) = setup_provider("test_size", "echo 'Total size: 1.23G'", 5);
         provider.size_pattern = Some(Regex::new(r"Total size: ([0-9\.]+[KMG])").unwrap());
-        let _: Result<(), ProviderError> = provider.run().await;
+        let _ = provider.run(RunContext::default()).await;
 
-        assert_eq!(provider.data_size().unwrap(), "1.23G");
+        assert_eq!(provider.data_size().await.unwrap(), "1.23G");
     }
 
     #[tokio::test]
     async fn test_cmd_timeout() {
         // Sleep for 10s but timeout is 1s
-        let (provider, _dir): (CmdProvider, _) = setup_provider("test_timeout", "sleep 10", 1);
-        let res: Result<(), ProviderError> = provider.run().await;
+        let (provider, _dir) = setup_provider("test_timeout", "sleep 10", 1);
+        let res = provider.run(RunContext::default()).await;
 
         match res {
-            Err(ProviderError::Timeout) => (),
+            Err(ProviderError::Timeout(_)) => (),
             _ => panic!("Expected timeout error, got {:?}", res),
         }
     }
 
     #[tokio::test]
     async fn test_cmd_fail_on_match() {
-        let (mut provider, _dir): (CmdProvider, _) =
-            setup_provider("test_fail", "echo 'ERROR: disk full'", 5);
+        let (mut provider, _dir) = setup_provider("test_fail", "echo 'ERROR: disk full'", 5);
         provider.fail_on_match = Some(Regex::new("ERROR").unwrap());
-        let res: Result<(), ProviderError> = provider.run().await;
+        let res = provider.run(RunContext::default()).await;
 
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Fail-on-match"));
@@ -343,14 +399,14 @@ mod tests {
     #[tokio::test]
     async fn test_process_group_kill() {
         // Run a shell script that spawns a long-running grandchild
-        let (provider, _dir): (CmdProvider, _) = setup_provider(
+        let (provider, _dir) = setup_provider(
             "test_pgid",
             "sh -c 'sleep 100 & sleep 100'",
             1, // timeout quickly
         );
 
-        let res: Result<(), ProviderError> = provider.run().await;
-        assert!(matches!(res, Err(ProviderError::Timeout)));
+        let res = provider.run(RunContext::default()).await;
+        assert!(matches!(res, Err(ProviderError::Timeout(_))));
 
         // At this point, thanks to process_group(0) and kill(-pid),
         // there should be no "sleep 100" processes left related to this test.

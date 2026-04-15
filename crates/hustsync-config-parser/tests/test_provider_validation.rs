@@ -59,10 +59,7 @@ fn reject_rsync_upstream_missing_trailing_slash() {
 #[test]
 fn reject_rsync_upstream_bare_host_no_slash() {
     // A URL that is syntactically unusual but still lacks the trailing `/`
-    let cfg = worker_with_single_mirror(named_rsync_mirror(
-        "foo",
-        "rsync://cdn.example.com",
-    ));
+    let cfg = worker_with_single_mirror(named_rsync_mirror("foo", "rsync://cdn.example.com"));
     let err = validate_worker_config(&cfg).unwrap_err();
     assert!(matches!(err, ConfigError::InvalidValue { .. }));
 }
@@ -92,7 +89,7 @@ fn reject_rsync_override_only_true_with_empty_override() {
         provider: Some("rsync".into()),
         upstream: Some("rsync://ftp.debian.org/debian/".into()),
         rsync_override_only: Some(true),
-        rsync_override: Some(vec![]),  // empty list
+        rsync_override: Some(vec![]), // empty list
         ..MirrorConfig::default()
     };
     let cfg = worker_with_single_mirror(mirror);
@@ -107,7 +104,7 @@ fn reject_rsync_override_only_true_with_absent_override() {
         provider: Some("rsync".into()),
         upstream: Some("rsync://ftp.debian.org/debian/".into()),
         rsync_override_only: Some(true),
-        rsync_override: None,  // entirely absent
+        rsync_override: None, // entirely absent
         ..MirrorConfig::default()
     };
     let cfg = worker_with_single_mirror(mirror);
@@ -121,19 +118,13 @@ fn reject_rsync_override_only_true_with_absent_override() {
 
 #[test]
 fn accept_ipv6_upstream_with_brackets() {
-    let cfg = worker_with_single_mirror(named_rsync_mirror(
-        "ipv6ok",
-        "rsync://[fe80::1]/mirror/",
-    ));
+    let cfg = worker_with_single_mirror(named_rsync_mirror("ipv6ok", "rsync://[fe80::1]/mirror/"));
     assert!(validate_worker_config(&cfg).is_ok());
 }
 
 #[test]
 fn reject_ipv6_upstream_without_brackets() {
-    let cfg = worker_with_single_mirror(named_rsync_mirror(
-        "ipv6bad",
-        "rsync://fe80::1/mirror/",
-    ));
+    let cfg = worker_with_single_mirror(named_rsync_mirror("ipv6bad", "rsync://fe80::1/mirror/"));
     let err = validate_worker_config(&cfg).unwrap_err();
     assert!(matches!(err, ConfigError::InvalidValue { .. }));
 }
@@ -171,7 +162,7 @@ fn reject_size_pattern_with_zero_groups() {
         name: Some("cmd-mirror".into()),
         provider: Some("command".into()),
         upstream: Some("https://example.org/".into()),
-        size_pattern: Some(r"Total: [0-9]+[KMGTP]?".into()),  // no group
+        size_pattern: Some(r"Total: [0-9]+[KMGTP]?".into()), // no group
         ..MirrorConfig::default()
     };
     let cfg = worker_with_single_mirror(mirror);
@@ -185,7 +176,7 @@ fn reject_size_pattern_with_two_groups() {
         name: Some("cmd-mirror".into()),
         provider: Some("command".into()),
         upstream: Some("https://example.org/".into()),
-        size_pattern: Some(r"(Total): ([0-9]+)".into()),  // two groups
+        size_pattern: Some(r"(Total): ([0-9]+)".into()), // two groups
         ..MirrorConfig::default()
     };
     let cfg = worker_with_single_mirror(mirror);

@@ -71,11 +71,7 @@ fn mask_suppresses_volatile_fields() {
     });
 
     // Must not panic — the differing timestamps are masked out.
-    contract::assert_json_eq_masked(
-        &got,
-        &want,
-        &["last_online", "last_register"],
-    );
+    contract::assert_json_eq_masked(&got, &want, &["last_online", "last_register"]);
 }
 
 /// Structural differences (wrong field value that is NOT masked) must still
@@ -114,10 +110,11 @@ fn mask_works_inside_arrays() {
 /// tests hit confusing "file not found" panics.
 #[test]
 fn fixtures_http_directory_exists() {
-    let manifest_dir =
-        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
-    let fixtures_path =
-        std::path::Path::new(&manifest_dir).join("tests").join("fixtures").join("http");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set");
+    let fixtures_path = std::path::Path::new(&manifest_dir)
+        .join("tests")
+        .join("fixtures")
+        .join("http");
     assert!(
         fixtures_path.is_dir(),
         "tests/fixtures/http must exist as a directory (path: {})",

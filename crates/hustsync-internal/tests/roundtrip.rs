@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 // Wire-type round-trip tests for hustsync-internal.
 //
 // Each test loads a committed fixture, deserializes it into the Rust type, re-serializes,
@@ -30,9 +32,7 @@
 
 use std::path::Path;
 
-use hustsync_internal::msg::{
-    ClientCmd, MirrorSchedules, MirrorStatus, WorkerCmd, WorkerStatus,
-};
+use hustsync_internal::msg::{ClientCmd, MirrorSchedules, MirrorStatus, WorkerCmd, WorkerStatus};
 use hustsync_internal::status::SyncStatus;
 use hustsync_internal::status_web::WebMirrorStatus;
 
@@ -127,10 +127,13 @@ fn test_roundtrip_client_cmd() {
 #[test]
 fn test_roundtrip_sync_status_variants() {
     let fixture = load_fixture("status/sync_status_variants.json");
-    let variants: Vec<SyncStatus> = serde_json::from_value(fixture.clone())
-        .expect("deserialize SyncStatus variants");
+    let variants: Vec<SyncStatus> =
+        serde_json::from_value(fixture.clone()).expect("deserialize SyncStatus variants");
     let reserialized = serde_json::to_value(&variants).expect("re-serialize SyncStatus variants");
-    assert_eq!(reserialized, fixture, "SyncStatus variants round-trip mismatch");
+    assert_eq!(
+        reserialized, fixture,
+        "SyncStatus variants round-trip mismatch"
+    );
     // Belt-and-suspenders: verify the seven discriminants are all present
     assert_eq!(variants.len(), 7);
     assert!(variants.contains(&SyncStatus::None));
@@ -160,16 +163,11 @@ fn test_roundtrip_web_mirror_status() {
 #[test]
 fn test_web_mirror_status_text_timestamp_format_preserved() {
     let fixture = load_fixture("status_web/web_mirror_status.json");
-    let wms: WebMirrorStatus = serde_json::from_value(fixture.clone())
-        .expect("deserialize WebMirrorStatus");
+    let wms: WebMirrorStatus =
+        serde_json::from_value(fixture.clone()).expect("deserialize WebMirrorStatus");
     let got = serde_json::to_value(&wms).expect("re-serialize WebMirrorStatus");
 
-    for field in &[
-        "last_update",
-        "last_started",
-        "last_ended",
-        "next_schedule",
-    ] {
+    for field in &["last_update", "last_started", "last_ended", "next_schedule"] {
         assert_eq!(
             got[field], fixture[field],
             "text timestamp field '{field}' changed during round-trip"

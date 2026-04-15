@@ -272,7 +272,9 @@ impl Worker {
                     "Provider type 'two-stage-rsync' for mirror '{}' is not implemented yet!",
                     name
                 );
-                Err(provider::ProviderError::UnknownType(p_type.to_string()))
+                Err(provider::ProviderError::Config(format!(
+                    "unknown provider type `{p_type}`"
+                )))
             }
             _ => {
                 tracing::error!(
@@ -280,7 +282,9 @@ impl Worker {
                     p_type,
                     name
                 );
-                Err(provider::ProviderError::UnknownType(p_type.to_string()))
+                Err(provider::ProviderError::Config(format!(
+                    "unknown provider type `{p_type}`"
+                )))
             }
         }
     }

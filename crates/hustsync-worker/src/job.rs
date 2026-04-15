@@ -112,7 +112,7 @@ impl JobActor {
                 msg,
                 schedule,
                 upstream: provider.upstream().to_string(),
-                size: provider.data_size(),
+                size: provider.data_size().await,
                 is_master: provider.is_master(),
             })
             .await;
@@ -126,9 +126,14 @@ impl JobActor {
     /// the diff is contained here.
     async fn invoke_provider(
         provider: &dyn MirrorProvider,
-        _attempt: u32,
+        attempt: u32,
     ) -> Result<(), ProviderError> {
-        provider.run().await
+        use crate::provider::RunContext;
+        let ctx = RunContext {
+            attempt,
+            ..RunContext::default()
+        };
+        provider.run(ctx).await
     }
 
     #[allow(clippy::cognitive_complexity)]
@@ -147,7 +152,10 @@ impl JobActor {
                 semaphore
                     .acquire_owned()
                     .await
-                    .map_err(|_| ProviderError::Execution("Semaphore closed".into()))?,
+                    .map_err(|_| ProviderError::Execution {
+                        code: -1,
+                        msg: "semaphore closed".into(),
+                    })?,
             )
         } else {
             tracing::info!("Job {} bypassing semaphore (ForceStart)", name);

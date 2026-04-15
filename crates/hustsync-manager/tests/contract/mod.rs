@@ -13,12 +13,7 @@
 //! - Fixture files are loaded from the committed tree so that the expected JSON
 //!   is versioned alongside the tests that assert it.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    dead_code
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, dead_code)]
 
 use axum::Router;
 use hustsync_config_parser::{ManagerConfig, ManagerFileConfig, ManagerServerConfig};
@@ -83,8 +78,8 @@ pub fn spawn_manager_tls() -> ! {
 /// the Cargo manifest dir so it works regardless of the working directory
 /// the test runner chooses.
 pub fn load_fixture(rel: &str) -> serde_json::Value {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR must be set by cargo test");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by cargo test");
     let full = Path::new(&manifest_dir)
         .join("tests")
         .join("fixtures")
@@ -110,11 +105,7 @@ pub fn load_fixture(rel: &str) -> serde_json::Value {
 ///
 /// Both `got` and `want` are normalised through the same mask so that fixtures
 /// can contain any placeholder for the masked fields.
-pub fn assert_json_eq_masked(
-    got: &serde_json::Value,
-    want: &serde_json::Value,
-    masks: &[&str],
-) {
+pub fn assert_json_eq_masked(got: &serde_json::Value, want: &serde_json::Value, masks: &[&str]) {
     let got_masked = mask_value(got, masks);
     let want_masked = mask_value(want, masks);
 

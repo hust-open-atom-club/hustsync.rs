@@ -13,9 +13,7 @@ pub struct AppState {
 }
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route("/", post(handle_cmd))
-        .with_state(state)
+    Router::new().route("/", post(handle_cmd)).with_state(state)
 }
 
 #[allow(clippy::cognitive_complexity, clippy::significant_drop_tightening)]
@@ -45,7 +43,9 @@ async fn handle_cmd(
         let Some(job) = jobs.get(&cmd.mirror_id) else {
             return (
                 StatusCode::OK,
-                Json(json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)})),
+                Json(
+                    json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)}),
+                ),
             );
         };
 
@@ -82,7 +82,9 @@ async fn handle_cmd(
     let Some(job) = jobs.get(&cmd.mirror_id) else {
         return (
             StatusCode::OK,
-            Json(json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)})),
+            Json(
+                json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)}),
+            ),
         );
     };
 
