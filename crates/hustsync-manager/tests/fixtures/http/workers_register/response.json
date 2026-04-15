@@ -1,0 +1,7 @@
+{
+  "id": "worker-1",
+  "url": "http://127.0.0.1:6001/",
+  "token": "secret-token",
+  "last_online": "__masked__",
+  "last_register": "__masked__"
+}

@@ -1,0 +1,8 @@
+{
+  "schedules": [
+    {
+      "name": "debian",
+      "next_schedule": "2026-04-16T00:00:00Z"
+    }
+  ]
+}

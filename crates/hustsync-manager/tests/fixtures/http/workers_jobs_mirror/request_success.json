@@ -1,0 +1,13 @@
+{
+  "name": "debian",
+  "worker": "worker-1",
+  "upstream": "rsync://mirrors.example.com/debian/",
+  "size": "100G",
+  "error-msg": "",
+  "last-update": "1970-01-01T00:00:00Z",
+  "last-started": "1970-01-01T00:00:00Z",
+  "last-ended": "1970-01-01T00:00:00Z",
+  "next-scheduled": "1970-01-01T00:00:00Z",
+  "status": "success",
+  "is-master": false
+}
