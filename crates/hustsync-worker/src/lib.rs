@@ -15,7 +15,7 @@ pub mod error;
 pub mod job;
 pub mod provider;
 pub mod schedule;
-mod server;
+pub mod server;
 
 pub use error::{HookError, WorkerError};
 
