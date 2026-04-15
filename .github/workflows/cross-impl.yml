@@ -1,0 +1,116 @@
+name: Cross-impl nightly
+
+# Fires daily at 06:00 UTC and on-demand.
+# Purpose: run Go tunasynctl against the Rust manager to catch wire-format
+# divergence between the two implementations before a release ships.
+# This job does NOT gate PR merges (continue-on-error on the probe steps).
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Parameterised Go tunasync release to download.
+  # Bump this string when a new Go tunasync stable is tagged.
+  # TODO: convert to a matrix strategy once more Go versions need coverage.
+  TUNASYNC_VERSION: "v0.7.4"
+  MANAGER_PORT: "14242"
+
+jobs:
+  cross-impl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Rust manager binary
+        run: cargo build --release -p hustsync
+
+      # Write a minimal manager config so the binary starts without a real DB
+      # path conflict. db_type=redb writes to /tmp so no sudo needed.
+      - name: Write minimal manager config
+        run: |
+          cat > /tmp/cross-impl-manager.toml << 'EOF'
+          [server]
+          addr = "127.0.0.1"
+          port = 14242
+          ssl_cert = ""
+          ssl_key = ""
+
+          [files]
+          db_type = "redb"
+          db_file = "/tmp/cross-impl-manager.db"
+          ca_cert = ""
+
+          debug = false
+          EOF
+
+      - name: Start Rust manager in background
+        run: |
+          ./target/release/hustsync manager \
+            --config /tmp/cross-impl-manager.toml \
+            --port "$MANAGER_PORT" \
+            --db-file /tmp/cross-impl-manager.db \
+            2>&1 | tee /tmp/manager.log &
+          echo "MANAGER_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for manager /ping
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "http://127.0.0.1:${MANAGER_PORT}/ping" > /dev/null; then
+              echo "Manager is up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Manager did not become ready within 30s"
+          cat /tmp/manager.log || true
+          exit 1
+
+      - name: Download Go tunasync release
+        run: |
+          curl -fsSL \
+            "https://github.com/tuna/tunasync/releases/download/${TUNASYNC_VERSION}/tunasynctl-linux-x86_64" \
+            -o /tmp/tunasynctl
+          chmod +x /tmp/tunasynctl
+
+      # Each tunasynctl probe runs with continue-on-error: true so a wire
+      # divergence is visible as a red badge without blocking PR merges.
+
+      - name: Probe — tunasynctl list (all jobs)
+        continue-on-error: true
+        run: |
+          /tmp/tunasynctl \
+            --manager 127.0.0.1 \
+            --port "$MANAGER_PORT" \
+            list --all
+
+      - name: Probe — tunasynctl workers
+        continue-on-error: true
+        run: |
+          /tmp/tunasynctl \
+            --manager 127.0.0.1 \
+            --port "$MANAGER_PORT" \
+            workers
+
+      - name: Probe — tunasynctl start (cross-impl-test mirror)
+        continue-on-error: true
+        run: |
+          /tmp/tunasynctl \
+            --manager 127.0.0.1 \
+            --port "$MANAGER_PORT" \
+            start cross-impl-test
+
+      - name: Report divergence if any probe failed
+        if: failure()
+        run: |
+          echo "Cross-impl divergence detected"
+          echo "One or more Go tunasynctl probes returned a non-zero exit code."
+          echo "Review the step logs above to identify the failing endpoint."
+          cat /tmp/manager.log || true
