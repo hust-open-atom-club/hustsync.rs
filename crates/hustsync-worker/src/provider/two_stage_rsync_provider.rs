@@ -197,11 +197,7 @@ impl TwoStageRsyncProvider {
 
         // Timeout — applied to both stages (Go: if !p.rsyncNeverTimeout)
         if !self.config.rsync_no_timeout {
-            let timeo = self
-                .config
-                .rsync_timeout
-                .filter(|&v| v > 0)
-                .unwrap_or(120);
+            let timeo = self.config.rsync_timeout.filter(|&v| v > 0).unwrap_or(120);
             options.push(format!("--timeout={}", timeo));
         }
 
@@ -230,6 +226,7 @@ impl TwoStageRsyncProvider {
     /// Spawn one rsync stage and await its completion, honoring the shared
     /// cancellation token.  The `log_file` handle is passed in so that both
     /// stages append to the same file (Go appends; no separator written).
+    #[allow(clippy::cognitive_complexity)]
     async fn run_stage(
         &self,
         stage: u8,
@@ -444,8 +441,7 @@ impl MirrorProvider for TwoStageRsyncProvider {
         self.running_pgid.store(0, Ordering::Release);
 
         if result.is_ok() {
-            let size =
-                extract_size_from_rsync_log(&self.config.log_file).unwrap_or_default();
+            let size = extract_size_from_rsync_log(&self.config.log_file).unwrap_or_default();
             if !size.is_empty() {
                 let mut size_guard = self.data_size.lock().await;
                 *size_guard = Some(size);
