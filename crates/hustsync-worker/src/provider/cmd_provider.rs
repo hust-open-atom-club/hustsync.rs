@@ -264,18 +264,24 @@ impl MirrorProvider for CmdProvider {
                 .await
                 .unwrap_or_default();
 
-            if let Some(fail_regex) = &self.fail_on_match
-                && fail_regex.is_match(&log_content)
-            {
-                return Err(ProviderError::Execution {
-                    code: -1,
-                    msg: "Fail-on-match regex matched log output".into(),
-                });
+            if let Some(fail_regex) = &self.fail_on_match {
+                let match_count = fail_regex.find_iter(&log_content).count();
+                if match_count > 0 {
+                    return Err(ProviderError::Execution {
+                        code: -1,
+                        msg: format!("Fail-on-match regexp found {} matches", match_count),
+                    });
+                }
             }
 
+            // Size pattern: take the LAST match, not the first. Long-running
+            // syncs emit multiple size-like lines; only the final total is
+            // authoritative. Matches Go `internal.ExtractSizeFromLog`.
             if let Some(size_regex) = &self.size_pattern
-                && let Some(captures) = size_regex.captures(&log_content)
-                && let Some(m) = captures.get(1)
+                && let Some(m) = size_regex
+                    .captures_iter(&log_content)
+                    .last()
+                    .and_then(|c| c.get(1))
             {
                 let mut size_guard = self.data_size.lock().await;
                 *size_guard = Some(m.as_str().to_string());

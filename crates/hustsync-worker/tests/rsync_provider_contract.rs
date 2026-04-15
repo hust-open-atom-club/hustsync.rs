@@ -102,11 +102,9 @@ fn config_from_fixture(f: &ArgvFixture) -> RsyncProviderConfig {
 // ---------------------------------------------------------------------------
 // §3.1  argv derivation — one test per fixture file
 //
-// Note on the ipv6-exclude fixture: the JSON was authored against Go output
-// which uses the short flag `-6`.  The Rust port follows Spec §3.1 step 3
-// which mandates the long form `--ipv6`.  The fixture expected_argv is
-// therefore patched during the test to reflect the Spec-correct long form.
-// See playbook gotcha "**`-6`/`-4` vs `--ipv6`/`--ipv4`**".
+// IPv flag: Go rsync_provider.go emits `-6`/`-4` (short form). Spec has
+// been corrected to match; the Rust implementation follows suit. The
+// `ipv6-exclude.json` fixture asserts the short flag verbatim.
 // ---------------------------------------------------------------------------
 
 fn load_fixture(name: &str) -> ArgvFixture {
@@ -150,28 +148,13 @@ fn argv_override_only_matches_fixture() {
 }
 
 #[test]
-fn argv_ipv6_exclude_matches_spec_long_form() {
-    // The fixture was authored against Go which uses `-6`; Spec §3.1 step 3
-    // mandates `--ipv6`.  We assert against what the Rust implementation
-    // actually emits (long form) so the test stays spec-driven rather than
-    // Go-parity for this one flag.
+fn argv_ipv6_exclude_matches_fixture() {
     let fixture = load_fixture("ipv6-exclude.json");
     let provider = RsyncProvider::new(config_from_fixture(&fixture)).unwrap();
     let args = provider.build_args();
 
-    // Build the expected list by replacing the short flag in the fixture.
-    let expected: Vec<String> = fixture.expected_argv[1..]
-        .iter()
-        .map(|s| {
-            if s == "-6" {
-                "--ipv6".to_string()
-            } else {
-                s.clone()
-            }
-        })
-        .collect();
-
-    assert_argv("ipv6-exclude.json", &expected, &args);
+    let expected = &fixture.expected_argv[1..];
+    assert_argv("ipv6-exclude.json", expected, &args);
 }
 
 #[test]
