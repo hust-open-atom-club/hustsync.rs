@@ -904,6 +904,7 @@ dependencies = [
  "http",
  "hustsync-config-parser",
  "hustsync-internal",
+ "hustsync-worker",
  "once_cell",
  "rcgen",
  "redb",

@@ -29,6 +29,7 @@ once_cell = "1.21.3"
 # rcgen: generates self-signed certificates for TLS contract smoke tests (T9)
 # without shelling out to openssl, keeping test setup hermetic.
 rcgen = "0.13"
+hustsync-worker = { path = "../hustsync-worker" }
 
 [lints]
 workspace = true
