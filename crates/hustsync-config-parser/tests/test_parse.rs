@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 #[cfg(test)]
 mod tests {
     use hustsync_config_parser::{ManagerConfig, WorkerConfig};
@@ -38,7 +40,6 @@ mod tests {
         manager_path.pop();
         manager_path.push(".local/manager.toml");
         if !manager_path.exists() {
-            assert!(true);
             return;
         }
         hustsync_config_parser::parse_config::<ManagerConfig>(&manager_path).unwrap();
@@ -53,7 +54,6 @@ mod tests {
         worker_path.pop();
         worker_path.push(".local/worker.toml");
         if !worker_path.exists() {
-            assert!(true);
             return;
         }
         hustsync_config_parser::parse_config::<WorkerConfig>(&worker_path).unwrap();

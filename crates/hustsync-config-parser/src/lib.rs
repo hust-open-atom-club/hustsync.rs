@@ -1,22 +1,56 @@
-use serde::{Deserialize, de::DeserializeOwned};
-use std::{collections::HashMap, error::Error, fs, path::Path};
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
-#[derive(Debug, Deserialize, PartialEq)]
+use serde::{Deserialize, de::DeserializeOwned};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}};
+use thiserror::Error;
+
+/// Typed error returned by every public entry-point in this crate.
+///
+/// Variants carry enough context for callers to produce actionable
+/// diagnostics without inspecting the inner message string.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// Low-level I/O failure (missing file, permission denied, …).
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// TOML deserialisation error (syntax / schema mismatch).
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
+
+    /// A field present in Track-B (Go tunasynctl) but not yet supported.
+    /// `tracked_in` names the issue / spec section where support is planned.
+    #[error("unsupported field `{field}` (tracked in: {tracked_in})")]
+    UnsupportedField {
+        field: String,
+        tracked_in: &'static str,
+    },
+
+    /// A field was present but its value is semantically invalid.
+    #[error("invalid value for `{field}`: {reason}")]
+    InvalidValue { field: String, reason: String },
+
+    /// A required field was absent from the config file.
+    #[error("missing required field: {0}")]
+    MissingRequired(String),
+
+    /// An I/O error tied to a specific path (used by the semantic-validation
+    /// pass when it must stat or open a referenced path).
+    #[error("could not read path `{path}`: {source}")]
+    PathRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+// ─── Structs ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ManagerConfig {
     pub server: ManagerServerConfig,
     pub files: ManagerFileConfig,
     pub debug: bool,
-}
-
-impl Default for ManagerConfig {
-    fn default() -> Self {
-        ManagerConfig {
-            server: ManagerServerConfig::default(),
-            files: ManagerFileConfig::default(),
-            debug: false,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -275,12 +309,18 @@ pub struct ExecOnStatusExtra {
     pub exec_on_failure_extra: Option<Vec<String>>,
 }
 
-pub fn parse_config<T>(path: impl AsRef<Path>) -> Result<T, Box<dyn Error>>
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/// Read and deserialise a TOML config file from `path`.
+///
+/// Errors are typed — callers should match on `ConfigError` variants rather
+/// than formatting the message for logic decisions.
+pub fn parse_config<T>(path: impl AsRef<Path>) -> Result<T, ConfigError>
 where
     T: DeserializeOwned,
 {
-    let rel_path = fs::canonicalize(path.as_ref())?;
-    let config_content = fs::read_to_string(rel_path)?;
-    let config: T = toml::from_str(&config_content)?;
+    let canonical = fs::canonicalize(path.as_ref())?;
+    let content = fs::read_to_string(canonical)?;
+    let config: T = toml::from_str(&content)?;
     Ok(config)
 }
