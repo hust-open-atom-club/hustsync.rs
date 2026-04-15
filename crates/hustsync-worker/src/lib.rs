@@ -12,12 +12,13 @@ use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub mod error;
+pub mod hooks;
 pub mod job;
 pub mod provider;
 pub mod schedule;
 pub mod server;
 
-pub use error::{HookError, WorkerError};
+pub use error::{HookError, HookErrorKind, WorkerError};
 
 pub use job::MirrorJob;
 use provider::MirrorProvider;
@@ -93,11 +94,13 @@ impl Worker {
                         }
                     };
 
+                    let hooks = Self::build_hooks(m_cfg, &cfg);
                     let (job, actor) = job::JobActor::new(
                         name.clone(),
                         manager_tx.clone(),
                         Arc::clone(&semaphore),
                         provider,
+                        hooks,
                     );
                     jobs_map.insert(name.clone(), job);
                     handles.spawn(actor.run());
@@ -168,6 +171,46 @@ impl Worker {
         g_cfg: &WorkerConfig,
     ) -> Result<Box<dyn MirrorProvider>, provider::ProviderError> {
         provider::build_provider(name, m_cfg, g_cfg)
+    }
+
+    /// Assemble the hook chain for one mirror. Order matters — `pre_*`
+    /// runs in this vec order, `post_*` in reverse (LIFO).
+    fn build_hooks(
+        m_cfg: &hustsync_config_parser::MirrorConfig,
+        _g_cfg: &WorkerConfig,
+    ) -> Vec<Arc<dyn hooks::JobHook>> {
+        let mut chain: Vec<Arc<dyn hooks::JobHook>> = Vec::new();
+        // 1. Built-in: ensure working_dir exists before anything else.
+        chain.push(Arc::new(hooks::WorkingDirHook::new()));
+        // 2. Built-in: rotate and stamp the log file before the provider
+        //    runs, so the new path is what the exec hook env and the
+        //    provider itself see.
+        chain.push(Arc::new(hooks::LogLimitHook::new()));
+        // 3. User-configured exec_on_{success,failure}. `exec_on_status_extra`
+        //    (mirror-level additions to global defaults) is appended after
+        //    the base list, matching Go's "append extra to the end".
+        let mut on_success: Vec<String> = Vec::new();
+        let mut on_failure: Vec<String> = Vec::new();
+        if let Some(status) = &m_cfg.exec_on_status {
+            if let Some(list) = &status.exec_on_success {
+                on_success.extend(list.iter().cloned());
+            }
+            if let Some(list) = &status.exec_on_failure {
+                on_failure.extend(list.iter().cloned());
+            }
+        }
+        if let Some(extra) = &m_cfg.exec_on_status_extra {
+            if let Some(list) = &extra.exec_on_success_extra {
+                on_success.extend(list.iter().cloned());
+            }
+            if let Some(list) = &extra.exec_on_failure_extra {
+                on_failure.extend(list.iter().cloned());
+            }
+        }
+        if !on_success.is_empty() || !on_failure.is_empty() {
+            chain.push(Arc::new(hooks::ExecPostHook::new(on_success, on_failure)));
+        }
+        chain
     }
 
     pub fn name(&self) -> String {

@@ -2,15 +2,48 @@ use thiserror::Error;
 
 use crate::provider::ProviderError;
 
-/// Stub error type for the hook pipeline.
+/// Error surfaced by a single hook invocation.
 ///
-/// This variant covers only the generic case for M1. Later milestones will
-/// add structured variants (pre-hook abort, post-hook failure, etc.) once
-/// the hook pipeline is wired up.
+/// Every variant carries the hook's name so the pipeline can identify
+/// which hook failed when a sync is aborted or a post-hook is logged.
 #[derive(Error, Debug)]
-pub enum HookError {
-    #[error("{0}")]
-    Generic(String),
+#[error("{hook}: {kind}")]
+pub struct HookError {
+    pub hook: String,
+    pub kind: HookErrorKind,
+}
+
+impl HookError {
+    pub fn io(hook: impl Into<String>, err: std::io::Error) -> Self {
+        Self {
+            hook: hook.into(),
+            kind: HookErrorKind::Io(err),
+        }
+    }
+
+    pub fn command_exit(hook: impl Into<String>, code: i32) -> Self {
+        Self {
+            hook: hook.into(),
+            kind: HookErrorKind::CommandExit(code),
+        }
+    }
+
+    pub fn config(hook: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            hook: hook.into(),
+            kind: HookErrorKind::Config(reason.into()),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum HookErrorKind {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("command exit {0}")]
+    CommandExit(i32),
+    #[error("config: {0}")]
+    Config(String),
 }
 
 /// Top-level error type for the worker process.

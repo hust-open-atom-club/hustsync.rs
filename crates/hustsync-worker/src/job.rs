@@ -7,6 +7,21 @@ use tokio::time::{Duration, sleep};
 use crate::JobMessage;
 use crate::provider::{MirrorProvider, ProviderError};
 
+#[derive(Clone, Copy)]
+#[allow(clippy::enum_variant_names)]
+enum PrePhase {
+    PreJob,
+    PreExec,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[allow(clippy::enum_variant_names)]
+enum PostPhase {
+    PostExec,
+    PostSuccess,
+    PostFail,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CtrlAction {
     Start,
@@ -58,6 +73,7 @@ pub struct JobActor {
     pub manager_tx: mpsc::Sender<JobMessage>,
     pub semaphore: Arc<tokio::sync::Semaphore>,
     pub provider: Arc<dyn MirrorProvider>,
+    pub hooks: Arc<Vec<Arc<dyn crate::hooks::JobHook>>>,
 }
 
 struct RunningJob {
@@ -70,6 +86,7 @@ impl JobActor {
         manager_tx: mpsc::Sender<JobMessage>,
         semaphore: Arc<tokio::sync::Semaphore>,
         provider: Box<dyn MirrorProvider>,
+        hooks: Vec<Arc<dyn crate::hooks::JobHook>>,
     ) -> (MirrorJob, Self) {
         let (tx, rx) = mpsc::channel(32);
         let state = Arc::new(AtomicU32::new(STATE_NONE));
@@ -92,9 +109,68 @@ impl JobActor {
             manager_tx,
             semaphore,
             provider: Arc::from(provider),
+            hooks: Arc::new(hooks),
         };
 
         (job, actor)
+    }
+
+    fn make_hook_ctx(
+        name: &str,
+        provider: &Arc<dyn MirrorProvider>,
+        attempt: u32,
+    ) -> crate::hooks::HookCtx {
+        crate::hooks::HookCtx {
+            mirror_name: name.to_string(),
+            working_dir: provider.working_dir().to_path_buf(),
+            upstream_url: provider.upstream().to_string(),
+            log_dir: provider.log_dir().to_path_buf(),
+            log_file: provider.log_file().to_path_buf(),
+            attempt,
+            env: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Run `pre_*` hooks in config order. Returns `Ok(n)` where `n` is
+    /// the number of hooks that ran successfully (for LIFO teardown on
+    /// failure), or `Err((n, e))` carrying both the completed count and
+    /// the error that aborted the pipeline.
+    async fn run_pre(
+        phase: PrePhase,
+        hooks: &[Arc<dyn crate::hooks::JobHook>],
+        ctx: &mut crate::hooks::HookCtx,
+    ) -> Result<usize, (usize, crate::hooks::HookError)> {
+        for (i, hook) in hooks.iter().enumerate() {
+            let res = match phase {
+                PrePhase::PreJob => hook.pre_job(ctx).await,
+                PrePhase::PreExec => hook.pre_exec(ctx).await,
+            };
+            if let Err(e) = res {
+                return Err((i, e));
+            }
+        }
+        Ok(hooks.len())
+    }
+
+    /// Run `post_*` hooks LIFO over the first `count` hooks (config
+    /// order, reversed). Errors from post-hooks are logged but never
+    /// surface back to the caller — Spec §3.2.
+    async fn run_post(
+        phase: PostPhase,
+        hooks: &[Arc<dyn crate::hooks::JobHook>],
+        count: usize,
+        ctx: &mut crate::hooks::HookCtx,
+    ) {
+        for hook in hooks.iter().take(count).rev() {
+            let res = match phase {
+                PostPhase::PostExec => hook.post_exec(ctx).await,
+                PostPhase::PostSuccess => hook.post_success(ctx).await,
+                PostPhase::PostFail => hook.post_fail(ctx).await,
+            };
+            if let Err(e) = res {
+                tracing::warn!("hook {} failed in {:?}: {}", hook.name(), phase, e);
+            }
+        }
     }
 
     async fn report_status(
@@ -127,10 +203,12 @@ impl JobActor {
     async fn invoke_provider(
         provider: &dyn MirrorProvider,
         attempt: u32,
+        env: std::collections::HashMap<String, String>,
     ) -> Result<(), ProviderError> {
         use crate::provider::RunContext;
         let ctx = RunContext {
             attempt,
+            env,
             ..RunContext::default()
         };
         provider.run(ctx).await
@@ -143,6 +221,7 @@ impl JobActor {
         semaphore: Arc<tokio::sync::Semaphore>,
         manager_tx: mpsc::Sender<JobMessage>,
         state: Arc<AtomicU32>,
+        hooks: Arc<Vec<Arc<dyn crate::hooks::JobHook>>>,
         force: bool,
     ) -> Result<(), ProviderError> {
         // 1. Acquire semaphore (Concurrency control)
@@ -162,13 +241,28 @@ impl JobActor {
             None
         };
 
-        // 2. Retry Loop
+        // 2. pre_job — once, outside the retry loop (§3 pipeline).
+        let mut hook_ctx = Self::make_hook_ctx(&name, &provider, 0);
+        let pre_job_count = match Self::run_pre(PrePhase::PreJob, &hooks, &mut hook_ctx).await {
+            Ok(n) => n,
+            Err((n, e)) => {
+                tracing::warn!("Job {} pre_job hook aborted: {}", name, e);
+                Self::run_post(PostPhase::PostFail, &hooks, n, &mut hook_ctx).await;
+                return Err(ProviderError::Execution {
+                    code: -1,
+                    msg: format!("pre_job hook failed: {e}"),
+                });
+            }
+        };
+
+        // 3. Retry Loop
         let retries = provider.retry();
         for i in 0..retries {
             if i > 0 {
                 tracing::info!("Job {} retrying sync (attempt {}/{})", name, i + 1, retries);
                 sleep(Duration::from_secs(2)).await;
             }
+            hook_ctx.attempt = i + 1;
 
             Self::report_status(
                 &manager_tx,
@@ -179,6 +273,22 @@ impl JobActor {
                 &provider,
             )
             .await;
+
+            // 3a. pre_exec — may rotate log files, mutate ctx.env / ctx.log_file.
+            let pre_exec_count = match Self::run_pre(PrePhase::PreExec, &hooks, &mut hook_ctx).await
+            {
+                Ok(n) => n,
+                Err((n, e)) => {
+                    tracing::warn!("Job {} pre_exec hook aborted: {}", name, e);
+                    Self::run_post(PostPhase::PostFail, &hooks, n, &mut hook_ctx).await;
+                    Self::run_post(PostPhase::PostFail, &hooks, pre_job_count, &mut hook_ctx).await;
+                    return Err(ProviderError::Execution {
+                        code: -1,
+                        msg: format!("pre_exec hook failed: {e}"),
+                    });
+                }
+            };
+
             Self::report_status(
                 &manager_tx,
                 &name,
@@ -189,10 +299,23 @@ impl JobActor {
             )
             .await;
 
-            // 3. Actual Run
-            match Self::invoke_provider(provider.as_ref(), i).await {
+            // 3b. Provider run with hook-injected env.
+            let provider_env = hook_ctx.env.clone();
+            let run_result = Self::invoke_provider(provider.as_ref(), i, provider_env).await;
+
+            // 3c. post_exec always runs, regardless of success/fail.
+            Self::run_post(PostPhase::PostExec, &hooks, pre_exec_count, &mut hook_ctx).await;
+
+            match run_result {
                 Ok(_) => {
                     tracing::info!("Job {} sync succeeded", name);
+                    Self::run_post(
+                        PostPhase::PostSuccess,
+                        &hooks,
+                        pre_exec_count,
+                        &mut hook_ctx,
+                    )
+                    .await;
                     let is_ready = state.load(Ordering::Acquire) == STATE_READY;
                     Self::report_status(
                         &manager_tx,
@@ -207,6 +330,8 @@ impl JobActor {
                 }
                 Err(e) => {
                     tracing::warn!("Job {} sync failed: {}", name, e);
+                    Self::run_post(PostPhase::PostFail, &hooks, pre_exec_count, &mut hook_ctx)
+                        .await;
 
                     let current_state = state.load(Ordering::Acquire);
                     if current_state == STATE_PAUSED || current_state == STATE_DISABLED {
@@ -247,9 +372,10 @@ impl JobActor {
         let semaphore = Arc::clone(&self.semaphore);
         let manager_tx = self.manager_tx.clone();
         let state = Arc::clone(&self.state);
+        let hooks = Arc::clone(&self.hooks);
 
         let done = tokio::spawn(async move {
-            Self::run_sync_loop(name, provider, semaphore, manager_tx, state, force).await
+            Self::run_sync_loop(name, provider, semaphore, manager_tx, state, hooks, force).await
         });
 
         RunningJob { done }
