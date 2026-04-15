@@ -21,12 +21,14 @@ use chrono::{DateTime, Local, SecondsFormat};
 
 use super::{HookCtx, HookError, JobHook};
 
-/// Matches Go's layout `2006-01-02_15-04-05` at runtime timezone.
-const TIMESTAMP_FMT: &str = "%Y-%m-%d_%H-%M-%S";
+/// Matches Go's `LogDirTimeFormat = "2006-01-02_15_04"` — minute
+/// precision, no seconds; hour and minute joined by `_`, not `-`.
+const TIMESTAMP_FMT: &str = "%Y-%m-%d_%H_%M";
 
-/// Files matching `<mirror>_*.log*` beyond this count are purged on
-/// `pre_exec`. Compressed `.log.gz` files count too (future track B).
-const RETENTION: usize = 10;
+/// Go keeps exactly 9 old files and creates the new one on top, so
+/// after `pre_exec` there are 10 on disk. Match the fencepost exactly
+/// — the Go test asserts `len(files) == 10` after 10 rotations.
+const RETENTION: usize = 9;
 
 const HOOK_NAME: &str = "loglimit";
 
@@ -38,7 +40,10 @@ impl LogLimitHook {
     }
 
     fn latest_symlink(&self, ctx: &HookCtx) -> PathBuf {
-        ctx.log_dir.join(format!("{}_latest.log", ctx.mirror_name))
+        // Go writes a bare `latest` sibling in the per-mirror log dir;
+        // dashboards and operator `tail -f` commands key off this
+        // exact filename.
+        ctx.log_dir.join("latest")
     }
 
     fn prefix(&self, ctx: &HookCtx) -> String {
@@ -63,7 +68,7 @@ impl LogLimitHook {
                 continue;
             }
             // Never list the symlink itself.
-            if name == format!("{}_latest.log", ctx.mirror_name) {
+            if name == "latest" {
                 continue;
             }
             let Ok(meta) = entry.metadata() else { continue };

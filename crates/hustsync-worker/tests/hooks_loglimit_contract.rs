@@ -45,8 +45,8 @@ async fn pre_exec_creates_fresh_file_and_symlink() {
     );
     assert!(name.ends_with(".log"));
 
-    // The `_latest.log` symlink now points at it.
-    let link = ctx.log_dir.join("archlinux_latest.log");
+    // Go writes a bare `latest` symlink sibling in the log dir.
+    let link = ctx.log_dir.join("latest");
     let target = std::fs::read_link(&link).unwrap();
     assert_eq!(target, ctx.log_file);
 
@@ -58,13 +58,13 @@ async fn pre_exec_creates_fresh_file_and_symlink() {
 }
 
 #[tokio::test]
-async fn pre_exec_rotates_to_ten_newest() {
+async fn pre_exec_rotates_retaining_go_fencepost() {
     let tmp = TempDir::new().unwrap();
     let mirror = "m1";
     let mut ctx = make_ctx(&tmp, mirror);
 
-    // Seed 15 existing log files with staggered mtimes (5 = newest,
-    // 300 = oldest); oldest 5 should be removed.
+    // Seed 15 staggered files. Go's fencepost: keep 9 oldest-before-
+    // create + create 1 new = 10 on disk after pre_exec.
     for secs_ago in (5..=75).step_by(5) {
         let p = ctx.log_dir.join(format!("{mirror}_old_{secs_ago}.log"));
         touch_with_mtime(&p, secs_ago);
@@ -76,11 +76,6 @@ async fn pre_exec_rotates_to_ten_newest() {
     let hook = LogLimitHook::new();
     hook.pre_exec(&mut ctx).await.unwrap();
 
-    // 15 seeded + 1 fresh - 6 oldest pruned = 10 (fresh counts toward the
-    // retention budget on the NEXT rotation; on this run the fresh file
-    // exists AFTER rotation, so 15 - 5 + 1 = 11 survivors minus the fresh
-    // one's own slot... the spec says "at most 10 after rotation"; the
-    // fresh file created this run is always in addition).
     let surviving: Vec<_> = std::fs::read_dir(&ctx.log_dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -89,15 +84,19 @@ async fn pre_exec_rotates_to_ten_newest() {
             n.starts_with(&format!("{mirror}_")) && n.ends_with(".log")
         })
         .collect();
-    // After rotation to 10 newest + fresh file + (symlink is a separate
-    // direntry kind, also counted). The key assertion: oldest entries
-    // (secs_ago = 45..=75) are gone.
-    assert!(
-        surviving.len() <= 12,
-        "rotation must cap survivors; got {} entries",
+
+    // 9 retained + 1 freshly created = 10 total (the symlink `latest`
+    // is a separate direntry and does not match the `<mirror>_*.log`
+    // predicate above).
+    assert_eq!(
+        surviving.len(),
+        10,
+        "rotation must retain 9 oldest-before-create + 1 fresh = 10; got {} entries",
         surviving.len()
     );
-    for secs_ago in [55u64, 60, 65, 70, 75] {
+
+    // Oldest 6 (45..=75 secs_ago) must have been rotated out.
+    for secs_ago in [50u64, 55, 60, 65, 70, 75] {
         let gone = ctx.log_dir.join(format!("{mirror}_old_{secs_ago}.log"));
         assert!(
             !gone.exists(),
@@ -132,7 +131,7 @@ async fn post_fail_renames_to_fail_and_updates_symlink() {
     assert_eq!(contents, b"hello");
 
     // Symlink points at the .fail file.
-    let link = ctx.log_dir.join("m1_latest.log");
+    let link = ctx.log_dir.join("latest");
     let target = std::fs::read_link(&link).unwrap();
     assert_eq!(target, failed);
 }
