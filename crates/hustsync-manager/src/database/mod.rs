@@ -47,11 +47,10 @@ pub enum AdapterError {
     InitError(String),
     #[error("create bucket: {0}, error: {1}")]
     CreateBucketError(String, String),
-    // This should be more specific in real implementation
-    #[error("anyhow error: {0}")]
-    Anyhow(String),
-    #[error(transparent)]
-    RdbError(#[from] redb::Error),
+    #[error("record not found: {0}")]
+    NotFound(String),
+    #[error("serialization error: {0}")]
+    SerdeError(#[from] serde_json::Error),
     #[error(transparent)]
     RdbDatabaseError(#[from] redb::DatabaseError),
     #[error(transparent)]
@@ -62,7 +61,6 @@ pub enum AdapterError {
     RdbCommitError(#[from] redb::CommitError),
     #[error(transparent)]
     RdbStorageError(#[from] redb::StorageError),
-    // TODO: more error variants
 }
 
 pub trait DbAdapterTrait: Send + Sync {
@@ -115,8 +113,7 @@ impl KvDBAdapter {
         let mut workers = Vec::new();
 
         for (_, v) in workers_map {
-            let w: WorkerStatus = serde_json::from_slice(&v)
-                .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+            let w: WorkerStatus = serde_json::from_slice(&v)?;
             workers.push(w);
         }
         Ok(workers)
@@ -125,14 +122,10 @@ impl KvDBAdapter {
     fn get_worker(&self, worker_id: &str) -> Result<WorkerStatus, AdapterError> {
         let v = self.inner.get(WORKER_BUCKETKEY, worker_id)?;
         let Some(bytes) = v else {
-            return Err(AdapterError::Anyhow(format!(
-                "invalid workerID {}",
-                worker_id
-            )));
+            return Err(AdapterError::NotFound(format!("worker '{}'", worker_id)));
         };
 
-        let w: WorkerStatus = serde_json::from_slice(&bytes)
-            .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+        let w: WorkerStatus = serde_json::from_slice(&bytes)?;
         Ok(w)
     }
 
@@ -140,17 +133,13 @@ impl KvDBAdapter {
         // Check existence first to match Go behavior (optional but good for error reporting)
         let v = self.inner.get(WORKER_BUCKETKEY, worker_id)?;
         if v.is_none() {
-            return Err(AdapterError::Anyhow(format!(
-                "invalid workerID {}",
-                worker_id
-            )));
+            return Err(AdapterError::NotFound(format!("worker '{}'", worker_id)));
         }
         self.inner.delete(WORKER_BUCKETKEY, worker_id)
     }
 
     fn create_worker(&self, w: WorkerStatus) -> Result<WorkerStatus, AdapterError> {
-        let v = serde_json::to_vec(&w)
-            .map_err(|e| AdapterError::Anyhow(format!("json marshal error: {}", e)))?;
+        let v = serde_json::to_vec(&w)?;
         self.inner.put(WORKER_BUCKETKEY, &w.id, &v)?;
         Ok(w)
     }
@@ -168,8 +157,7 @@ impl KvDBAdapter {
         status: MirrorStatus,
     ) -> Result<MirrorStatus, AdapterError> {
         let id = format!("{}/{}", mirror_id, worker_id);
-        let v = serde_json::to_vec(&status)
-            .map_err(|e| AdapterError::Anyhow(format!("json marshal error: {}", e)))?;
+        let v = serde_json::to_vec(&status)?;
         self.inner.put(STATUS_BUCKETKEY, &id, &v)?;
         Ok(status)
     }
@@ -182,13 +170,9 @@ impl KvDBAdapter {
         let id = format!("{}/{}", mirror_id, worker_id);
         let v = self.inner.get(STATUS_BUCKETKEY, &id)?;
         match v {
-            Some(bytes) => {
-                let m: MirrorStatus = serde_json::from_slice(&bytes)
-                    .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
-                Ok(m)
-            }
-            None => Err(AdapterError::Anyhow(format!(
-                "no mirror '{}' exists in worker '{}'",
+            Some(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            None => Err(AdapterError::NotFound(format!(
+                "mirror '{}' in worker '{}'",
                 mirror_id, worker_id
             ))),
         }
@@ -202,8 +186,7 @@ impl KvDBAdapter {
             // key format: mirrorID/workerID
             let parts: Vec<&str> = k.split('/').collect();
             if parts.len() > 1 && parts[1] == worker_id {
-                let m: MirrorStatus = serde_json::from_slice(&v)
-                    .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+                let m: MirrorStatus = serde_json::from_slice(&v)?;
                 result.push(m);
             }
         }
@@ -215,8 +198,7 @@ impl KvDBAdapter {
         let mut result = Vec::new();
 
         for (_, v) in vals {
-            let m: MirrorStatus = serde_json::from_slice(&v)
-                .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+            let m: MirrorStatus = serde_json::from_slice(&v)?;
             result.push(m);
         }
         Ok(result)
@@ -225,8 +207,7 @@ impl KvDBAdapter {
     fn flush_disabled_jobs(&self) -> Result<(), AdapterError> {
         let vals = self.inner.get_all(STATUS_BUCKETKEY)?;
         for (k, v) in vals {
-            let m: MirrorStatus = serde_json::from_slice(&v)
-                .map_err(|e| AdapterError::Anyhow(format!("json unmarshal error: {}", e)))?;
+            let m: MirrorStatus = serde_json::from_slice(&v)?;
 
             if m.status == hustsync_internal::status::SyncStatus::Disabled || m.name.is_empty() {
                 self.inner.delete(STATUS_BUCKETKEY, &k)?;
