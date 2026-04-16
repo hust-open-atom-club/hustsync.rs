@@ -67,10 +67,7 @@ mod tests {
     fn default_worker_global_config_values() {
         let cfg = hustsync_config_parser::WorkerGlobalConfig::default();
         assert_eq!(cfg.name.as_deref(), Some(""));
-        assert_eq!(
-            cfg.log_dir.as_deref(),
-            Some("/var/log/hustsync/{{.Name}}")
-        );
+        assert_eq!(cfg.log_dir.as_deref(), Some("/var/log/hustsync/{{.Name}}"));
         assert_eq!(cfg.mirror_dir.as_deref(), Some("/srv/mirror"));
     }
 
@@ -214,9 +211,14 @@ docker_image = "ghcr.io/example/rsync:latest"
 
         let res = hustsync_config_parser::load_worker_config(
             f.path(),
-            &ConfigLoadOptions { allow_unsupported_fields: false },
+            &ConfigLoadOptions {
+                allow_unsupported_fields: false,
+            },
         );
-        assert!(res.is_err(), "strict mode must reject unknown mirror fields");
+        assert!(
+            res.is_err(),
+            "strict mode must reject unknown mirror fields"
+        );
     }
 
     /// With the flag, the same Track-B mirror field is accepted with a WARN
@@ -236,7 +238,9 @@ docker_image = "ghcr.io/example/rsync:latest"
 
         let res = hustsync_config_parser::load_worker_config(
             f.path(),
-            &ConfigLoadOptions { allow_unsupported_fields: true },
+            &ConfigLoadOptions {
+                allow_unsupported_fields: true,
+            },
         );
         assert!(
             res.is_ok(),
@@ -282,7 +286,11 @@ upstream = "rsync://ftp.debian.org/debian/"
         // Write the main config that references the fragment via glob.
         let pattern = format!("{}/*.conf", dir.path().display());
         let main_conf = NamedTempFile::new().unwrap();
-        writeln!(main_conf.as_file(), "[include]\ninclude_mirrors = {pattern:?}").unwrap();
+        writeln!(
+            main_conf.as_file(),
+            "[include]\ninclude_mirrors = {pattern:?}"
+        )
+        .unwrap();
 
         let cfg = hustsync_config_parser::load_worker_config(
             main_conf.path(),
@@ -344,5 +352,199 @@ upstream = "rsync://ftp.debian.org/debian/"
             &ConfigLoadOptions::default(),
         );
         assert!(res.is_err(), "invalid fragment TOML must produce error");
+    }
+
+    // ── Feature 4: nested mirror children ─────────────────────────────────
+
+    /// A child with no explicit interval inherits the parent's interval.
+    #[test]
+    fn nested_mirror_child_inherits_parent_interval() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[mirrors]]
+name = "parent"
+interval = 360
+
+[[mirrors.mirrors]]
+name = "child"
+upstream = "rsync://mirror.example.org/debian/"
+"#
+        )
+        .unwrap();
+
+        let cfg =
+            hustsync_config_parser::load_worker_config(f.path(), &ConfigLoadOptions::default())
+                .unwrap();
+
+        let mirrors = cfg.mirrors.unwrap();
+        assert_eq!(
+            mirrors.len(),
+            1,
+            "parent must not appear, only the leaf child"
+        );
+        let child = &mirrors[0];
+        assert_eq!(child.name.as_deref(), Some("child"));
+        // interval is inside the flattened RetryStrategy
+        let interval = child.retry.as_ref().and_then(|r| r.interval);
+        assert_eq!(
+            interval,
+            Some(360),
+            "child must inherit interval=360 from parent"
+        );
+    }
+
+    /// A child with its own upstream overrides the parent's upstream.
+    #[test]
+    fn nested_mirror_child_overrides_parent_upstream() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[mirrors]]
+name = "parent"
+upstream = "rsync://parent.example.org/base/"
+interval = 120
+
+[[mirrors.mirrors]]
+name = "child"
+upstream = "rsync://child.example.org/override/"
+"#
+        )
+        .unwrap();
+
+        let cfg =
+            hustsync_config_parser::load_worker_config(f.path(), &ConfigLoadOptions::default())
+                .unwrap();
+
+        let mirrors = cfg.mirrors.unwrap();
+        assert_eq!(mirrors.len(), 1);
+        let child = &mirrors[0];
+        assert_eq!(
+            child.upstream.as_deref(),
+            Some("rsync://child.example.org/override/"),
+            "child's explicit upstream must not be overwritten by parent"
+        );
+        // interval still inherited
+        let interval = child.retry.as_ref().and_then(|r| r.interval);
+        assert_eq!(interval, Some(120));
+    }
+
+    /// A grandchild inherits from intermediate parent which inherited from root.
+    #[test]
+    fn nested_mirror_three_levels_grandchild_inherits() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[mirrors]]
+name = "root"
+provider = "rsync"
+interval = 720
+
+[[mirrors.mirrors]]
+name = "mid"
+
+[[mirrors.mirrors.mirrors]]
+name = "leaf"
+upstream = "rsync://leaf.example.org/path/"
+"#
+        )
+        .unwrap();
+
+        let cfg =
+            hustsync_config_parser::load_worker_config(f.path(), &ConfigLoadOptions::default())
+                .unwrap();
+
+        let mirrors = cfg.mirrors.unwrap();
+        // Only the leaf should appear; root and mid are interior nodes.
+        assert_eq!(mirrors.len(), 1, "only the leaf node must be emitted");
+        let leaf = &mirrors[0];
+        assert_eq!(leaf.name.as_deref(), Some("leaf"));
+        assert_eq!(
+            leaf.provider.as_deref(),
+            Some("rsync"),
+            "leaf must inherit provider from root via mid"
+        );
+        let interval = leaf.retry.as_ref().and_then(|r| r.interval);
+        assert_eq!(
+            interval,
+            Some(720),
+            "leaf must inherit interval from root via mid"
+        );
+    }
+
+    /// After flattening, no emitted mirror has a non-empty `mirrors` field.
+    #[test]
+    fn flattened_output_has_no_children() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[mirrors]]
+name = "p"
+
+[[mirrors.mirrors]]
+name = "c1"
+upstream = "rsync://a.example.org/a/"
+
+[[mirrors.mirrors]]
+name = "c2"
+upstream = "rsync://b.example.org/b/"
+"#
+        )
+        .unwrap();
+
+        let cfg =
+            hustsync_config_parser::load_worker_config(f.path(), &ConfigLoadOptions::default())
+                .unwrap();
+
+        let mirrors = cfg.mirrors.unwrap();
+        assert_eq!(mirrors.len(), 2, "two leaf children must be emitted");
+        for m in &mirrors {
+            assert!(
+                m.mirrors.is_none() || m.mirrors.as_ref().map(Vec::is_empty).unwrap_or(false),
+                "emitted mirror must not carry children"
+            );
+        }
+    }
+
+    /// `name` is not inherited — a child with no name keeps `None`.
+    #[test]
+    fn nested_mirror_name_not_inherited() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[mirrors]]
+name = "parent"
+provider = "rsync"
+
+[[mirrors.mirrors]]
+upstream = "rsync://anon.example.org/repo/"
+"#
+        )
+        .unwrap();
+
+        let cfg =
+            hustsync_config_parser::load_worker_config(f.path(), &ConfigLoadOptions::default())
+                .unwrap();
+
+        let mirrors = cfg.mirrors.unwrap();
+        assert_eq!(mirrors.len(), 1);
+        // name was not set on the child; the parent's name must not have leaked
+        assert_ne!(
+            mirrors[0].name.as_deref(),
+            Some("parent"),
+            "name must never be inherited from parent"
+        );
+    }
+
+    /// A mirror with no children is passed through unchanged by `flatten_mirrors`.
+    #[test]
+    fn default_mirror_mirrors_field_is_none() {
+        let m = hustsync_config_parser::MirrorConfig::default();
+        assert!(m.mirrors.is_none(), "mirrors field must default to None");
     }
 }

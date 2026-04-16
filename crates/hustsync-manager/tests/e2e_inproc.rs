@@ -130,6 +130,7 @@ fn worker_config(
             memory_limit: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
+            mirrors: None,
         }]),
         include: None,
     }

@@ -235,7 +235,7 @@ impl Default for WorkerServerConfig {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct MirrorConfig {
     #[serde(flatten)]
@@ -270,6 +270,11 @@ pub struct MirrorConfig {
     pub memory_limit: Option<String>,
     pub success_exit_codes: Option<Vec<i32>>,
     pub rsync_success_exit_codes: Option<Vec<i32>>,
+    /// Nested child mirrors. Children inherit unset fields from this parent.
+    /// After loading, `flatten_mirrors` converts the tree to a flat list and
+    /// clears this field on every emitted mirror.
+    #[serde(default)]
+    pub mirrors: Option<Vec<MirrorConfig>>,
 }
 
 impl Default for MirrorConfig {
@@ -314,24 +319,25 @@ impl Default for MirrorConfig {
             memory_limit: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
+            mirrors: None,
         }
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct RetryStrategy {
     pub retry: Option<u32>,
     pub timeout: Option<u32>,
     pub interval: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct ExecOnStatus {
     pub exec_on_success: Option<Vec<String>>,
     pub exec_on_failure: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct ExecOnStatusExtra {
     pub exec_on_success_extra: Option<Vec<String>>,
     pub exec_on_failure_extra: Option<Vec<String>>,
@@ -400,6 +406,8 @@ struct LenientMirrorConfig {
     memory_limit: Option<String>,
     success_exit_codes: Option<Vec<i32>>,
     rsync_success_exit_codes: Option<Vec<i32>>,
+    #[serde(default)]
+    mirrors: Option<Vec<LenientMirrorConfig>>,
 }
 
 impl From<LenientMirrorConfig> for MirrorConfig {
@@ -434,6 +442,9 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             memory_limit: l.memory_limit,
             success_exit_codes: l.success_exit_codes,
             rsync_success_exit_codes: l.rsync_success_exit_codes,
+            mirrors: l
+                .mirrors
+                .map(|mv| mv.into_iter().map(MirrorConfig::from).collect()),
         }
     }
 }
@@ -548,7 +559,166 @@ pub fn load_worker_config(
         cfg.include = None;
     }
 
+    // Expand any nested [[mirrors.mirrors]] children into a flat list.
+    // Leaf-only mirrors with no children pass through unchanged.
+    if let Some(mirrors) = cfg.mirrors.take() {
+        cfg.mirrors = Some(flatten_mirrors(mirrors));
+    }
+
     Ok(cfg)
+}
+
+// ─── Mirror-tree flattening ───────────────────────────────────────────────────
+
+/// Flatten a potentially-nested mirror list into a flat list of leaf mirrors.
+///
+/// Each mirror may contain a `[[mirrors.mirrors]]` array of children.
+/// Children inherit every unset `Option` field from their parent (Go's
+/// `mergo.Merge` with override semantics).  After flattening:
+/// - Only leaf nodes (mirrors with no children) appear in the result.
+/// - Every emitted mirror has `mirrors = None`.
+/// - `name` is never inherited — each leaf keeps its own value.
+pub fn flatten_mirrors(mirrors: Vec<MirrorConfig>) -> Vec<MirrorConfig> {
+    let mut result = Vec::new();
+    for mirror in mirrors {
+        flatten_recursive(None, mirror, &mut result);
+    }
+    result
+}
+
+fn flatten_recursive(
+    parent: Option<&MirrorConfig>,
+    mut mirror: MirrorConfig,
+    out: &mut Vec<MirrorConfig>,
+) {
+    // Take children out before merging so we don't inherit them downward.
+    let children = mirror.mirrors.take();
+
+    // Fill in any unset Option fields from the parent.
+    if let Some(p) = parent {
+        merge_from_parent(&mut mirror, p);
+    }
+
+    match children {
+        Some(kids) if !kids.is_empty() => {
+            // Interior node — recurse into children; this node is not emitted.
+            for child in kids {
+                flatten_recursive(Some(&mirror), child, out);
+            }
+        }
+        _ => {
+            // Leaf node — emit.
+            mirror.mirrors = None;
+            out.push(mirror);
+        }
+    }
+}
+
+macro_rules! inherit {
+    ($child:expr, $parent:expr, $($field:ident),+ $(,)?) => {
+        $(
+            if $child.$field.is_none() {
+                $child.$field = $parent.$field.clone();
+            }
+        )+
+    };
+}
+
+fn merge_retry(child: &mut MirrorConfig, parent: &MirrorConfig) {
+    if let Some(p) = &parent.retry {
+        let c = child.retry.get_or_insert(RetryStrategy {
+            retry: None,
+            timeout: None,
+            interval: None,
+        });
+        if c.retry.is_none() {
+            c.retry = p.retry;
+        }
+        if c.timeout.is_none() {
+            c.timeout = p.timeout;
+        }
+        if c.interval.is_none() {
+            c.interval = p.interval;
+        }
+    }
+}
+
+fn merge_exec_on_status(child: &mut MirrorConfig, parent: &MirrorConfig) {
+    if let Some(p) = &parent.exec_on_status {
+        let c = child.exec_on_status.get_or_insert(ExecOnStatus {
+            exec_on_success: None,
+            exec_on_failure: None,
+        });
+        if c.exec_on_success.is_none() {
+            c.exec_on_success = p.exec_on_success.clone();
+        }
+        if c.exec_on_failure.is_none() {
+            c.exec_on_failure = p.exec_on_failure.clone();
+        }
+    }
+}
+
+fn merge_exec_on_status_extra(child: &mut MirrorConfig, parent: &MirrorConfig) {
+    if let Some(p) = &parent.exec_on_status_extra {
+        let c = child.exec_on_status_extra.get_or_insert(ExecOnStatusExtra {
+            exec_on_success_extra: None,
+            exec_on_failure_extra: None,
+        });
+        if c.exec_on_success_extra.is_none() {
+            c.exec_on_success_extra = p.exec_on_success_extra.clone();
+        }
+        if c.exec_on_failure_extra.is_none() {
+            c.exec_on_failure_extra = p.exec_on_failure_extra.clone();
+        }
+    }
+}
+
+/// Copy unset fields from `parent` into `child`.
+///
+/// `name` and `mirrors` are intentionally excluded: each mirror owns its name,
+/// and `mirrors` (children) was already taken before this call.
+///
+/// The flattened sub-structs (`retry`, `exec_on_status`, `exec_on_status_extra`)
+/// are handled field-by-field because serde's flatten deserialization always
+/// produces `Some(T { all_none })` even when none of T's keys appear in the
+/// TOML, so a simple `is_none()` guard would never fire on the child.
+#[allow(clippy::cognitive_complexity)]
+fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
+    // Merge flattened sub-struct fields individually; see note in the doc
+    // comment above for why a simple is_none() guard won't work here.
+    merge_retry(child, parent);
+    merge_exec_on_status(child, parent);
+    merge_exec_on_status_extra(child, parent);
+
+    inherit!(
+        child,
+        parent,
+        provider,
+        upstream,
+        use_ipv6,
+        use_ipv4,
+        mirror_dir,
+        mirror_subdir,
+        mirror_type,
+        log_dir,
+        env,
+        role,
+        command,
+        fail_on_match,
+        size_pattern,
+        exclude_file,
+        username,
+        password,
+        rsync_no_timeout,
+        rsync_timeout,
+        rsync_options,
+        rsync_override,
+        rsync_override_only,
+        stage1_profile,
+        memory_limit,
+        success_exit_codes,
+        rsync_success_exit_codes,
+    );
 }
 
 /// Expand `pattern` via glob, parse each matched file as a `MirrorFragment`,
