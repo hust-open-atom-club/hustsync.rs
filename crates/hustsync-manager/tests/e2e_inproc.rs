@@ -83,6 +83,7 @@ fn worker_config(
         }),
         manager: Some(WorkerManagerConfig {
             api_base: Some(format!("http://{}", manager_addr)),
+            api_base_list: None,
             token: None,
             ca_cert: None,
         }),
