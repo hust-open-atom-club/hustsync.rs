@@ -4,8 +4,10 @@ use hustsync_internal::msg::{MirrorStatus, WorkerStatus};
 use thiserror::Error;
 
 use crate::database::db_redb::RedbAdapter;
+use crate::database::db_redis::RedisAdapter;
 
 mod db_redb;
+mod db_redis;
 
 pub(super) const WORKER_BUCKETKEY: &str = "workers";
 pub(super) const STATUS_BUCKETKEY: &str = "mirror_status";
@@ -13,6 +15,7 @@ pub(super) const STATUS_BUCKETKEY: &str = "mirror_status";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbType {
     Redb,
+    Redis,
 }
 
 impl FromStr for DbType {
@@ -20,6 +23,7 @@ impl FromStr for DbType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "redb" => Ok(DbType::Redb),
+            "redis" => Ok(DbType::Redis),
             _ => Err(AdapterError::UnsupportedDbType(s.into())),
         }
     }
@@ -47,6 +51,8 @@ pub enum AdapterError {
     RdbCommitError(#[from] redb::CommitError),
     #[error(transparent)]
     RdbStorageError(#[from] redb::StorageError),
+    #[error("redis error: {0}")]
+    RedisError(String),
 }
 
 pub trait DbAdapterTrait: Send + Sync {
@@ -82,6 +88,10 @@ pub fn make_db_adapter(
         DbType::Redb => {
             let db = redb::Database::create(db_file.as_ref())?;
             Box::new(RedbAdapter { db })
+        }
+        DbType::Redis => {
+            let adapter = RedisAdapter::new(db_file.as_ref())?;
+            Box::new(adapter)
         }
     };
     Ok(adapter)
