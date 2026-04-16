@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -10,19 +8,16 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-#[cfg(unix)]
-use nix::sys::signal::{self, Signal};
-#[cfg(unix)]
-use nix::unistd::Pid;
-
 use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
 
-use super::{MirrorProvider, ProviderError, ProviderType, RunContext, tail_log_file};
+use super::{
+    CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
+    impl_provider_getters, inject_provider_env, log_provider_failure,
+};
 
 pub struct RsyncProviderConfig {
-    pub name: String,
+    pub common: CommonProviderConfig,
     pub command: String,
-    pub upstream_url: String,
     pub username: Option<String>,
     pub password: Option<String>,
     pub exclude_file: Option<String>,
@@ -32,16 +27,8 @@ pub struct RsyncProviderConfig {
     pub rsync_override_only: bool,
     pub rsync_no_timeout: bool,
     pub rsync_timeout: Option<u32>,
-    pub env: HashMap<String, String>,
-    pub working_dir: String,
-    pub log_dir: String,
-    pub log_file: String,
     pub use_ipv6: bool,
     pub use_ipv4: bool,
-    pub interval: Duration,
-    pub retry: u32,
-    pub timeout: Duration,
-    pub is_master: bool,
 }
 
 pub struct RsyncProvider {
@@ -53,7 +40,7 @@ pub struct RsyncProvider {
 
 impl RsyncProvider {
     pub fn new(mut config: RsyncProviderConfig) -> Result<Self, ProviderError> {
-        if !config.upstream_url.ends_with('/') {
+        if !config.common.upstream_url.ends_with('/') {
             return Err(ProviderError::Config(
                 "rsync upstream URL should end with /".into(),
             ));
@@ -63,8 +50,8 @@ impl RsyncProvider {
                 "rsync_override_only is set but no rsync_override provided".into(),
             ));
         }
-        if config.retry == 0 {
-            config.retry = 2;
+        if config.common.retry == 0 {
+            config.common.retry = 2;
         }
         if config.command.is_empty() {
             config.command = "rsync".to_string();
@@ -123,8 +110,8 @@ impl RsyncProvider {
         }
 
         let mut args = options;
-        args.push(self.config.upstream_url.clone());
-        args.push(self.config.working_dir.clone());
+        args.push(self.config.common.upstream_url.clone());
+        args.push(self.config.common.working_dir.clone());
 
         args
     }
@@ -132,47 +119,13 @@ impl RsyncProvider {
 
 #[async_trait]
 impl MirrorProvider for RsyncProvider {
-    fn name(&self) -> &str {
-        &self.config.name
-    }
-
-    fn upstream(&self) -> &str {
-        &self.config.upstream_url
-    }
-
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Rsync
-    }
-
-    fn interval(&self) -> Duration {
-        self.config.interval
-    }
-
-    fn retry(&self) -> u32 {
-        self.config.retry
-    }
-
-    fn timeout(&self) -> Duration {
-        self.config.timeout
-    }
-
-    fn working_dir(&self) -> &Path {
-        Path::new(&self.config.working_dir)
-    }
-
-    fn log_dir(&self) -> &Path {
-        Path::new(&self.config.log_dir)
-    }
-
-    fn log_file(&self) -> &Path {
-        Path::new(&self.config.log_file)
-    }
+    impl_provider_getters!(RsyncProvider, ProviderType::Rsync);
 
     async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
         if ctx.attempt > 1 {
             tracing::debug!(
                 "Rsync provider {} re-entering on attempt {}",
-                self.config.name,
+                self.config.common.name,
                 ctx.attempt
             );
         }
@@ -189,8 +142,8 @@ impl MirrorProvider for RsyncProvider {
             *size_guard = None;
         }
 
-        create_dir_all(&self.config.working_dir).await?;
-        create_dir_all(&self.config.log_dir).await?;
+        create_dir_all(&self.config.common.working_dir).await?;
+        create_dir_all(&self.config.common.log_dir).await?;
 
         // Loglimit (or any pre_exec hook) may have rotated the log path;
         // honor it before opening the file handle.
@@ -198,7 +151,7 @@ impl MirrorProvider for RsyncProvider {
             .env
             .get("TUNASYNC_LOG_FILE")
             .cloned()
-            .unwrap_or_else(|| self.config.log_file.clone());
+            .unwrap_or_else(|| self.config.common.log_file.clone());
 
         let mut log_file = File::create(&effective_log_file).await?;
         let std_out_log = log_file.try_clone().await?.into_std().await;
@@ -207,7 +160,7 @@ impl MirrorProvider for RsyncProvider {
         let mut cmd = Command::new(&self.config.command);
         cmd.args(self.build_args());
 
-        cmd.current_dir(&self.config.working_dir)
+        cmd.current_dir(&self.config.common.working_dir)
             .stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
 
@@ -223,24 +176,9 @@ impl MirrorProvider for RsyncProvider {
             cmd.env("RSYNC_PASSWORD", password);
         }
 
-        // Standard hustsync env vars
-        cmd.env("HUSTSYNC_MIRROR_NAME", &self.config.name)
-            .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
-            .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
-            .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
-            .env("HUSTSYNC_LOG_FILE", &effective_log_file);
+        inject_provider_env(&mut cmd, &self.config.common, &effective_log_file, &ctx.env);
 
-        // Per-mirror config env
-        for (k, v) in &self.config.env {
-            cmd.env(k, v);
-        }
-
-        // Hook-injected env wins over everything above
-        for (k, v) in &ctx.env {
-            cmd.env(k, v);
-        }
-
-        tracing::info!("Starting rsync provider for {}", self.config.name);
+        tracing::info!("Starting rsync provider for {}", self.config.common.name);
 
         let mut spawned_child = match cmd.spawn() {
             Ok(child) => child,
@@ -260,7 +198,7 @@ impl MirrorProvider for RsyncProvider {
             });
         }
 
-        let result = if self.config.timeout == Duration::ZERO {
+        let result = if self.config.common.timeout == Duration::ZERO {
             // Timeout disabled — still honour cancellation
             tokio::select! {
                 wait_res = spawned_child.wait() => {
@@ -277,12 +215,7 @@ impl MirrorProvider for RsyncProvider {
                                     let _ = log_file.write_all(b"\n").await;
                                 }
                                 let msg = msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                                let tail = tail_log_file(&effective_log_file, 5).await;
-                                if tail.is_empty() {
-                                    tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
-                                } else {
-                                    tracing::error!("Rsync failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
-                                }
+                                log_provider_failure("Rsync", &self.config.common.name, &msg, &effective_log_file).await;
                                 Err(ProviderError::Execution { code, msg })
                             }
                         }
@@ -290,14 +223,14 @@ impl MirrorProvider for RsyncProvider {
                     }
                 }
                 _ = ctx.cancel.cancelled() => {
-                    tracing::warn!("Rsync provider {} cancelled", self.config.name);
+                    tracing::warn!("Rsync provider {} cancelled", self.config.common.name);
                     let _ = self.terminate().await;
                     let _ = spawned_child.wait().await;
                     Err(ProviderError::Terminated)
                 }
             }
         } else {
-            match timeout(self.config.timeout, async {
+            match timeout(self.config.common.timeout, async {
                 tokio::select! {
                     wait_res = spawned_child.wait() => wait_res.map(Some),
                     _ = ctx.cancel.cancelled() => Ok(None),
@@ -318,28 +251,23 @@ impl MirrorProvider for RsyncProvider {
                         }
                         let msg =
                             msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                        let tail = tail_log_file(&effective_log_file, 5).await;
-                        if tail.is_empty() {
-                            tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
-                        } else {
-                            tracing::error!("Rsync failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
-                        }
+                        log_provider_failure("Rsync", &self.config.common.name, &msg, &effective_log_file).await;
                         Err(ProviderError::Execution { code, msg })
                     }
                 }
                 Ok(Ok(None)) => {
                     // cancelled
-                    tracing::warn!("Rsync provider {} cancelled", self.config.name);
+                    tracing::warn!("Rsync provider {} cancelled", self.config.common.name);
                     let _ = self.terminate().await;
                     let _ = spawned_child.wait().await;
                     Err(ProviderError::Terminated)
                 }
                 Ok(Err(e)) => Err(ProviderError::Io(e)),
                 Err(_elapsed) => {
-                    tracing::warn!("Timeout occurred for {}", self.config.name);
+                    tracing::warn!("Timeout occurred for {}", self.config.common.name);
                     let _ = self.terminate().await;
                     let _ = spawned_child.wait().await;
-                    Err(ProviderError::Timeout(self.config.timeout))
+                    Err(ProviderError::Timeout(self.config.common.timeout))
                 }
             }
         };
@@ -358,31 +286,21 @@ impl MirrorProvider for RsyncProvider {
     }
 
     async fn terminate(&self) -> Result<(), ProviderError> {
-        let pid = self.running_pgid.load(Ordering::Acquire);
-        if pid != 0 {
-            tracing::warn!("Terminating rsync provider for {}", self.config.name);
-            #[cfg(unix)]
-            {
-                let pgid = Pid::from_raw(-i32::try_from(pid).unwrap_or(i32::MAX));
-                // Give the process group a chance to clean up before forcing death.
-                // Mirrors Go worker/runner.go: SIGTERM → 2s wait → SIGKILL.
-                let _ = signal::kill(pgid, Signal::SIGTERM);
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                // SIGKILL after an already-exited group returns ESRCH — harmless.
-                if let Err(e) = signal::kill(pgid, Signal::SIGKILL) {
-                    tracing::debug!("Failed to send SIGKILL to pgid {}: {}", pgid, e);
-                }
+        #[cfg(unix)]
+        {
+            if self.running_pgid.load(Ordering::Acquire) != 0 {
+                tracing::warn!(
+                    "Terminating rsync provider for {}",
+                    self.config.common.name
+                );
             }
+            super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
         }
         Ok(())
     }
 
     async fn data_size(&self) -> Option<String> {
         self.data_size.lock().await.clone()
-    }
-
-    fn is_master(&self) -> bool {
-        self.config.is_master
     }
 }
 
@@ -392,32 +310,64 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    #[test]
-    fn test_rsync_args_basic() {
-        let config = RsyncProviderConfig {
-            name: "test".to_string(),
-            command: "rsync".to_string(),
-            upstream_url: "rsync://example.com/test/".to_string(),
+    fn make_config(
+        upstream_url: &str,
+        rsync_override: Option<Vec<String>>,
+        rsync_override_only: bool,
+        rsync_no_timeout: bool,
+        rsync_timeout: Option<u32>,
+        use_ipv6: bool,
+        use_ipv4: bool,
+        rsync_options: Vec<String>,
+        global_options: Vec<String>,
+        exclude_file: Option<String>,
+        command: &str,
+        retry: u32,
+    ) -> RsyncProviderConfig {
+        RsyncProviderConfig {
+            common: CommonProviderConfig {
+                name: "test".to_string(),
+                upstream_url: upstream_url.to_string(),
+                working_dir: "/tmp/test".to_string(),
+                log_dir: "/tmp/log".to_string(),
+                log_file: "/tmp/log/test.log".to_string(),
+                interval: Duration::from_secs(60),
+                retry,
+                timeout: Duration::from_secs(3600),
+                env: HashMap::new(),
+                is_master: true,
+            },
+            command: command.to_string(),
             username: None,
             password: None,
-            exclude_file: None,
-            rsync_options: vec![],
-            global_options: vec![],
-            rsync_override: None,
-            rsync_override_only: false,
-            rsync_no_timeout: false,
-            rsync_timeout: None,
-            env: HashMap::new(),
-            working_dir: "/tmp/test".to_string(),
-            log_dir: "/tmp/log".to_string(),
-            log_file: "/tmp/log/test.log".to_string(),
-            use_ipv6: false,
-            use_ipv4: false,
-            interval: Duration::from_secs(60),
-            retry: 2,
-            timeout: Duration::from_secs(3600),
-            is_master: true,
-        };
+            exclude_file,
+            rsync_options,
+            global_options,
+            rsync_override,
+            rsync_override_only,
+            rsync_no_timeout,
+            rsync_timeout,
+            use_ipv6,
+            use_ipv4,
+        }
+    }
+
+    #[test]
+    fn test_rsync_args_basic() {
+        let config = make_config(
+            "rsync://example.com/test/",
+            None,
+            false,
+            false,
+            None,
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            "rsync",
+            2,
+        );
         let provider = RsyncProvider::new(config).unwrap();
         let args = provider.build_args();
 
@@ -430,30 +380,20 @@ mod tests {
 
     #[test]
     fn test_rsync_args_override() {
-        let config = RsyncProviderConfig {
-            name: "test".to_string(),
-            command: "rsync".to_string(),
-            upstream_url: "rsync://example.com/test/".to_string(),
-            username: None,
-            password: None,
-            exclude_file: None,
-            rsync_options: vec![],
-            global_options: vec![],
-            rsync_override: Some(vec!["-az".to_string()]),
-            rsync_override_only: true,
-            rsync_no_timeout: false,
-            rsync_timeout: None,
-            env: HashMap::new(),
-            working_dir: "/tmp/test".to_string(),
-            log_dir: "/tmp/log".to_string(),
-            log_file: "/tmp/log/test.log".to_string(),
-            use_ipv6: false,
-            use_ipv4: false,
-            interval: Duration::from_secs(60),
-            retry: 2,
-            timeout: Duration::from_secs(3600),
-            is_master: true,
-        };
+        let config = make_config(
+            "rsync://example.com/test/",
+            Some(vec!["-az".to_string()]),
+            true,
+            false,
+            None,
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            "rsync",
+            2,
+        );
         let provider = RsyncProvider::new(config).unwrap();
         let args = provider.build_args();
 
@@ -465,30 +405,20 @@ mod tests {
 
     #[test]
     fn test_rsync_args_ipv6_and_exclude() {
-        let config = RsyncProviderConfig {
-            name: "test".to_string(),
-            command: "rsync".to_string(),
-            upstream_url: "rsync://example.com/test/".to_string(),
-            username: None,
-            password: None,
-            exclude_file: Some("/tmp/exclude.txt".to_string()),
-            rsync_options: vec!["--bwlimit=1000".to_string()],
-            global_options: vec!["--global".to_string()],
-            rsync_override: None,
-            rsync_override_only: false,
-            rsync_no_timeout: true,
-            rsync_timeout: None,
-            env: HashMap::new(),
-            working_dir: "/tmp/test".to_string(),
-            log_dir: "/tmp/log".to_string(),
-            log_file: "/tmp/log/test.log".to_string(),
-            use_ipv6: true,
-            use_ipv4: false,
-            interval: Duration::from_secs(60),
-            retry: 2,
-            timeout: Duration::from_secs(3600),
-            is_master: true,
-        };
+        let config = make_config(
+            "rsync://example.com/test/",
+            None,
+            false,
+            true,
+            None,
+            true,
+            false,
+            vec!["--bwlimit=1000".to_string()],
+            vec!["--global".to_string()],
+            Some("/tmp/exclude.txt".to_string()),
+            "rsync",
+            2,
+        );
         let provider = RsyncProvider::new(config).unwrap();
         let args = provider.build_args();
 
@@ -502,61 +432,40 @@ mod tests {
 
     #[test]
     fn test_rsync_upstream_validation() {
-        let config = RsyncProviderConfig {
-            name: "test".to_string(),
-            command: "rsync".to_string(),
-            upstream_url: "rsync://example.com/test".to_string(), // No trailing slash
-            username: None,
-            password: None,
-            exclude_file: None,
-            rsync_options: vec![],
-            global_options: vec![],
-            rsync_override: None,
-            rsync_override_only: false,
-            rsync_no_timeout: false,
-            rsync_timeout: None,
-            env: HashMap::new(),
-            working_dir: "/tmp/test".to_string(),
-            log_dir: "/tmp/log".to_string(),
-            log_file: "/tmp/log/test.log".to_string(),
-            use_ipv6: false,
-            use_ipv4: false,
-            interval: Duration::from_secs(60),
-            retry: 2,
-            timeout: Duration::from_secs(3600),
-            is_master: true,
-        };
+        let config = make_config(
+            "rsync://example.com/test", // No trailing slash
+            None,
+            false,
+            false,
+            None,
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            "rsync",
+            2,
+        );
         let res = RsyncProvider::new(config);
         assert!(res.is_err());
     }
 
     #[test]
     fn test_rsync_defaults_are_applied_in_provider() {
-        let config = RsyncProviderConfig {
-            name: "test".to_string(),
-            command: "".to_string(),
-            upstream_url: "rsync://example.com/test/".to_string(),
-            username: None,
-            password: None,
-            exclude_file: None,
-            rsync_options: vec![],
-            global_options: vec![],
-            rsync_override: None,
-            rsync_override_only: false,
-            rsync_no_timeout: false,
-            rsync_timeout: None,
-            env: HashMap::new(),
-            working_dir: "/tmp/test".to_string(),
-            log_dir: "/tmp/log".to_string(),
-            log_file: "/tmp/log/test.log".to_string(),
-            use_ipv6: false,
-            use_ipv4: false,
-            interval: Duration::from_secs(60),
-            retry: 0,
-            timeout: Duration::from_secs(3600),
-            is_master: true,
-        };
-
+        let config = make_config(
+            "rsync://example.com/test/",
+            None,
+            false,
+            false,
+            None,
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            "", // empty command — should default to "rsync"
+            0,  // retry=0 — should default to 2
+        );
         let provider = RsyncProvider::new(config).unwrap();
         assert_eq!(provider.config.command, "rsync");
         assert_eq!(provider.retry(), 2);
@@ -564,30 +473,20 @@ mod tests {
 
     #[test]
     fn test_rsync_override_only_requires_override() {
-        let config = RsyncProviderConfig {
-            name: "test".to_string(),
-            command: "rsync".to_string(),
-            upstream_url: "rsync://example.com/test/".to_string(),
-            username: None,
-            password: None,
-            exclude_file: None,
-            rsync_options: vec![],
-            global_options: vec![],
-            rsync_override: None,
-            rsync_override_only: true,
-            rsync_no_timeout: false,
-            rsync_timeout: None,
-            env: HashMap::new(),
-            working_dir: "/tmp/test".to_string(),
-            log_dir: "/tmp/log".to_string(),
-            log_file: "/tmp/log/test.log".to_string(),
-            use_ipv6: false,
-            use_ipv4: false,
-            interval: Duration::from_secs(60),
-            retry: 2,
-            timeout: Duration::from_secs(3600),
-            is_master: true,
-        };
+        let config = make_config(
+            "rsync://example.com/test/",
+            None, // no override provided
+            true, // but override_only=true
+            false,
+            None,
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            "rsync",
+            2,
+        );
 
         let res = RsyncProvider::new(config);
         match res {

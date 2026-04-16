@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use hustsync_worker::provider::rsync_provider::{RsyncProvider, RsyncProviderConfig};
-use hustsync_worker::provider::{MirrorProvider, ProviderError, RunContext};
+use hustsync_worker::provider::{CommonProviderConfig, MirrorProvider, ProviderError, RunContext};
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
@@ -74,9 +74,19 @@ struct FixtureConfig {
 /// assertions can be exercised separately.
 fn config_from_fixture(f: &ArgvFixture) -> RsyncProviderConfig {
     RsyncProviderConfig {
-        name: f.config.name.clone(),
+        common: CommonProviderConfig {
+            name: f.config.name.clone(),
+            upstream_url: f.config.upstream.clone(),
+            working_dir: f.config.working_dir.clone(),
+            log_dir: "/tmp/hustsync-test-logs".to_string(),
+            log_file: "/tmp/hustsync-test-logs/test.log".to_string(),
+            interval: Duration::from_secs(3600),
+            retry: 2,
+            timeout: Duration::from_secs(7200),
+            env: f.env.clone(),
+            is_master: true,
+        },
         command: "rsync".to_string(),
-        upstream_url: f.config.upstream.clone(),
         username: f.config.username.clone(),
         password: f.config.password.clone(),
         exclude_file: f.config.exclude_file.clone(),
@@ -86,16 +96,8 @@ fn config_from_fixture(f: &ArgvFixture) -> RsyncProviderConfig {
         rsync_override_only: f.config.rsync_override_only,
         rsync_no_timeout: false,
         rsync_timeout: None,
-        env: f.env.clone(),
-        working_dir: f.config.working_dir.clone(),
-        log_dir: "/tmp/hustsync-test-logs".to_string(),
-        log_file: "/tmp/hustsync-test-logs/test.log".to_string(),
         use_ipv6: f.config.use_ipv6,
         use_ipv4: f.config.use_ipv4,
-        interval: Duration::from_secs(3600),
-        retry: 2,
-        timeout: Duration::from_secs(7200),
-        is_master: true,
     }
 }
 
@@ -179,9 +181,19 @@ fn zero_rsync_timeout_falls_back_to_default_not_zero() {
     // rsync_timeout = Some(0) must be treated identically to None (default
     // 120 s). The Rust implementation uses `.filter(|&v| v > 0).unwrap_or(120)`.
     let config = RsyncProviderConfig {
-        name: "zero-timeout".to_string(),
+        common: CommonProviderConfig {
+            name: "zero-timeout".to_string(),
+            upstream_url: "rsync://example.com/repo/".to_string(),
+            working_dir: "/tmp/zero-timeout-test".to_string(),
+            log_dir: "/tmp/zero-timeout-test-logs".to_string(),
+            log_file: "/tmp/zero-timeout-test-logs/test.log".to_string(),
+            interval: Duration::from_secs(3600),
+            retry: 2,
+            timeout: Duration::from_secs(7200),
+            env: HashMap::new(),
+            is_master: true,
+        },
         command: "rsync".to_string(),
-        upstream_url: "rsync://example.com/repo/".to_string(),
         username: None,
         password: None,
         exclude_file: None,
@@ -191,16 +203,8 @@ fn zero_rsync_timeout_falls_back_to_default_not_zero() {
         rsync_override_only: false,
         rsync_no_timeout: false,
         rsync_timeout: Some(0),
-        env: HashMap::new(),
-        working_dir: "/tmp/zero-timeout-test".to_string(),
-        log_dir: "/tmp/zero-timeout-test-logs".to_string(),
-        log_file: "/tmp/zero-timeout-test-logs/test.log".to_string(),
         use_ipv6: false,
         use_ipv4: false,
-        interval: Duration::from_secs(3600),
-        retry: 2,
-        timeout: Duration::from_secs(7200),
-        is_master: true,
     };
     let provider = RsyncProvider::new(config).unwrap();
     let args = provider.build_args();
@@ -231,11 +235,22 @@ async fn run_returns_timeout_error_when_deadline_exceeded() {
     let log_file = format!("{}/run.log", working_dir);
 
     let config = RsyncProviderConfig {
-        name: "timeout-test".to_string(),
+        common: CommonProviderConfig {
+            name: "timeout-test".to_string(),
+            upstream_url: "rsync://example.com/repo/".to_string(),
+            working_dir,
+            log_dir,
+            log_file,
+            interval: Duration::from_secs(3600),
+            retry: 2,
+            // 1-second provider-level timeout — the job-actor wraps run() here.
+            timeout: Duration::from_secs(1),
+            env: HashMap::new(),
+            is_master: true,
+        },
         // Use `sh` as the executable with the sleep command as an override so
         // the binary validation in RsyncProvider::new does not reject it.
         command: "sh".to_string(),
-        upstream_url: "rsync://example.com/repo/".to_string(),
         username: None,
         password: None,
         exclude_file: None,
@@ -246,17 +261,8 @@ async fn run_returns_timeout_error_when_deadline_exceeded() {
         rsync_override_only: true,
         rsync_no_timeout: false,
         rsync_timeout: None,
-        env: HashMap::new(),
-        working_dir,
-        log_dir,
-        log_file,
         use_ipv6: false,
         use_ipv4: false,
-        interval: Duration::from_secs(3600),
-        retry: 2,
-        // 1-second provider-level timeout — the job-actor wraps run() here.
-        timeout: Duration::from_secs(1),
-        is_master: true,
     };
 
     let provider = RsyncProvider::new(config).unwrap();
@@ -288,9 +294,20 @@ async fn run_returns_terminated_on_cancel() {
     let log_file = format!("{}/run.log", working_dir);
 
     let config = RsyncProviderConfig {
-        name: "terminate-test".to_string(),
+        common: CommonProviderConfig {
+            name: "terminate-test".to_string(),
+            upstream_url: "rsync://example.com/repo/".to_string(),
+            working_dir,
+            log_dir,
+            log_file,
+            interval: Duration::from_secs(3600),
+            retry: 2,
+            // Disable provider-level timeout so only cancellation fires.
+            timeout: Duration::ZERO,
+            env: HashMap::new(),
+            is_master: true,
+        },
         command: "sh".to_string(),
-        upstream_url: "rsync://example.com/repo/".to_string(),
         username: None,
         password: None,
         exclude_file: None,
@@ -300,17 +317,8 @@ async fn run_returns_terminated_on_cancel() {
         rsync_override_only: true,
         rsync_no_timeout: false,
         rsync_timeout: None,
-        env: HashMap::new(),
-        working_dir,
-        log_dir,
-        log_file,
         use_ipv6: false,
         use_ipv4: false,
-        interval: Duration::from_secs(3600),
-        retry: 2,
-        // Disable provider-level timeout so only cancellation fires.
-        timeout: Duration::ZERO,
-        is_master: true,
     };
 
     use std::sync::Arc;

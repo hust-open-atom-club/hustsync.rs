@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -9,31 +7,20 @@ use tokio::fs::{File, create_dir_all};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-#[cfg(unix)]
-use nix::sys::signal::{self, Signal};
-#[cfg(unix)]
-use nix::unistd::Pid;
-
-use super::{MirrorProvider, ProviderError, ProviderType, RunContext, tail_log_file};
-
 use tokio::sync::Mutex;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use super::{
+    CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
+    impl_provider_getters, inject_provider_env, log_provider_failure,
+};
+
 pub struct CmdProviderConfig {
-    pub name: String,
-    pub upstream_url: String,
+    pub common: CommonProviderConfig,
     pub command: String,
-    pub working_dir: String,
-    pub log_dir: String,
-    pub log_file: String,
-    pub interval: Duration,
-    pub retry: u32,
-    pub timeout: Duration,
-    pub env: HashMap<String, String>,
     pub fail_on_match: Option<String>,
     pub size_pattern: Option<String>,
-    pub is_master: bool,
 }
 
 pub struct CmdProvider {
@@ -49,8 +36,8 @@ pub struct CmdProvider {
 
 impl CmdProvider {
     pub fn new(mut config: CmdProviderConfig) -> Result<Self, ProviderError> {
-        if config.retry == 0 {
-            config.retry = 2;
+        if config.common.retry == 0 {
+            config.common.retry = 2;
         }
 
         let cmd_args = shlex::split(&config.command)
@@ -83,47 +70,13 @@ impl CmdProvider {
 
 #[async_trait]
 impl MirrorProvider for CmdProvider {
-    fn name(&self) -> &str {
-        &self.config.name
-    }
-
-    fn upstream(&self) -> &str {
-        &self.config.upstream_url
-    }
-
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::Command
-    }
-
-    fn interval(&self) -> Duration {
-        self.config.interval
-    }
-
-    fn retry(&self) -> u32 {
-        self.config.retry
-    }
-
-    fn timeout(&self) -> Duration {
-        self.config.timeout
-    }
-
-    fn working_dir(&self) -> &Path {
-        Path::new(&self.config.working_dir)
-    }
-
-    fn log_dir(&self) -> &Path {
-        Path::new(&self.config.log_dir)
-    }
-
-    fn log_file(&self) -> &Path {
-        Path::new(&self.config.log_file)
-    }
+    impl_provider_getters!(CmdProvider, ProviderType::Command);
 
     async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
         if ctx.attempt > 1 {
             tracing::debug!(
                 "Cmd provider {} re-entering on attempt {}",
-                self.config.name,
+                self.config.common.name,
                 ctx.attempt
             );
         }
@@ -139,8 +92,8 @@ impl MirrorProvider for CmdProvider {
         }
 
         // Ensure directories exist
-        create_dir_all(&self.config.working_dir).await?;
-        create_dir_all(&self.config.log_dir).await?;
+        create_dir_all(&self.config.common.working_dir).await?;
+        create_dir_all(&self.config.common.log_dir).await?;
 
         // Loglimit hook (or any other pre_exec hook) may redirect the log
         // file to a rotated timestamped path; honor it via ctx.env before
@@ -150,7 +103,7 @@ impl MirrorProvider for CmdProvider {
             .env
             .get("TUNASYNC_LOG_FILE")
             .cloned()
-            .unwrap_or_else(|| self.config.log_file.clone());
+            .unwrap_or_else(|| self.config.common.log_file.clone());
 
         // Setup log file
         let log_file = File::create(&effective_log_file).await?;
@@ -162,7 +115,7 @@ impl MirrorProvider for CmdProvider {
             cmd.args(&self.cmd_args[1..]);
         }
 
-        cmd.current_dir(&self.config.working_dir)
+        cmd.current_dir(&self.config.common.working_dir)
             .stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
 
@@ -173,28 +126,15 @@ impl MirrorProvider for CmdProvider {
 
         // Inject both TUNASYNC_* (Go parity for existing mirror scripts) and
         // HUSTSYNC_* (Rust-port canonical names).  Both sets must stay in sync.
-        cmd.env("TUNASYNC_MIRROR_NAME", &self.config.name)
-            .env("TUNASYNC_WORKING_DIR", &self.config.working_dir)
-            .env("TUNASYNC_UPSTREAM_URL", &self.config.upstream_url)
-            .env("TUNASYNC_LOG_DIR", &self.config.log_dir)
-            .env("TUNASYNC_LOG_FILE", &effective_log_file)
-            .env("HUSTSYNC_MIRROR_NAME", &self.config.name)
-            .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
-            .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
-            .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
-            .env("HUSTSYNC_LOG_FILE", &effective_log_file);
+        cmd.env("TUNASYNC_MIRROR_NAME", &self.config.common.name)
+            .env("TUNASYNC_WORKING_DIR", &self.config.common.working_dir)
+            .env("TUNASYNC_UPSTREAM_URL", &self.config.common.upstream_url)
+            .env("TUNASYNC_LOG_DIR", &self.config.common.log_dir)
+            .env("TUNASYNC_LOG_FILE", &effective_log_file);
 
-        // Per-mirror config env
-        for (k, v) in &self.config.env {
-            cmd.env(k, v);
-        }
+        inject_provider_env(&mut cmd, &self.config.common, &effective_log_file, &ctx.env);
 
-        // Hook-injected env wins over everything above
-        for (k, v) in &ctx.env {
-            cmd.env(k, v);
-        }
-
-        tracing::info!("Starting command provider for {}", self.config.name);
+        tracing::info!("Starting command provider for {}", self.config.common.name);
 
         let mut spawned_child = cmd.spawn()?;
 
@@ -204,7 +144,7 @@ impl MirrorProvider for CmdProvider {
         }
 
         // Wait for the process to complete, respecting both timeout and cancellation
-        let result = if self.config.timeout == Duration::ZERO {
+        let result = if self.config.common.timeout == Duration::ZERO {
             tokio::select! {
                 wait_res = spawned_child.wait() => {
                     match wait_res {
@@ -214,12 +154,7 @@ impl MirrorProvider for CmdProvider {
                             } else {
                                 let code = status.code().unwrap_or(-1);
                                 let msg = format!("Command exited with status: {}", status);
-                                let tail = tail_log_file(&effective_log_file, 5).await;
-                                if tail.is_empty() {
-                                    tracing::error!("Cmd failed for {}: {}", self.config.name, msg);
-                                } else {
-                                    tracing::error!("Cmd failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
-                                }
+                                log_provider_failure("Cmd", &self.config.common.name, &msg, &effective_log_file).await;
                                 Err(ProviderError::Execution { code, msg })
                             }
                         }
@@ -227,14 +162,14 @@ impl MirrorProvider for CmdProvider {
                     }
                 }
                 _ = ctx.cancel.cancelled() => {
-                    tracing::warn!("Cmd provider {} cancelled", self.config.name);
+                    tracing::warn!("Cmd provider {} cancelled", self.config.common.name);
                     let _ = self.terminate().await;
                     let _ = spawned_child.wait().await;
                     Err(ProviderError::Terminated)
                 }
             }
         } else {
-            match timeout(self.config.timeout, async {
+            match timeout(self.config.common.timeout, async {
                 tokio::select! {
                     wait_res = spawned_child.wait() => wait_res.map(Some),
                     _ = ctx.cancel.cancelled() => Ok(None),
@@ -248,17 +183,12 @@ impl MirrorProvider for CmdProvider {
                     } else {
                         let code = status.code().unwrap_or(-1);
                         let msg = format!("Command exited with status: {}", status);
-                        let tail = tail_log_file(&effective_log_file, 5).await;
-                        if tail.is_empty() {
-                            tracing::error!("Cmd failed for {}: {}", self.config.name, msg);
-                        } else {
-                            tracing::error!("Cmd failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
-                        }
+                        log_provider_failure("Cmd", &self.config.common.name, &msg, &effective_log_file).await;
                         Err(ProviderError::Execution { code, msg })
                     }
                 }
                 Ok(Ok(None)) => {
-                    tracing::warn!("Cmd provider {} cancelled", self.config.name);
+                    tracing::warn!("Cmd provider {} cancelled", self.config.common.name);
                     let _ = self.terminate().await;
                     let _ = spawned_child.wait().await;
                     Err(ProviderError::Terminated)
@@ -266,11 +196,11 @@ impl MirrorProvider for CmdProvider {
                 Ok(Err(e)) => Err(ProviderError::Io(e)),
                 Err(_elapsed) => {
                     // Timeout occurred, kill the child explicitly
-                    tracing::warn!("Timeout occurred for {}", self.config.name);
+                    tracing::warn!("Timeout occurred for {}", self.config.common.name);
                     let _ = self.terminate().await;
                     // Wait for it to actually die after sending the signal
                     let _ = spawned_child.wait().await;
-                    Err(ProviderError::Timeout(self.config.timeout))
+                    Err(ProviderError::Timeout(self.config.common.timeout))
                 }
             }
         };
@@ -312,32 +242,21 @@ impl MirrorProvider for CmdProvider {
     }
 
     async fn terminate(&self) -> Result<(), ProviderError> {
-        let pid = self.running_pgid.load(Ordering::Acquire);
-        if pid != 0 {
-            tracing::warn!("Terminating command provider for {}", self.config.name);
-
-            #[cfg(unix)]
-            {
-                let pgid = Pid::from_raw(-i32::try_from(pid).unwrap_or(i32::MAX));
-                // Give the process group a chance to clean up before forcing death.
-                // Mirrors Go worker/runner.go: SIGTERM → 2s wait → SIGKILL.
-                let _ = signal::kill(pgid, Signal::SIGTERM);
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                // SIGKILL after an already-exited group returns ESRCH — harmless.
-                if let Err(e) = signal::kill(pgid, Signal::SIGKILL) {
-                    tracing::debug!("Failed to send SIGKILL to pgid {}: {}", pgid, e);
-                }
+        #[cfg(unix)]
+        {
+            if self.running_pgid.load(Ordering::Acquire) != 0 {
+                tracing::warn!(
+                    "Terminating command provider for {}",
+                    self.config.common.name
+                );
             }
+            super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
         }
         Ok(())
     }
 
     async fn data_size(&self) -> Option<String> {
         self.data_size.lock().await.clone()
-    }
-
-    fn is_master(&self) -> bool {
-        self.config.is_master
     }
 }
 
@@ -356,19 +275,21 @@ mod tests {
         let dir = tempdir().unwrap();
         let log_file = dir.path().join("test.log");
         let config = CmdProviderConfig {
-            name: name.to_string(),
-            upstream_url: "http://example.com".to_string(),
+            common: CommonProviderConfig {
+                name: name.to_string(),
+                upstream_url: "http://example.com".to_string(),
+                working_dir: dir.path().to_str().unwrap().to_string(),
+                log_dir: dir.path().to_str().unwrap().to_string(),
+                log_file: log_file.to_str().unwrap().to_string(),
+                interval: Duration::from_secs(60),
+                retry: 1,
+                timeout: Duration::from_secs(timeout_secs),
+                env: HashMap::new(),
+                is_master: true,
+            },
             command: command.to_string(),
-            working_dir: dir.path().to_str().unwrap().to_string(),
-            log_dir: dir.path().to_str().unwrap().to_string(),
-            log_file: log_file.to_str().unwrap().to_string(),
-            interval: Duration::from_secs(60),
-            retry: 1,
-            timeout: Duration::from_secs(timeout_secs),
-            env: HashMap::new(),
             fail_on_match: None,
             size_pattern: None,
-            is_master: true,
         };
         (CmdProvider::new(config).unwrap(), dir)
     }
@@ -379,7 +300,7 @@ mod tests {
         let res = provider.run(RunContext::default()).await;
         assert!(res.is_ok());
 
-        let log: String = tokio::fs::read_to_string(&provider.config.log_file)
+        let log: String = tokio::fs::read_to_string(&provider.config.common.log_file)
             .await
             .unwrap();
         assert!(log.contains("hello_world"));
@@ -390,11 +311,12 @@ mod tests {
         let (mut provider, _dir) = setup_provider("test_env", "sh -c 'echo $TEST_VAR'", 5);
         provider
             .config
+            .common
             .env
             .insert("TEST_VAR".to_string(), "env_works".to_string());
         let _ = provider.run(RunContext::default()).await;
 
-        let log: String = tokio::fs::read_to_string(&provider.config.log_file)
+        let log: String = tokio::fs::read_to_string(&provider.config.common.log_file)
             .await
             .unwrap();
         assert!(log.contains("env_works"));

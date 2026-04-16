@@ -16,7 +16,7 @@ mod cmd_provider_contract {
     use std::time::Duration;
 
     use hustsync_worker::provider::cmd_provider::{CmdProvider, CmdProviderConfig};
-    use hustsync_worker::provider::{MirrorProvider, ProviderError, RunContext};
+    use hustsync_worker::provider::{CommonProviderConfig, MirrorProvider, ProviderError, RunContext};
     use tempfile::tempdir;
     use tokio_util::sync::CancellationToken;
 
@@ -31,19 +31,21 @@ mod cmd_provider_contract {
     ) -> CmdProvider {
         let log_file = dir.path().join("run.log");
         let cfg = CmdProviderConfig {
-            name: name.to_string(),
-            upstream_url: "https://upstream.example/".to_string(),
+            common: CommonProviderConfig {
+                name: name.to_string(),
+                upstream_url: "https://upstream.example/".to_string(),
+                working_dir: dir.path().to_str().unwrap().to_string(),
+                log_dir: dir.path().to_str().unwrap().to_string(),
+                log_file: log_file.to_str().unwrap().to_string(),
+                interval: Duration::from_secs(3600),
+                retry: 1,
+                timeout,
+                env: HashMap::new(),
+                is_master: true,
+            },
             command: command.to_string(),
-            working_dir: dir.path().to_str().unwrap().to_string(),
-            log_dir: dir.path().to_str().unwrap().to_string(),
-            log_file: log_file.to_str().unwrap().to_string(),
-            interval: Duration::from_secs(3600),
-            retry: 1,
-            timeout,
-            env: HashMap::new(),
             fail_on_match,
             size_pattern,
-            is_master: true,
         };
         CmdProvider::new(cfg).unwrap()
     }

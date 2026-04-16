@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -10,14 +9,12 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-#[cfg(unix)]
-use nix::sys::signal::{self, Signal};
-#[cfg(unix)]
-use nix::unistd::Pid;
-
 use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
 
-use super::{MirrorProvider, ProviderError, ProviderType, RunContext, tail_log_file};
+use super::{
+    CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
+    impl_provider_getters, inject_provider_env, log_provider_failure,
+};
 
 /// Stage-1 option sets keyed by profile name.
 ///
@@ -64,26 +61,17 @@ fn stage1_profiles() -> HashMap<&'static str, Vec<&'static str>> {
 /// stage-1 filter set. The stage-2 argv is the standard rsync base
 /// plus `extra_options` — identical to `RsyncProvider`.
 pub struct TwoStageRsyncProviderConfig {
-    pub name: String,
+    pub common: CommonProviderConfig,
     pub command: String,
     pub stage1_profile: String,
-    pub upstream_url: String,
     pub username: Option<String>,
     pub password: Option<String>,
     pub exclude_file: Option<String>,
     pub extra_options: Vec<String>,
     pub rsync_no_timeout: bool,
     pub rsync_timeout: Option<u32>,
-    pub env: HashMap<String, String>,
-    pub working_dir: String,
-    pub log_dir: String,
-    pub log_file: String,
     pub use_ipv6: bool,
     pub use_ipv4: bool,
-    pub interval: Duration,
-    pub retry: u32,
-    pub timeout: Duration,
-    pub is_master: bool,
 }
 
 /// Two-stage rsync provider.
@@ -104,13 +92,13 @@ pub struct TwoStageRsyncProvider {
 
 impl TwoStageRsyncProvider {
     pub fn new(mut config: TwoStageRsyncProviderConfig) -> Result<Self, ProviderError> {
-        if !config.upstream_url.ends_with('/') {
+        if !config.common.upstream_url.ends_with('/') {
             return Err(ProviderError::Config(
                 "rsync upstream URL should end with /".into(),
             ));
         }
-        if config.retry == 0 {
-            config.retry = 2;
+        if config.common.retry == 0 {
+            config.common.retry = 2;
         }
         if config.command.is_empty() {
             config.command = "rsync".to_string();
@@ -215,8 +203,8 @@ impl TwoStageRsyncProvider {
         }
 
         // Positional args
-        options.push(self.config.upstream_url.clone());
-        options.push(self.config.working_dir.clone());
+        options.push(self.config.common.upstream_url.clone());
+        options.push(self.config.common.working_dir.clone());
 
         Ok(options)
     }
@@ -239,7 +227,7 @@ impl TwoStageRsyncProvider {
 
         let mut cmd = Command::new(&self.config.command);
         cmd.args(&args)
-            .current_dir(&self.config.working_dir)
+            .current_dir(&self.config.common.working_dir)
             .stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
 
@@ -255,24 +243,11 @@ impl TwoStageRsyncProvider {
             cmd.env("RSYNC_PASSWORD", password);
         }
 
-        cmd.env("HUSTSYNC_MIRROR_NAME", &self.config.name)
-            .env("HUSTSYNC_WORKING_DIR", &self.config.working_dir)
-            .env("HUSTSYNC_UPSTREAM_URL", &self.config.upstream_url)
-            .env("HUSTSYNC_LOG_DIR", &self.config.log_dir)
-            .env("HUSTSYNC_LOG_FILE", &self.config.log_file);
-
-        for (k, v) in &self.config.env {
-            cmd.env(k, v);
-        }
-
-        // Hook-injected env wins over everything above
-        for (k, v) in &ctx.env {
-            cmd.env(k, v);
-        }
+        inject_provider_env(&mut cmd, &self.config.common, effective_log_file, &ctx.env);
 
         tracing::info!(
             "Starting two-stage-rsync provider for {} (stage {})",
-            self.config.name,
+            self.config.common.name,
             stage
         );
 
@@ -311,23 +286,8 @@ impl TwoStageRsyncProvider {
                             let msg = msg.unwrap_or_else(|| {
                                 format!("rsync stage {} exited with status: {}", stage, status)
                             });
-                            let tail = tail_log_file(effective_log_file, 5).await;
-                            if tail.is_empty() {
-                                tracing::error!(
-                                    "Two-stage-rsync stage {} failed for {}: {}",
-                                    stage,
-                                    self.config.name,
-                                    msg
-                                );
-                            } else {
-                                tracing::error!(
-                                    "Two-stage-rsync stage {} failed for {}: {}\n  log tail:\n{}",
-                                    stage,
-                                    self.config.name,
-                                    msg,
-                                    tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n")
-                                );
-                            }
+                            let kind = format!("Two-stage-rsync stage {stage}");
+                            log_provider_failure(&kind, &self.config.common.name, &msg, effective_log_file).await;
                             Err(ProviderError::Execution { code, msg })
                         }
                     }
@@ -337,7 +297,7 @@ impl TwoStageRsyncProvider {
             _ = ctx.cancel.cancelled() => {
                 tracing::warn!(
                     "Two-stage-rsync provider {} cancelled during stage {}",
-                    self.config.name,
+                    self.config.common.name,
                     stage
                 );
                 let _ = self.terminate().await;
@@ -355,47 +315,13 @@ impl TwoStageRsyncProvider {
 
 #[async_trait]
 impl MirrorProvider for TwoStageRsyncProvider {
-    fn name(&self) -> &str {
-        &self.config.name
-    }
-
-    fn upstream(&self) -> &str {
-        &self.config.upstream_url
-    }
-
-    fn provider_type(&self) -> ProviderType {
-        ProviderType::TwoStageRsync
-    }
-
-    fn interval(&self) -> Duration {
-        self.config.interval
-    }
-
-    fn retry(&self) -> u32 {
-        self.config.retry
-    }
-
-    fn timeout(&self) -> Duration {
-        self.config.timeout
-    }
-
-    fn working_dir(&self) -> &Path {
-        Path::new(&self.config.working_dir)
-    }
-
-    fn log_dir(&self) -> &Path {
-        Path::new(&self.config.log_dir)
-    }
-
-    fn log_file(&self) -> &Path {
-        Path::new(&self.config.log_file)
-    }
+    impl_provider_getters!(TwoStageRsyncProvider, ProviderType::TwoStageRsync);
 
     async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
         if ctx.attempt > 1 {
             tracing::debug!(
                 "Two-stage-rsync provider {} re-entering on attempt {}",
-                self.config.name,
+                self.config.common.name,
                 ctx.attempt
             );
         }
@@ -412,8 +338,8 @@ impl MirrorProvider for TwoStageRsyncProvider {
             *size_guard = None;
         }
 
-        create_dir_all(&self.config.working_dir).await?;
-        create_dir_all(&self.config.log_dir).await?;
+        create_dir_all(&self.config.common.working_dir).await?;
+        create_dir_all(&self.config.common.log_dir).await?;
 
         // Pre_exec hook may rotate the log path; honor `ctx.env`
         // before opening the file handle. Fall back to config default.
@@ -421,7 +347,7 @@ impl MirrorProvider for TwoStageRsyncProvider {
             .env
             .get("TUNASYNC_LOG_FILE")
             .cloned()
-            .unwrap_or_else(|| self.config.log_file.clone());
+            .unwrap_or_else(|| self.config.common.log_file.clone());
 
         // Both stages append to the same log file; stage-2 output follows
         // stage-1 without a separator to match Go's `prepareLogFile`.
@@ -445,15 +371,15 @@ impl MirrorProvider for TwoStageRsyncProvider {
                 .await
         };
 
-        let result = if self.config.timeout == Duration::ZERO {
+        let result = if self.config.common.timeout == Duration::ZERO {
             run_body.await
         } else {
-            match timeout(self.config.timeout, run_body).await {
+            match timeout(self.config.common.timeout, run_body).await {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
-                    tracing::warn!("Timeout occurred for {}", self.config.name);
+                    tracing::warn!("Timeout occurred for {}", self.config.common.name);
                     let _ = self.terminate().await;
-                    Err(ProviderError::Timeout(self.config.timeout))
+                    Err(ProviderError::Timeout(self.config.common.timeout))
                 }
             }
         };
@@ -472,33 +398,21 @@ impl MirrorProvider for TwoStageRsyncProvider {
     }
 
     async fn terminate(&self) -> Result<(), ProviderError> {
-        let pid = self.running_pgid.load(Ordering::Acquire);
-        if pid != 0 && pid != u32::MAX {
-            tracing::warn!(
-                "Terminating two-stage-rsync provider for {}",
-                self.config.name
-            );
-            #[cfg(unix)]
-            {
-                let pgid = Pid::from_raw(-i32::try_from(pid).unwrap_or(i32::MAX));
-                // Give the process group a chance to clean up before forcing death.
-                // Mirrors Go worker/runner.go: SIGTERM → 2s wait → SIGKILL.
-                let _ = signal::kill(pgid, Signal::SIGTERM);
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                // SIGKILL after an already-exited group returns ESRCH — harmless.
-                if let Err(e) = signal::kill(pgid, Signal::SIGKILL) {
-                    tracing::debug!("Failed to send SIGKILL to pgid {}: {}", pgid, e);
-                }
+        #[cfg(unix)]
+        {
+            let raw = self.running_pgid.load(Ordering::Acquire);
+            if raw != 0 && raw != u32::MAX {
+                tracing::warn!(
+                    "Terminating two-stage-rsync provider for {}",
+                    self.config.common.name
+                );
             }
+            super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
         }
         Ok(())
     }
 
     async fn data_size(&self) -> Option<String> {
         self.data_size.lock().await.clone()
-    }
-
-    fn is_master(&self) -> bool {
-        self.config.is_master
     }
 }

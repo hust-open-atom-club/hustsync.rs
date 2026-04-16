@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use hustsync_worker::provider::{
-    MirrorProvider, ProviderError, RunContext,
+    CommonProviderConfig, MirrorProvider, ProviderError, RunContext,
     two_stage_rsync_provider::{TwoStageRsyncProvider, TwoStageRsyncProviderConfig},
 };
 use tempfile::TempDir;
@@ -44,26 +44,28 @@ fn make_config(
     let log_dir = root.join("log");
     std::fs::create_dir_all(&log_dir).unwrap();
     TwoStageRsyncProviderConfig {
-        name: name.to_string(),
+        common: CommonProviderConfig {
+            name: name.to_string(),
+            upstream_url: "rsync://upstream.test/mirror/".to_string(),
+            working_dir: root.to_string_lossy().into_owned(),
+            log_dir: log_dir.to_string_lossy().into_owned(),
+            log_file: log_dir.join("latest.log").to_string_lossy().into_owned(),
+            interval: Duration::from_secs(60),
+            retry: 1,
+            timeout: Duration::from_secs(5),
+            env,
+            is_master: true,
+        },
         command: fake_rsync_path(),
         stage1_profile: "debian".to_string(),
-        upstream_url: "rsync://upstream.test/mirror/".to_string(),
         username: None,
         password: None,
         exclude_file: None,
         extra_options: vec![],
         rsync_no_timeout: true,
         rsync_timeout: None,
-        env,
-        working_dir: root.to_string_lossy().into_owned(),
-        log_dir: log_dir.to_string_lossy().into_owned(),
-        log_file: log_dir.join("latest.log").to_string_lossy().into_owned(),
         use_ipv6: false,
         use_ipv4: false,
-        interval: Duration::from_secs(60),
-        retry: 1,
-        timeout: Duration::from_secs(5),
-        is_master: true,
     }
 }
 
