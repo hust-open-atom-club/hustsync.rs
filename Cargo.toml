@@ -9,6 +9,14 @@ members = [
     "crates/hustsync-worker",
 ]
 
+[profile.release]
+codegen-units = 1
+opt-level = 3
+debug = false
+lto = true
+strip = true
+panic = "abort"
+
 [workspace.lints.clippy]
 panic = "deny"
 unwrap_used = "warn"
