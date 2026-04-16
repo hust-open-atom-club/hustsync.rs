@@ -36,6 +36,22 @@ pub struct JobMessage {
 
 use tokio::task::JoinSet;
 
+fn parse_api_bases(api_base: &str) -> Vec<&str> {
+    api_base
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn format_manager_url(base: &str, path: &str) -> String {
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
 pub struct Worker {
     pub cfg: Arc<WorkerConfig>,
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
@@ -145,11 +161,7 @@ impl Worker {
             .split(',')
             .next()
             .unwrap_or("http://localhost:12345");
-        let url = format!(
-            "{}/workers/{}/jobs",
-            root.trim_end_matches('/'),
-            self.name()
-        );
+        let url = format_manager_url(root, &format!("workers/{}/jobs", self.name()));
 
         match hustsync_internal::util::get_json::<Vec<hustsync_internal::msg::MirrorStatus>>(
             &url,
@@ -261,11 +273,7 @@ impl Worker {
             .api_base
             .as_deref()
             .unwrap_or("http://localhost:12345");
-        let api_bases: Vec<&str> = api_base
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let api_bases = parse_api_bases(api_base);
 
         let msg = WorkerStatus {
             id: self.name(),
@@ -280,7 +288,7 @@ impl Worker {
         };
 
         for root in api_bases {
-            let url = format!("{}/workers", root.trim_end_matches('/'));
+            let url = format_manager_url(root, "workers");
             let mut retries = 10;
             while retries > 0 {
                 if let Ok(resp) = client.post(&url).json(&msg).send().await
@@ -353,12 +361,8 @@ impl Worker {
                 .unwrap_or("http://localhost:12345");
             let worker_name = self.name();
 
-            for root in api_base.split(',').map(|str| str.trim()) {
-                let url = format!(
-                    "{}/workers/{}/schedules",
-                    root.trim_end_matches('/'),
-                    worker_name
-                );
+            for root in parse_api_bases(api_base) {
+                let url = format_manager_url(root, &format!("workers/{}/schedules", worker_name));
                 tokio::spawn({
                     let client = client.clone();
                     let url = url.clone();
@@ -539,12 +543,10 @@ impl Worker {
                     .api_base
                     .as_deref()
                     .unwrap_or("http://localhost:12345");
-                for root in api_base.split(',').map(|s| s.trim()) {
-                    let url = format!(
-                        "{}/workers/{}/jobs/{}",
-                        root.trim_end_matches('/'),
-                        worker_name,
-                        msg.name
+                for root in parse_api_bases(api_base) {
+                    let url = format_manager_url(
+                        root,
+                        &format!("workers/{}/jobs/{}", worker_name, msg.name),
                     );
                     let _ = client.post(&url).json(&smsg).send().await;
                 }
@@ -568,11 +570,10 @@ impl Worker {
                     })
                     .collect();
                 let sched_msg = hustsync_internal::msg::MirrorSchedules { schedules: s };
-                for root in api_base.split(',').map(|s| s.trim()) {
-                    let url = format!(
-                        "{}/workers/{}/schedules",
-                        root.trim_end_matches('/'),
-                        worker_name
+                for root in parse_api_bases(api_base) {
+                    let url = format_manager_url(
+                        root,
+                        &format!("workers/{}/schedules", worker_name),
                     );
                     let _ = client.post(&url).json(&sched_msg).send().await;
                 }
