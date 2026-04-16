@@ -92,7 +92,7 @@ impl Default for ManagerFileConfig {
         ManagerFileConfig {
             status_file: "".into(),
             db_type: "redb".into(),
-            db_file: "/tmp/hustsync/manager.db".into(),
+            db_file: "/var/lib/hustsync/manager.db".into(),
             ca_cert: "".into(),
         }
     }
