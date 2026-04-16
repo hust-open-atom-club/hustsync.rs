@@ -28,7 +28,6 @@ target
 CLAUDE.md
 **/CLAUDE.md
 .claude/
-docs/rust-port
 
 # Local-only documentation (vibe docs, design notes, guides)
 .doc/
