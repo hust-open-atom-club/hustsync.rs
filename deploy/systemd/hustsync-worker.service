@@ -1,0 +1,16 @@
+[Unit]
+Description=HustSync Worker — mirror sync job runner
+After=network-online.target hustsync-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hustsync
+ExecStart=/usr/bin/hustsync worker --config /etc/hustsync/worker.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

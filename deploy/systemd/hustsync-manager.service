@@ -1,0 +1,15 @@
+[Unit]
+Description=HustSync Manager — mirror sync control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hustsync
+ExecStart=/usr/bin/hustsync manager --config /etc/hustsync/manager.conf
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
