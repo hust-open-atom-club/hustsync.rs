@@ -61,6 +61,54 @@ mod tests {
         hustsync_config_parser::parse_config::<WorkerConfig>(&worker_path).unwrap();
     }
 
+    /// `WorkerGlobalConfig` production-safe defaults.
+    #[test]
+    fn default_worker_global_config_values() {
+        let cfg = hustsync_config_parser::WorkerGlobalConfig::default();
+        assert_eq!(cfg.name.as_deref(), Some(""));
+        assert_eq!(
+            cfg.log_dir.as_deref(),
+            Some("/var/log/hustsync/{{.Name}}")
+        );
+        assert_eq!(cfg.mirror_dir.as_deref(), Some("/srv/mirror"));
+    }
+
+    /// `MirrorConfig` name and upstream default to empty strings so no
+    /// example host leaks into production configuration.
+    #[test]
+    fn default_mirror_config_name_and_upstream_are_empty() {
+        let default_mirror = hustsync_config_parser::MirrorConfig::default();
+        assert_eq!(default_mirror.name.as_deref(), Some(""));
+        assert_eq!(default_mirror.upstream.as_deref(), Some(""));
+    }
+
+    /// `use_ipv4` defaults to `None` when absent from config.
+    #[test]
+    fn default_mirror_use_ipv4_is_none() {
+        let default_mirror = hustsync_config_parser::MirrorConfig::default();
+        assert_eq!(default_mirror.use_ipv4, None);
+    }
+
+    /// `use_ipv4 = true` round-trips through TOML correctly.
+    #[test]
+    fn parse_mirror_use_ipv4_true() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[[mirrors]]
+name = "archlinux"
+use_ipv4 = true
+"#
+        )
+        .unwrap();
+
+        let cfg: hustsync_config_parser::WorkerConfig =
+            hustsync_config_parser::parse_config(f.path()).unwrap();
+        let mirror = &cfg.mirrors.unwrap()[0];
+        assert_eq!(mirror.use_ipv4, Some(true));
+    }
+
     /// track-B hooks (cgroup/docker/zfs/btrfs) must
     /// error at parse time, never silently accepted. `deny_unknown_fields`
     /// on `MirrorConfig` is what enforces this; the test pins the
