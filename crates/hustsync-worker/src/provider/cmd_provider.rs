@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
     CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
-    impl_provider_getters, inject_provider_env, log_provider_failure,
+    impl_provider_getters, inject_provider_env, log_provider_failure, resolve_log_file,
     run_child_with_cancellation,
 };
 
@@ -97,11 +97,7 @@ impl MirrorProvider for CmdProvider {
         // file to a rotated timestamped path; honor it via ctx.env before
         // opening the file handle. Falls back to the config default when
         // no hook has set it.
-        let effective_log_file = ctx
-            .env
-            .get("TUNASYNC_LOG_FILE")
-            .cloned()
-            .unwrap_or_else(|| self.config.common.log_file.clone());
+        let effective_log_file = resolve_log_file(&ctx, &self.config.common.log_file);
 
         // Setup log file
         let log_file = File::create(&effective_log_file).await?;

@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(unix)]
@@ -21,6 +22,38 @@ use self::two_stage_rsync_provider::{TwoStageRsyncProvider, TwoStageRsyncProvide
 pub mod cmd_provider;
 pub mod rsync_provider;
 pub mod two_stage_rsync_provider;
+
+/// Base rsync arguments shared by both the standard rsync provider (full
+/// sync) and the two-stage provider's stage-2 pass.
+pub(crate) const BASE_RSYNC_ARGS: &[&str] = &[
+    "-aHvh",
+    "--no-o",
+    "--no-g",
+    "--stats",
+    "--filter",
+    "risk .~tmp~/",
+    "--exclude",
+    ".~tmp~/",
+    "--delete",
+    "--delete-after",
+    "--delay-updates",
+    "--safe-links",
+];
+
+/// Stage-1 subset of `BASE_RSYNC_ARGS` — omits `--delete`, `--delete-after`,
+/// and `--delay-updates` so that the first pass only fetches without removing
+/// anything. The delete pass is left entirely to stage 2.
+pub(crate) const BASE_RSYNC_STAGE1_ARGS: &[&str] = &[
+    "-aHvh",
+    "--no-o",
+    "--no-g",
+    "--stats",
+    "--filter",
+    "risk .~tmp~/",
+    "--exclude",
+    ".~tmp~/",
+    "--safe-links",
+];
 
 /// Fields shared by every provider variant.
 ///
@@ -118,6 +151,36 @@ pub(crate) fn inject_provider_env(
     }
     for (k, v) in ctx_env {
         cmd.env(k, v);
+    }
+}
+
+/// Resolve the effective log file path for a sync run.
+///
+/// A pre-exec hook (e.g. loglimit) may have rotated the log to a
+/// timestamped path and written the new path into `ctx.env`. When the
+/// key is present it takes precedence; otherwise the provider's
+/// configured default is used.
+pub(crate) fn resolve_log_file(ctx: &RunContext, default: &str) -> String {
+    ctx.env
+        .get("TUNASYNC_LOG_FILE")
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// Store the total transfer size parsed from an rsync log file.
+///
+/// Extracts the size from `log_file` and writes it to `data_size` when
+/// non-empty. A parse failure (malformed or absent stats block) is
+/// silently treated as "no size available" — callers use this for
+/// informational reporting only, never for control flow.
+pub(crate) async fn store_rsync_data_size(
+    data_size: &Mutex<Option<String>>,
+    log_file: &str,
+) {
+    let size =
+        hustsync_internal::util::extract_size_from_rsync_log(log_file).unwrap_or_default();
+    if !size.is_empty() {
+        *data_size.lock().await = Some(size);
     }
 }
 

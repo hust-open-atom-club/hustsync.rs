@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -9,50 +8,55 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
+use hustsync_internal::util::translate_rsync_exit_status;
 
 use super::{
-    CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
-    impl_provider_getters, inject_provider_env, log_provider_failure, run_child_with_cancellation,
+    BASE_RSYNC_ARGS, BASE_RSYNC_STAGE1_ARGS, CommonProviderConfig, MirrorProvider, ProviderError,
+    ProviderType, RunContext, impl_provider_getters, inject_provider_env, log_provider_failure,
+    resolve_log_file, run_child_with_cancellation, store_rsync_data_size,
 };
 
-/// Stage-1 option sets keyed by profile name.
+/// Stage-1 filter rules for the `debian` profile.
 ///
-/// Verbatim translation of `rsyncStage1Profiles` in Go
-/// `worker/two_stage_rsync_provider.go`. Keep in sync with Go when the
-/// upstream map grows.
-fn stage1_profiles() -> HashMap<&'static str, Vec<&'static str>> {
-    let mut map = HashMap::new();
-    map.insert(
-        "debian",
-        vec![
-            "--include=*.diff/",
-            "--include=by-hash/",
-            "--exclude=*.diff/Index",
-            "--exclude=Contents*",
-            "--exclude=Packages*",
-            "--exclude=Sources*",
-            "--exclude=Release*",
-            "--exclude=InRelease",
-            "--exclude=i18n/*",
-            "--exclude=dep11/*",
-            "--exclude=installer-*/current",
-            "--exclude=ls-lR*",
-        ],
-    );
-    map.insert(
-        "debian-oldstyle",
-        vec![
-            "--exclude=Packages*",
-            "--exclude=Sources*",
-            "--exclude=Release*",
-            "--exclude=InRelease",
-            "--exclude=i18n/*",
-            "--exclude=ls-lR*",
-            "--exclude=dep11/*",
-        ],
-    );
-    map
+/// Verbatim translation of `rsyncStage1Profiles["debian"]` in Go
+/// `worker/two_stage_rsync_provider.go`.
+const STAGE1_PROFILE_DEBIAN: &[&str] = &[
+    "--include=*.diff/",
+    "--include=by-hash/",
+    "--exclude=*.diff/Index",
+    "--exclude=Contents*",
+    "--exclude=Packages*",
+    "--exclude=Sources*",
+    "--exclude=Release*",
+    "--exclude=InRelease",
+    "--exclude=i18n/*",
+    "--exclude=dep11/*",
+    "--exclude=installer-*/current",
+    "--exclude=ls-lR*",
+];
+
+/// Stage-1 filter rules for the `debian-oldstyle` profile.
+///
+/// Verbatim translation of `rsyncStage1Profiles["debian-oldstyle"]` in Go
+/// `worker/two_stage_rsync_provider.go`.
+const STAGE1_PROFILE_DEBIAN_OLDSTYLE: &[&str] = &[
+    "--exclude=Packages*",
+    "--exclude=Sources*",
+    "--exclude=Release*",
+    "--exclude=InRelease",
+    "--exclude=i18n/*",
+    "--exclude=ls-lR*",
+    "--exclude=dep11/*",
+];
+
+/// Return the compile-time filter-rule slice for a named stage-1 profile,
+/// or `None` when the profile is unrecognised.
+fn stage1_profile_options(profile: &str) -> Option<&'static [&'static str]> {
+    match profile {
+        "debian" => Some(STAGE1_PROFILE_DEBIAN),
+        "debian-oldstyle" => Some(STAGE1_PROFILE_DEBIAN_OLDSTYLE),
+        _ => None,
+    }
 }
 
 /// Configuration for the two-stage rsync provider.
@@ -106,8 +110,7 @@ impl TwoStageRsyncProvider {
 
         // Validate the profile at construction time so failures are reported
         // before any sync attempt rather than mid-run.
-        let profiles = stage1_profiles();
-        if !profiles.contains_key(config.stage1_profile.as_str()) {
+        if stage1_profile_options(config.stage1_profile.as_str()).is_none() {
             return Err(ProviderError::Config(format!(
                 "unknown stage1_profile: {}",
                 config.stage1_profile
@@ -131,49 +134,24 @@ impl TwoStageRsyncProvider {
     pub(crate) fn build_args_for_stage(&self, stage: u8) -> Result<Vec<String>, ProviderError> {
         let mut options: Vec<String> = match stage {
             1 => {
-                // Stage-1 base — verbatim from Go newTwoStageRsyncProvider
-                let mut opts = vec![
-                    "-aHvh".to_string(),
-                    "--no-o".to_string(),
-                    "--no-g".to_string(),
-                    "--stats".to_string(),
-                    "--filter".to_string(),
-                    "risk .~tmp~/".to_string(),
-                    "--exclude".to_string(),
-                    ".~tmp~/".to_string(),
-                    "--safe-links".to_string(),
-                ];
+                // Stage-1 base — subset without --delete/--delete-after/--delay-updates
+                let mut opts: Vec<String> =
+                    BASE_RSYNC_STAGE1_ARGS.iter().map(|s| s.to_string()).collect();
                 // Append profile filter rules
-                let profiles = stage1_profiles();
-                let profile_opts = profiles
-                    .get(self.config.stage1_profile.as_str())
+                let profile_opts = stage1_profile_options(self.config.stage1_profile.as_str())
                     .ok_or_else(|| {
                         ProviderError::Config(format!(
                             "unknown stage1_profile: {}",
                             self.config.stage1_profile
                         ))
                     })?;
-                for opt in profile_opts {
-                    opts.push(opt.to_string());
-                }
+                opts.extend(profile_opts.iter().map(|s| s.to_string()));
                 opts
             }
             2 => {
-                // Stage-2 base — verbatim from Go newTwoStageRsyncProvider
-                let mut opts = vec![
-                    "-aHvh".to_string(),
-                    "--no-o".to_string(),
-                    "--no-g".to_string(),
-                    "--stats".to_string(),
-                    "--filter".to_string(),
-                    "risk .~tmp~/".to_string(),
-                    "--exclude".to_string(),
-                    ".~tmp~/".to_string(),
-                    "--delete".to_string(),
-                    "--delete-after".to_string(),
-                    "--delay-updates".to_string(),
-                    "--safe-links".to_string(),
-                ];
+                // Stage-2 base — full sync including --delete and --delay-updates
+                let mut opts: Vec<String> =
+                    BASE_RSYNC_ARGS.iter().map(|s| s.to_string()).collect();
                 // Stage 2 appends extra_options (Go's p.extraOptions)
                 opts.extend(self.config.extra_options.iter().cloned());
                 opts
@@ -339,11 +317,7 @@ impl MirrorProvider for TwoStageRsyncProvider {
 
         // Pre_exec hook may rotate the log path; honor `ctx.env`
         // before opening the file handle. Fall back to config default.
-        let effective_log_file = ctx
-            .env
-            .get("TUNASYNC_LOG_FILE")
-            .cloned()
-            .unwrap_or_else(|| self.config.common.log_file.clone());
+        let effective_log_file = resolve_log_file(&ctx, &self.config.common.log_file);
 
         // Both stages append to the same log file; stage-2 output follows
         // stage-1 without a separator to match Go's `prepareLogFile`.
@@ -383,11 +357,7 @@ impl MirrorProvider for TwoStageRsyncProvider {
         self.running_pgid.store(0, Ordering::Release);
 
         if result.is_ok() {
-            let size = extract_size_from_rsync_log(&effective_log_file).unwrap_or_default();
-            if !size.is_empty() {
-                let mut size_guard = self.data_size.lock().await;
-                *size_guard = Some(size);
-            }
+            store_rsync_data_size(&self.data_size, &effective_log_file).await;
         }
 
         result

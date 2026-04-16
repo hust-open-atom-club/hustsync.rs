@@ -6,12 +6,12 @@ use tokio::fs::{File, create_dir_all};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
+use hustsync_internal::util::translate_rsync_exit_status;
 
 use super::{
-    CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
-    impl_provider_getters, inject_provider_env, log_provider_failure,
-    run_child_with_cancellation,
+    BASE_RSYNC_ARGS, CommonProviderConfig, MirrorProvider, ProviderError, ProviderType,
+    RunContext, impl_provider_getters, inject_provider_env, log_provider_failure,
+    resolve_log_file, run_child_with_cancellation, store_rsync_data_size,
 };
 
 pub struct RsyncProviderConfig {
@@ -68,21 +68,7 @@ impl RsyncProvider {
         let mut options = if let Some(overridden) = &self.config.rsync_override {
             overridden.clone()
         } else {
-            // Default options
-            vec![
-                "-aHvh".to_string(),
-                "--no-o".to_string(),
-                "--no-g".to_string(),
-                "--stats".to_string(),
-                "--filter".to_string(),
-                "risk .~tmp~/".to_string(),
-                "--exclude".to_string(),
-                ".~tmp~/".to_string(),
-                "--delete".to_string(),
-                "--delete-after".to_string(),
-                "--delay-updates".to_string(),
-                "--safe-links".to_string(),
-            ]
+            BASE_RSYNC_ARGS.iter().map(|s| s.to_string()).collect()
         };
 
         if !self.config.rsync_override_only {
@@ -146,11 +132,7 @@ impl MirrorProvider for RsyncProvider {
 
         // Loglimit (or any pre_exec hook) may have rotated the log path;
         // honor it before opening the file handle.
-        let effective_log_file = ctx
-            .env
-            .get("TUNASYNC_LOG_FILE")
-            .cloned()
-            .unwrap_or_else(|| self.config.common.log_file.clone());
+        let effective_log_file = resolve_log_file(&ctx, &self.config.common.log_file);
 
         let mut log_file = File::create(&effective_log_file).await?;
         let std_out_log = log_file.try_clone().await?.into_std().await;
@@ -235,11 +217,7 @@ impl MirrorProvider for RsyncProvider {
         self.running_pgid.store(0, Ordering::Release);
 
         if result.is_ok() {
-            let size = extract_size_from_rsync_log(&effective_log_file).unwrap_or_default();
-            if !size.is_empty() {
-                let mut size_guard = self.data_size.lock().await;
-                *size_guard = Some(size);
-            }
+            store_rsync_data_size(&self.data_size, &effective_log_file).await;
         }
 
         result
