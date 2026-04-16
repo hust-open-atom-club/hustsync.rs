@@ -181,10 +181,10 @@ rsync_success_exit_codes = [0, 6]
         let mut f = NamedTempFile::new().unwrap();
         writeln!(
             f,
-            r#"
+            "
 [global]
 dangerous_global_rsync_success_exit_codes = [0, 1, 23]
-"#
+"
         )
         .unwrap();
 

@@ -77,6 +77,7 @@ fn worker_config(
             concurrent: Some(2),
             rsync_options: None,
             dangerous_global_success_exit_codes: None,
+            dangerous_global_rsync_success_exit_codes: None,
             retry: None,
             exec_on_status: None,
         }),
@@ -127,7 +128,10 @@ fn worker_config(
             rsync_override_only: None,
             stage1_profile: None,
             memory_limit: None,
+            success_exit_codes: None,
+            rsync_success_exit_codes: None,
         }]),
+        include: None,
     }
 }
 
