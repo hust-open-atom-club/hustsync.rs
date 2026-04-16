@@ -547,4 +547,65 @@ upstream = "rsync://anon.example.org/repo/"
         let m = hustsync_config_parser::MirrorConfig::default();
         assert!(m.mirrors.is_none(), "mirrors field must default to None");
     }
+
+    // ── api_base_list field ────────────────────────────────────────────────────
+
+    /// `api_base_list` defaults to `None` when absent from the manager section.
+    #[test]
+    fn default_worker_manager_api_base_list_is_none() {
+        let cfg = hustsync_config_parser::WorkerManagerConfig::default();
+        assert_eq!(cfg.api_base_list, None);
+    }
+
+    /// A `[manager]` section with `api_base_list` parses into a `Vec<String>`.
+    #[test]
+    fn parse_worker_manager_api_base_list() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[manager]
+api_base_list = ["http://m1:14242", "http://m2:14242"]
+"#
+        )
+        .unwrap();
+
+        let cfg: hustsync_config_parser::WorkerConfig =
+            hustsync_config_parser::parse_config(f.path()).unwrap();
+        let manager = cfg.manager.unwrap();
+        assert_eq!(
+            manager.api_base_list,
+            Some(vec![
+                "http://m1:14242".to_string(),
+                "http://m2:14242".to_string()
+            ])
+        );
+    }
+
+    /// `api_base` and `api_base_list` can coexist in the same section.
+    #[test]
+    fn parse_worker_manager_api_base_and_list_coexist() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"
+[manager]
+api_base = "http://m1:14242"
+api_base_list = ["http://m1:14242", "http://m2:14242"]
+"#
+        )
+        .unwrap();
+
+        let cfg: hustsync_config_parser::WorkerConfig =
+            hustsync_config_parser::parse_config(f.path()).unwrap();
+        let manager = cfg.manager.unwrap();
+        assert_eq!(manager.api_base.as_deref(), Some("http://m1:14242"));
+        assert_eq!(
+            manager.api_base_list,
+            Some(vec![
+                "http://m1:14242".to_string(),
+                "http://m2:14242".to_string()
+            ])
+        );
+    }
 }

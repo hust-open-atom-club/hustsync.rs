@@ -36,12 +36,46 @@ pub struct JobMessage {
 
 use tokio::task::JoinSet;
 
-fn parse_api_bases(api_base: &str) -> Vec<&str> {
-    api_base
+/// Resolve the effective list of manager API base URLs from worker manager
+/// config.
+///
+/// If `api_base_list` is set and non-empty it is returned directly — this is
+/// the HA broadcast list. Otherwise the comma-separated `api_base` string is
+/// split and trimmed as a fallback, matching Go's `worker/worker.go` `apiBases`
+/// helper.
+fn resolve_api_bases(cfg: &hustsync_config_parser::WorkerManagerConfig) -> Vec<String> {
+    if let Some(list) = &cfg.api_base_list
+        && !list.is_empty()
+    {
+        return list.clone();
+    }
+    cfg.api_base
+        .as_deref()
+        .unwrap_or("http://localhost:12345")
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(String::from)
         .collect()
+}
+
+/// Attempt to POST `msg` to `url` up to 10 times (1 s between attempts).
+/// Returns `true` on the first successful response.
+async fn try_register(client: &Client, url: &str, msg: &WorkerStatus) -> bool {
+    let mut retries = 10u32;
+    while retries > 0 {
+        if let Ok(resp) = client.post(url).json(msg).send().await
+            && resp.status().is_success()
+        {
+            tracing::info!("Successfully registered to manager: {}", url);
+            return true;
+        }
+        retries -= 1;
+        if retries > 0 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+    false
 }
 
 fn format_manager_url(base: &str, path: &str) -> String {
@@ -207,13 +241,11 @@ impl Worker {
         let Some(manager_cfg) = &self.cfg.manager else {
             return vec![];
         };
-        let api_base = manager_cfg
-            .api_base
-            .as_deref()
-            .unwrap_or("http://localhost:12345");
-        let root = api_base
-            .split(',')
-            .next()
+        // Reads always use the first (primary) manager only.
+        let api_bases = resolve_api_bases(manager_cfg);
+        let root = api_bases
+            .first()
+            .map(|s| s.as_str())
             .unwrap_or("http://localhost:12345");
         let url = format_manager_url(root, &format!("workers/{}/jobs", self.name()));
 
@@ -323,11 +355,9 @@ impl Worker {
             return;
         };
 
-        let api_base = manager_cfg
-            .api_base
-            .as_deref()
-            .unwrap_or("http://localhost:12345");
-        let api_bases = parse_api_bases(api_base);
+        let Some(client) = &self.http_client else {
+            return;
+        };
 
         let msg = WorkerStatus {
             id: self.name(),
@@ -337,25 +367,12 @@ impl Worker {
             last_register: Utc::now(),
         };
 
-        let Some(client) = &self.http_client else {
-            return;
-        };
-
-        for root in api_bases {
-            let url = format_manager_url(root, "workers");
-            let mut retries = 10;
-            while retries > 0 {
-                if let Ok(resp) = client.post(&url).json(&msg).send().await
-                    && resp.status().is_success()
-                {
-                    tracing::info!("Successfully registered to manager: {}", url);
-                    break;
-                }
-                retries -= 1;
-                if retries > 0 {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
+        for root in resolve_api_bases(manager_cfg) {
+            let url = format_manager_url(&root, "workers");
+            if try_register(client, &url, &msg).await {
+                break;
             }
+            tracing::warn!("Failed to register to manager after retries: {}", url);
         }
     }
 
@@ -409,14 +426,12 @@ impl Worker {
             drop(jobs);
 
             let sched_msg = hustsync_internal::msg::MirrorSchedules { schedules: s };
-            let api_base = manager_cfg
-                .api_base
-                .as_deref()
-                .unwrap_or("http://localhost:12345");
+            let api_bases = resolve_api_bases(manager_cfg);
             let worker_name = self.name();
 
-            for root in parse_api_bases(api_base) {
-                let url = format_manager_url(root, &format!("workers/{}/schedules", worker_name));
+            for root in api_bases {
+                let url =
+                    format_manager_url(&root, &format!("workers/{}/schedules", worker_name));
                 tokio::spawn({
                     let client = client.clone();
                     let url = url.clone();
@@ -593,16 +608,34 @@ impl Worker {
                     is_master: msg.is_master,
                 };
 
-                let api_base = manager_cfg
-                    .api_base
-                    .as_deref()
-                    .unwrap_or("http://localhost:12345");
-                for root in parse_api_bases(api_base) {
+                let api_bases = resolve_api_bases(manager_cfg);
+
+                // Status push: broadcast, break on first success.
+                let mut status_sent = false;
+                for root in &api_bases {
                     let url = format_manager_url(
                         root,
                         &format!("workers/{}/jobs/{}", worker_name, msg.name),
                     );
-                    let _ = client.post(&url).json(&smsg).send().await;
+                    match client.post(&url).json(&smsg).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            status_sent = true;
+                            break;
+                        }
+                        Ok(resp) => {
+                            tracing::warn!(
+                                "Status push to {} returned {}", url, resp.status()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!("Status push to {} failed: {}", url, e);
+                        }
+                    }
+                }
+                if !status_sent {
+                    tracing::error!(
+                        "Failed to push status for {} to all managers", msg.name
+                    );
                 }
 
                 if msg.schedule {
@@ -624,12 +657,31 @@ impl Worker {
                     })
                     .collect();
                 let sched_msg = hustsync_internal::msg::MirrorSchedules { schedules: s };
-                for root in parse_api_bases(api_base) {
+
+                // Schedule push: broadcast, break on first success.
+                let mut sched_sent = false;
+                for root in &api_bases {
                     let url = format_manager_url(
                         root,
                         &format!("workers/{}/schedules", worker_name),
                     );
-                    let _ = client.post(&url).json(&sched_msg).send().await;
+                    match client.post(&url).json(&sched_msg).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            sched_sent = true;
+                            break;
+                        }
+                        Ok(resp) => {
+                            tracing::warn!(
+                                "Schedule push to {} returned {}", url, resp.status()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!("Schedule push to {} failed: {}", url, e);
+                        }
+                    }
+                }
+                if !sched_sent {
+                    tracing::error!("Failed to push schedule to all managers");
                 }
             }
         });
@@ -823,5 +875,61 @@ impl Worker {
 
         self.exit_token.cancelled().await;
         self.shutdown().await;
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use hustsync_config_parser::WorkerManagerConfig;
+
+    use super::resolve_api_bases;
+
+    fn make_cfg(api_base: Option<&str>, api_base_list: Option<Vec<&str>>) -> WorkerManagerConfig {
+        WorkerManagerConfig {
+            api_base: api_base.map(String::from),
+            api_base_list: api_base_list
+                .map(|v| v.into_iter().map(String::from).collect()),
+            token: None,
+            ca_cert: None,
+        }
+    }
+
+    #[test]
+    fn resolve_prefers_api_base_list_when_set() {
+        let cfg = make_cfg(
+            Some("http://old:12345"),
+            Some(vec!["http://m1:14242", "http://m2:14242"]),
+        );
+        let bases = resolve_api_bases(&cfg);
+        assert_eq!(bases, vec!["http://m1:14242", "http://m2:14242"]);
+    }
+
+    #[test]
+    fn resolve_falls_back_to_api_base_csv() {
+        let cfg = make_cfg(Some("http://m1:12345, http://m2:12345"), None);
+        let bases = resolve_api_bases(&cfg);
+        assert_eq!(bases, vec!["http://m1:12345", "http://m2:12345"]);
+    }
+
+    #[test]
+    fn resolve_empty_api_base_list_falls_back_to_api_base() {
+        let cfg = make_cfg(Some("http://m1:12345"), Some(vec![]));
+        let bases = resolve_api_bases(&cfg);
+        assert_eq!(bases, vec!["http://m1:12345"]);
+    }
+
+    #[test]
+    fn resolve_defaults_when_both_absent() {
+        let cfg = make_cfg(None, None);
+        let bases = resolve_api_bases(&cfg);
+        assert_eq!(bases, vec!["http://localhost:12345"]);
+    }
+
+    #[test]
+    fn resolve_single_api_base_no_csv() {
+        let cfg = make_cfg(Some("http://manager:14242"), None);
+        let bases = resolve_api_bases(&cfg);
+        assert_eq!(bases, vec!["http://manager:14242"]);
     }
 }

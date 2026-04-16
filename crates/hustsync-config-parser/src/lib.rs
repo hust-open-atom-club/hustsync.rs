@@ -181,6 +181,12 @@ impl Default for WorkerGlobalConfig {
 #[serde(deny_unknown_fields)]
 pub struct WorkerManagerConfig {
     pub api_base: Option<String>,
+    /// List of manager API base URLs for HA deployments. When set and
+    /// non-empty, this takes precedence over `api_base`. Write operations
+    /// (register, status push, schedule push) broadcast to all entries
+    /// and stop on the first success; read operations use only the first
+    /// entry.
+    pub api_base_list: Option<Vec<String>>,
     pub token: Option<String>,
     pub ca_cert: Option<String>,
 }
@@ -189,6 +195,7 @@ impl Default for WorkerManagerConfig {
     fn default() -> Self {
         WorkerManagerConfig {
             api_base: Some("http://localhost:12345".into()),
+            api_base_list: None,
             token: Some("".into()),
             ca_cert: Some("".into()),
         }
