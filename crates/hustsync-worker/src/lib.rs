@@ -20,7 +20,7 @@ pub mod server;
 
 pub use error::{HookError, HookErrorKind, WorkerError};
 
-pub use job::MirrorJob;
+pub use job::{CtrlAction, MirrorJob};
 use provider::MirrorProvider;
 use schedule::ScheduleQueue;
 
@@ -50,6 +50,60 @@ fn format_manager_url(base: &str, path: &str) -> String {
         base.trim_end_matches('/'),
         path.trim_start_matches('/')
     )
+}
+
+/// Records the names of mirrors that differ between the running jobs map
+/// and a freshly-loaded config slice. Names that appear only in the old
+/// map are `removed`; names only in the new config are `added`; names in
+/// both are `modified` (the actor is torn down and rebuilt so the new
+/// provider takes effect).
+struct MirrorDiff {
+    added: Vec<String>,
+    removed: Vec<String>,
+    modified: Vec<String>,
+}
+
+/// Compare the set of currently-running jobs against a new config slice.
+///
+/// Because `MirrorJob` does not retain its originating `MirrorConfig`, a
+/// deep-equal comparison is not possible without storing extra state. The
+/// caller rebuilds the actor for every name that appears in both sets —
+/// identical to Go's behaviour for the modify path.
+fn diff_mirror_configs(
+    old: &HashMap<String, MirrorJob>,
+    new_cfg: &[hustsync_config_parser::MirrorConfig],
+) -> MirrorDiff {
+    let new_names: std::collections::HashSet<&str> = new_cfg
+        .iter()
+        .filter_map(|m| m.name.as_deref())
+        .collect();
+
+    let mut removed = Vec::new();
+    let mut modified = Vec::new();
+
+    for name in old.keys() {
+        if new_names.contains(name.as_str()) {
+            modified.push(name.clone());
+        } else {
+            removed.push(name.clone());
+        }
+    }
+
+    let old_names: std::collections::HashSet<&str> =
+        old.keys().map(|s| s.as_str()).collect();
+
+    let added: Vec<String> = new_cfg
+        .iter()
+        .filter_map(|m| m.name.as_deref())
+        .filter(|n| !old_names.contains(*n))
+        .map(|n| n.to_owned())
+        .collect();
+
+    MirrorDiff {
+        added,
+        removed,
+        modified,
+    }
 }
 
 pub struct Worker {
@@ -629,6 +683,128 @@ impl Worker {
             }
         }
         tracing::info!("Worker fully stopped.");
+    }
+
+    /// Disable and remove a job by name if it exists.
+    async fn disable_and_remove_job(&self, name: &str) -> Option<u32> {
+        let job = self.jobs.write().await.remove(name);
+        if let Some(job) = job {
+            let prev = job.state();
+            let _ = job.send_ctrl(CtrlAction::Disable).await;
+            return Some(prev);
+        }
+        None
+    }
+
+    /// Build provider + hooks for `m_cfg`, spawn actor, schedule it, and
+    /// insert it into the jobs map. The actor is scheduled at `now` unless
+    /// `initial_state` forces it into disabled/paused.
+    async fn spawn_mirror_from_cfg(
+        &self,
+        name: &str,
+        m_cfg: &hustsync_config_parser::MirrorConfig,
+        initial_state: u32,
+    ) {
+        let provider = match Self::create_provider(name, m_cfg, &self.cfg) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("Failed to create provider for {}: {}", name, e);
+                return;
+            }
+        };
+
+        let hooks = Self::build_hooks(m_cfg, &self.cfg);
+        let (job, actor) = job::JobActor::new(
+            name.to_owned(),
+            self.manager_tx.clone(),
+            Arc::clone(&self.semaphore),
+            provider,
+            hooks,
+        );
+
+        if initial_state == crate::job::STATE_DISABLED {
+            job.set_state(crate::job::STATE_DISABLED);
+        } else {
+            // Paused jobs re-enter the queue at now (same as Go's stateNone path).
+            let resolved = if initial_state == crate::job::STATE_PAUSED {
+                crate::job::STATE_PAUSED
+            } else {
+                crate::job::STATE_NONE
+            };
+            job.set_state(resolved);
+            self.schedule_queue
+                .lock()
+                .await
+                .add_job(chrono::Utc::now(), job.clone());
+        }
+
+        self.job_handles.lock().await.spawn(actor.run());
+        self.jobs.write().await.insert(name.to_owned(), job);
+    }
+
+    /// Remove mirrors dropped from the config.
+    async fn apply_removed_mirrors(&self, removed: &[String]) {
+        for name in removed {
+            self.disable_and_remove_job(name).await;
+            tracing::info!("Mirror {} removed by config reload", name);
+        }
+    }
+
+    /// Rebuild mirrors whose config changed, preserving previous state.
+    async fn apply_modified_mirrors(
+        &self,
+        modified: &[String],
+        new_mirrors: &[hustsync_config_parser::MirrorConfig],
+    ) {
+        for name in modified {
+            let prev = self.disable_and_remove_job(name).await;
+            let Some(m_cfg) = new_mirrors.iter().find(|m| m.name.as_deref() == Some(name)) else {
+                continue;
+            };
+            let state = prev.unwrap_or(crate::job::STATE_NONE);
+            self.spawn_mirror_from_cfg(name, m_cfg, state).await;
+            tracing::info!("Mirror {} reloaded by config reload", name);
+        }
+    }
+
+    /// Instantiate and schedule mirrors that appear only in the new config.
+    async fn apply_added_mirrors(
+        &self,
+        added: &[String],
+        new_mirrors: &[hustsync_config_parser::MirrorConfig],
+    ) {
+        for name in added {
+            let Some(m_cfg) = new_mirrors.iter().find(|m| m.name.as_deref() == Some(name)) else {
+                continue;
+            };
+            self.spawn_mirror_from_cfg(name, m_cfg, crate::job::STATE_NONE)
+                .await;
+            tracing::info!("Mirror {} added by config reload", name);
+        }
+    }
+
+    /// Apply a freshly-loaded mirror config slice to the running worker.
+    ///
+    /// Mirrors absent from the new config are disabled and dropped. Mirrors
+    /// present in both are torn down and rebuilt so the new provider config
+    /// takes effect; the previous paused/disabled state is preserved. New
+    /// mirrors are created and scheduled immediately. Matches Go
+    /// `Worker.ReloadMirrorConfig`.
+    pub async fn reload_mirror_config(
+        &self,
+        new_mirrors: Vec<hustsync_config_parser::MirrorConfig>,
+    ) {
+        tracing::info!("Reloading mirror configs");
+
+        let diff = {
+            let jobs = self.jobs.read().await;
+            diff_mirror_configs(&jobs, &new_mirrors)
+        };
+
+        self.apply_removed_mirrors(&diff.removed).await;
+        self.apply_modified_mirrors(&diff.modified, &new_mirrors)
+            .await;
+        self.apply_added_mirrors(&diff.added, &new_mirrors).await;
     }
 
     pub async fn run(&self) {

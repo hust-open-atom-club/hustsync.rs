@@ -207,7 +207,9 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
 
     info!("Initializing HustSync Worker...");
 
-    let worker = Worker::new(config);
+    let worker = Arc::new(Worker::new(config));
+
+    // SIGTERM/SIGINT → cancel exit token → Worker::shutdown().
     // Signal delivery is decoupled from the worker's exit_token so the
     // worker's existing shutdown path (exit_token.cancelled() → shutdown())
     // handles cleanup without any changes to worker internals.
@@ -216,6 +218,39 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
         shutdown_signal().await;
         exit_token.cancel();
     });
+
+    // SIGHUP → reload config file and apply mirror diff without restarting.
+    // The loop runs for the lifetime of the process; each signal triggers
+    // one reload attempt. Config parse errors are logged but do not affect
+    // the currently-running worker state.
+    #[cfg(unix)]
+    {
+        let worker_reload = Arc::clone(&worker);
+        let reload_path = config_path.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sighup = match signal(SignalKind::hangup()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to install SIGHUP handler: {}", e);
+                    return;
+                }
+            };
+            loop {
+                sighup.recv().await;
+                tracing::info!("Received SIGHUP, reloading config...");
+                match parse_config::<WorkerConfig>(&reload_path) {
+                    Ok(new_cfg) => {
+                        if let Some(mirrors) = new_cfg.mirrors {
+                            worker_reload.reload_mirror_config(mirrors).await;
+                        }
+                    }
+                    Err(e) => tracing::error!("Failed to reload config: {}", e),
+                }
+            }
+        });
+    }
+
     worker.run().await;
 
     Ok(())
