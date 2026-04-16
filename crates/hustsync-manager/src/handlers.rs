@@ -1,18 +1,31 @@
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
-use axum::{Json, response::IntoResponse};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use chrono::Utc;
 use hustsync_internal::msg::{
     ClientCmd, CmdVerb, MirrorSchedules, MirrorStatus, WorkerCmd, WorkerStatus,
 };
 use hustsync_internal::status::SyncStatus;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 
 use crate::database::DbAdapterTrait;
 use crate::server::{ERROR_KEY, INFO_KEY, Manager};
+
+fn error_response(status: StatusCode, msg: impl std::fmt::Display) -> Response {
+    (status, Json(json!({ ERROR_KEY: msg.to_string() }))).into_response()
+}
+
+fn ok_json(data: impl Serialize) -> Response {
+    (StatusCode::OK, Json(json!(data))).into_response()
+}
+
+fn ok_message(msg: &str) -> Response {
+    (StatusCode::OK, Json(json!({ INFO_KEY: msg }))).into_response()
+}
 
 // Custom Extractor for the database adapter
 pub struct Database(pub Arc<dyn DbAdapterTrait>);
@@ -35,55 +48,51 @@ impl FromRequestParts<Arc<Manager>> for Database {
     }
 }
 
-pub async fn ping_handler() -> impl IntoResponse {
-    let body = json!({
-        INFO_KEY: "pong"
-    });
-
-    (StatusCode::OK, Json(body))
+pub async fn ping_handler() -> Response {
+    ok_message("pong")
 }
 
 pub async fn register_worker(
     Database(adapter): Database,
     Json(mut worker): Json<WorkerStatus>,
-) -> impl IntoResponse {
+) -> Response {
     worker.last_online = Utc::now();
     worker.last_register = Utc::now();
 
     match adapter.create_worker(worker) {
-        Ok(new_worker) => (StatusCode::OK, Json(json!(new_worker))),
-        Err(e) => (
+        Ok(new_worker) => ok_json(new_worker),
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to register worker: {}", e) })),
+            format!("Failed to register worker: {}", e),
         ),
     }
 }
 
-pub async fn list_all_workers(Database(adapter): Database) -> impl IntoResponse {
+pub async fn list_all_workers(Database(adapter): Database) -> Response {
     match adapter.list_workers() {
         Ok(mut workers) => {
             for w in &mut workers {
                 w.token = "REDACTED".to_string();
             }
-            (StatusCode::OK, Json(json!(workers)))
+            ok_json(workers)
         }
-        Err(e) => (
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to list workers: {}", e) })),
+            format!("Failed to list workers: {}", e),
         ),
     }
 }
 
-pub async fn list_all_jobs(Database(adapter): Database) -> impl IntoResponse {
+pub async fn list_all_jobs(Database(adapter): Database) -> Response {
     match adapter.list_all_mirror_status() {
         Ok(statuses) => {
             let web_statuses: Vec<hustsync_internal::status_web::WebMirrorStatus> =
                 statuses.into_iter().map(|s| s.into()).collect();
-            (StatusCode::OK, Json(json!(web_statuses)))
+            ok_json(web_statuses)
         }
-        Err(e) => (
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to list jobs: {}", e) })),
+            format!("Failed to list jobs: {}", e),
         ),
     }
 }
@@ -91,18 +100,16 @@ pub async fn list_all_jobs(Database(adapter): Database) -> impl IntoResponse {
 pub async fn list_jobs_of_worker(
     Database(adapter): Database,
     Path(worker_id): Path<String>,
-) -> impl IntoResponse {
+) -> Response {
     // Go `listJobsOfWorker` returns raw `[]MirrorStatus`, NOT WebMirrorStatus.
     // Workers bootstrap their schedule from this endpoint and rely on the
     // RFC3339 timestamps in MirrorStatus rather than the dual text+ts pair
     // that WebMirrorStatus adds for the dashboard.
     match adapter.list_mirror_status(&worker_id) {
-        Ok(statuses) => (StatusCode::OK, Json(json!(statuses))),
-        Err(e) => (
+        Ok(statuses) => ok_json(statuses),
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(
-                json!({ ERROR_KEY: format!("Failed to list jobs of worker {}: {}", worker_id, e) }),
-            ),
+            format!("Failed to list jobs of worker {}: {}", worker_id, e),
         ),
     }
 }
@@ -110,25 +117,25 @@ pub async fn list_jobs_of_worker(
 pub async fn delete_worker(
     Database(adapter): Database,
     Path(worker_id): Path<String>,
-) -> impl IntoResponse {
+) -> Response {
     match adapter.delete_worker(&worker_id) {
         Ok(_) => {
             tracing::info!("Worker <{}> deleted", worker_id);
-            (StatusCode::OK, Json(json!({ INFO_KEY: "deleted" })))
+            ok_message("deleted")
         }
-        Err(e) => (
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to delete worker: {}", e) })),
+            format!("Failed to delete worker: {}", e),
         ),
     }
 }
 
-pub async fn flush_disabled_jobs(Database(adapter): Database) -> impl IntoResponse {
+pub async fn flush_disabled_jobs(Database(adapter): Database) -> Response {
     match adapter.flush_disabled_jobs() {
-        Ok(_) => (StatusCode::OK, Json(json!({ INFO_KEY: "flushed" }))),
-        Err(e) => (
+        Ok(_) => ok_message("flushed"),
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to flush disabled jobs: {}", e) })),
+            format!("Failed to flush disabled jobs: {}", e),
         ),
     }
 }
@@ -137,12 +144,9 @@ pub async fn update_job_of_worker(
     Database(adapter): Database,
     Path((worker_id, mirror_id)): Path<(String, String)>,
     Json(mut status): Json<MirrorStatus>,
-) -> impl IntoResponse {
+) -> Response {
     if status.name.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ ERROR_KEY: "mirror Name should not be empty" })),
-        );
+        return error_response(StatusCode::BAD_REQUEST, "mirror Name should not be empty");
     }
 
     let _ = adapter.refresh_worker(&worker_id);
@@ -185,10 +189,10 @@ pub async fn update_job_of_worker(
     }
 
     match adapter.update_mirror_status(&worker_id, &mirror_id, status) {
-        Ok(new_status) => (StatusCode::OK, Json(json!(new_status))),
-        Err(e) => (
+        Ok(new_status) => ok_json(new_status),
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Failed to update job: {}", e) })),
+            format!("Failed to update job: {}", e),
         ),
     }
 }
@@ -207,7 +211,7 @@ pub async fn update_mirror_size(
     Database(adapter): Database,
     Path((worker_id, mirror_id)): Path<(String, String)>,
     Json(msg): Json<SizeMsg>,
-) -> impl IntoResponse {
+) -> Response {
     let _ = adapter.refresh_worker(&worker_id);
 
     match adapter.get_mirror_status(&worker_id, &mirror_id) {
@@ -215,19 +219,19 @@ pub async fn update_mirror_size(
             if !msg.size.is_empty() && msg.size != "unknown" {
                 status.size = msg.size;
                 match adapter.update_mirror_status(&worker_id, &mirror_id, status) {
-                    Ok(new_status) => (StatusCode::OK, Json(json!(new_status))),
-                    Err(e) => (
+                    Ok(new_status) => ok_json(new_status),
+                    Err(e) => error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ ERROR_KEY: format!("Failed to save size: {}", e) })),
+                        format!("Failed to save size: {}", e),
                     ),
                 }
             } else {
-                (StatusCode::OK, Json(json!(status)))
+                ok_json(status)
             }
         }
-        Err(e) => (
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: format!("Mirror not found: {}", e) })),
+            format!("Mirror not found: {}", e),
         ),
     }
 }
@@ -236,15 +240,12 @@ pub async fn update_schedules_of_worker(
     Database(adapter): Database,
     Path(worker_id): Path<String>,
     Json(schedules): Json<MirrorSchedules>,
-) -> impl IntoResponse {
+) -> Response {
     let _ = adapter.refresh_worker(&worker_id);
 
     for s in schedules.schedules {
         if s.name.is_empty() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ ERROR_KEY: "mirror Name should not be empty" })),
-            );
+            return error_response(StatusCode::BAD_REQUEST, "mirror Name should not be empty");
         }
 
         match adapter.get_mirror_status(&worker_id, &s.name) {
@@ -254,10 +255,11 @@ pub async fn update_schedules_of_worker(
                 }
                 status.next_scheduled = s.next_schedule;
                 if let Err(e) = adapter.update_mirror_status(&worker_id, &s.name, status) {
-                    return (
+                    return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(
-                            json!({ ERROR_KEY: format!("failed to update job {} of worker {}: {}", s.name, worker_id, e) }),
+                        format!(
+                            "failed to update job {} of worker {}: {}",
+                            s.name, worker_id, e
                         ),
                     );
                 }
@@ -273,14 +275,14 @@ pub async fn update_schedules_of_worker(
         }
     }
 
-    (StatusCode::OK, Json(json!({})))
+    ok_json(json!({}))
 }
 
 pub async fn handle_cmd(
     State(manager): State<Arc<Manager>>,
     Database(adapter): Database,
     Json(client_cmd): Json<ClientCmd>,
-) -> axum::response::Response {
+) -> Response {
     let worker_id = &client_cmd.worker_id;
 
     // Empty worker_id: Go aborts with 500 and no body (multi-worker routing
@@ -292,13 +294,10 @@ pub async fn handle_cmd(
     let worker = match adapter.get_worker(worker_id) {
         Ok(w) => w,
         Err(_) => {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
-                Json(json!({
-                    ERROR_KEY: format!("worker {} is not registered yet", worker_id)
-                })),
-            )
-                .into_response();
+                format!("worker {} is not registered yet", worker_id),
+            );
         }
     };
 
@@ -329,11 +328,7 @@ pub async fn handle_cmd(
     }
 
     let Some(ref client) = manager.http_client else {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ ERROR_KEY: "HTTP client not initialized" })),
-        )
-            .into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "HTTP client not initialized");
     };
 
     // Workers accept commands at POST / (worker URL ends with "/").
@@ -341,22 +336,10 @@ pub async fn handle_cmd(
     // 500 with a unified error JSON — no 502/504 discrimination.
     let url = worker.url.clone();
     match client.post(&url).json(&worker_cmd).send().await {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(json!({
-                INFO_KEY: format!("successfully send command to worker {}", worker_id)
-            })),
-        )
-            .into_response(),
-        Err(e) => (
+        Ok(_) => ok_message(&format!("successfully send command to worker {}", worker_id)),
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                ERROR_KEY: format!(
-                    "post command to worker {}({}) fail: {}",
-                    worker_id, url, e
-                )
-            })),
-        )
-            .into_response(),
+            format!("post command to worker {}({}) fail: {}", worker_id, url, e),
+        ),
     }
 }
