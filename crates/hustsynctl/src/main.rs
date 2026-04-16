@@ -438,7 +438,7 @@ async fn list_jobs(
             let mut expected_statuses = Vec::new();
             for st in filter_statuses {
                 match serde_json::from_str::<SyncStatus>(&st) {
-                    Ok(SyncStatus::Unknown) | Err(_) => {
+                    Err(_) => {
                         bail!(
                             "Invalid status filter: {}. Supported values: success, failed, syncing, pre-syncing, paused, disabled",
                             st

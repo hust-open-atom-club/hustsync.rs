@@ -195,6 +195,11 @@ pub async fn update_job_of_worker(
 
 #[derive(Deserialize)]
 pub struct SizeMsg {
+    /// Mirror name from the Go client payload; the handler uses the URL path name instead.
+    /// Accepted here so Go clients that send both `name` and `size` fields are not rejected.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub name: String,
     pub size: String,
 }
 

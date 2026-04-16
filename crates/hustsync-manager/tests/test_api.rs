@@ -536,3 +536,81 @@ async fn test_size_and_schedule_updates() {
             .contains("2030-01-01")
     );
 }
+
+#[tokio::test]
+async fn test_size_msg_accepts_name_field() {
+    // Go clients send {"name":"<mirror>","size":"<size>"} to the size endpoint.
+    // The `name` field must be accepted; the handler uses the URL path name, not the body.
+    let app = create_test_app("test_size_name_field");
+
+    let worker_id = "size-name-worker";
+    let mirror_id = "archlinux";
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workers")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({"id": worker_id, "url": "http://127.0.0.1", "token": ""}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workers/{}/jobs/{}", worker_id, mirror_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                    "name": mirror_id, "worker": worker_id, "upstream": "",
+                    "size": "0", "error_msg": "", "last_update": "2023-01-01T00:00:00Z",
+                    "last_started": "2023-01-01T00:00:00Z", "last_ended": "2023-01-01T00:00:00Z",
+                    "next_schedule": "2023-01-01T00:00:00Z", "status": "success", "is_master": true
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Send size update with both `name` and `size` fields (Go client payload shape).
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workers/{}/jobs/{}/size", worker_id, mirror_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({"name": mirror_id, "size": "234G"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Also verify size-only payload still works (name defaults to "").
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/workers/{}/jobs/{}/size", worker_id, mirror_id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(json!({"size": "500G"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
