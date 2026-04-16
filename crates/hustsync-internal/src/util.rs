@@ -10,8 +10,19 @@ use std::time::Duration;
 
 use crate::error::InternalError;
 
+/// Expand a leading `~/` to `$HOME/`. Leaves the path unchanged if
+/// `HOME` is unset or the path doesn't start with `~`.
+pub fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return format!("{}/{}", home.trim_end_matches('/'), rest);
+    }
+    path.to_string()
+}
+
 pub fn format_path(path: &str, name: &str) -> String {
-    path.replace("{{.Name}}", name)
+    expand_tilde(&path.replace("{{.Name}}", name))
 }
 
 fn rsync_exit_values_map() -> HashMap<i32, &'static str> {

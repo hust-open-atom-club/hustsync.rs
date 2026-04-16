@@ -50,8 +50,9 @@ impl Manager {
             }
         }
 
-        if !config.files.db_file.is_empty() {
-            match make_db_adapter(&config.files.db_type, &config.files.db_file) {
+        let db_file = hustsync_internal::util::expand_tilde(&config.files.db_file);
+        if !db_file.is_empty() {
+            match make_db_adapter(&config.files.db_type, &db_file) {
                 Ok(adapter) => {
                     if let Err(e) = adapter.init() {
                         tracing::error!("Failed to initialize database tables: {}", e);

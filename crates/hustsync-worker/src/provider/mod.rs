@@ -6,7 +6,7 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 use hustsync_config_parser::{MirrorConfig, WorkerConfig};
-use hustsync_internal::util::format_path;
+use hustsync_internal::util::{expand_tilde, format_path};
 
 use self::cmd_provider::{CmdProvider, CmdProviderConfig};
 use self::rsync_provider::{RsyncProvider, RsyncProviderConfig};
@@ -156,9 +156,10 @@ pub fn build_provider(
         format_path(explicit, name)
     } else {
         // No per-mirror mirror_dir: Go joins global.mirror_dir / sub_dir / name.
-        let base = global
+        let base_raw = global
             .and_then(|g| g.mirror_dir.as_deref())
             .unwrap_or("/tmp/hustsync");
+        let base = expand_tilde(base_raw);
         let sub = m_cfg.mirror_subdir.as_deref().unwrap_or("");
         let mut p = std::path::PathBuf::from(base);
         if !sub.is_empty() {
@@ -197,7 +198,7 @@ pub fn build_provider(
                 upstream_url: m_cfg.upstream.clone().unwrap_or_default(),
                 username: m_cfg.username.clone(),
                 password: m_cfg.password.clone(),
-                exclude_file: m_cfg.exclude_file.clone(),
+                exclude_file: m_cfg.exclude_file.as_deref().map(expand_tilde),
                 rsync_options: m_cfg.rsync_options.clone().unwrap_or_default(),
                 global_options: global
                     .and_then(|g| g.rsync_options.clone())
@@ -230,7 +231,7 @@ pub fn build_provider(
                 upstream_url: m_cfg.upstream.clone().unwrap_or_default(),
                 username: m_cfg.username.clone(),
                 password: m_cfg.password.clone(),
-                exclude_file: m_cfg.exclude_file.clone(),
+                exclude_file: m_cfg.exclude_file.as_deref().map(expand_tilde),
                 extra_options: m_cfg.rsync_options.clone().unwrap_or_default(),
                 rsync_no_timeout: m_cfg.rsync_no_timeout.unwrap_or(false),
                 rsync_timeout: m_cfg.rsync_timeout,
