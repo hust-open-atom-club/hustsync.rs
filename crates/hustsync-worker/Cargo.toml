@@ -4,12 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1"
 async-trait = "0.1.89"
 axum = "0.7"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 chrono = "0.4"
-futures = "0.3"
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 hustsync-internal = { version = "0.1.0", path = "../hustsync-internal" }
 nix = { version = "0.31.2", features = ["process", "signal"] }
