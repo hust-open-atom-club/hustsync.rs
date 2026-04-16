@@ -13,7 +13,7 @@ use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_
 
 use super::{
     CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
-    impl_provider_getters, inject_provider_env, log_provider_failure,
+    impl_provider_getters, inject_provider_env, log_provider_failure, run_child_with_cancellation,
 };
 
 /// Stage-1 option sets keyed by profile name.
@@ -269,41 +269,37 @@ impl TwoStageRsyncProvider {
             });
         }
 
-        let wait_result = tokio::select! {
-            wait_res = spawned_child.wait() => {
-                match wait_res {
-                    Ok(status) => {
-                        if status.success() {
-                            Ok(())
-                        } else {
-                            let (code, msg) = translate_rsync_exit_status(&status);
-                            let code = code.unwrap_or(-1);
-                            if let Some(ref m) = msg {
-                                use tokio::io::AsyncWriteExt;
-                                let _ = log_file.write_all(m.as_bytes()).await;
-                                let _ = log_file.write_all(b"\n").await;
-                            }
-                            let msg = msg.unwrap_or_else(|| {
-                                format!("rsync stage {} exited with status: {}", stage, status)
-                            });
-                            let kind = format!("Two-stage-rsync stage {stage}");
-                            log_provider_failure(&kind, &self.config.common.name, &msg, effective_log_file).await;
-                            Err(ProviderError::Execution { code, msg })
-                        }
+        // No per-stage timeout — the outer run() wraps both stages in the shared budget.
+        let wait_result = match run_child_with_cancellation(
+            &mut spawned_child,
+            std::time::Duration::ZERO,
+            &ctx.cancel,
+            &self.running_pgid,
+            &self.config.common.name,
+        )
+        .await
+        {
+            Ok(status) => {
+                if status.success() {
+                    Ok(())
+                } else {
+                    let (code, msg) = translate_rsync_exit_status(&status);
+                    let code = code.unwrap_or(-1);
+                    if let Some(ref m) = msg {
+                        use tokio::io::AsyncWriteExt;
+                        let _ = log_file.write_all(m.as_bytes()).await;
+                        let _ = log_file.write_all(b"\n").await;
                     }
-                    Err(e) => Err(ProviderError::Io(e)),
+                    let msg = msg.unwrap_or_else(|| {
+                        format!("rsync stage {} exited with status: {}", stage, status)
+                    });
+                    let kind = format!("Two-stage-rsync stage {stage}");
+                    log_provider_failure(&kind, &self.config.common.name, &msg, effective_log_file)
+                        .await;
+                    Err(ProviderError::Execution { code, msg })
                 }
             }
-            _ = ctx.cancel.cancelled() => {
-                tracing::warn!(
-                    "Two-stage-rsync provider {} cancelled during stage {}",
-                    self.config.common.name,
-                    stage
-                );
-                let _ = self.terminate().await;
-                let _ = spawned_child.wait().await;
-                Err(ProviderError::Terminated)
-            }
+            Err(e) => Err(e),
         };
 
         // Reset pgid after each stage so terminate() is a no-op between stages

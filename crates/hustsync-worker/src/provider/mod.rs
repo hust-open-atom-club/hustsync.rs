@@ -179,6 +179,63 @@ macro_rules! impl_provider_getters {
 
 pub(crate) use impl_provider_getters;
 
+/// Await a spawned child process, honoring both timeout and cancellation.
+///
+/// Returns `Ok(ExitStatus)` on normal exit, or `Err(ProviderError)` for
+/// cancellation, timeout, or I/O error. On cancel/timeout the process group
+/// is terminated via `terminate_pgid` and the child is waited to avoid
+/// zombies.
+///
+/// Pass `Duration::ZERO` for `timeout_dur` to disable timeout (cancellation
+/// still applies). Providers that manage timeout at an outer layer (e.g.
+/// two-stage wrapping both stages in one budget) should pass `ZERO` here.
+#[allow(clippy::cognitive_complexity)]
+pub(crate) async fn run_child_with_cancellation(
+    child: &mut tokio::process::Child,
+    timeout_dur: Duration,
+    cancel: &CancellationToken,
+    pgid: &AtomicU32,
+    name: &str,
+) -> Result<std::process::ExitStatus, ProviderError> {
+    if timeout_dur == Duration::ZERO {
+        tokio::select! {
+            wait_res = child.wait() => {
+                wait_res.map_err(ProviderError::Io)
+            }
+            _ = cancel.cancelled() => {
+                tracing::warn!("Provider {} cancelled", name);
+                terminate_pgid(pgid, name).await;
+                let _ = child.wait().await;
+                Err(ProviderError::Terminated)
+            }
+        }
+    } else {
+        match tokio::time::timeout(timeout_dur, async {
+            tokio::select! {
+                wait_res = child.wait() => wait_res.map(Some),
+                _ = cancel.cancelled() => Ok(None),
+            }
+        })
+        .await
+        {
+            Ok(Ok(Some(status))) => Ok(status),
+            Ok(Ok(None)) => {
+                tracing::warn!("Provider {} cancelled", name);
+                terminate_pgid(pgid, name).await;
+                let _ = child.wait().await;
+                Err(ProviderError::Terminated)
+            }
+            Ok(Err(e)) => Err(ProviderError::Io(e)),
+            Err(_elapsed) => {
+                tracing::warn!("Timeout occurred for {}", name);
+                terminate_pgid(pgid, name).await;
+                let _ = child.wait().await;
+                Err(ProviderError::Timeout(timeout_dur))
+            }
+        }
+    }
+}
+
 /// Execution context passed into every `run()` call.
 ///
 /// `cancel` carries the operator cancellation signal — providers must select on

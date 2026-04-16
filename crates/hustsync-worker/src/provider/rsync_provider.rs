@@ -1,18 +1,17 @@
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::fs::{File, create_dir_all};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
 
 use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
 
 use super::{
     CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
     impl_provider_getters, inject_provider_env, log_provider_failure,
+    run_child_with_cancellation,
 };
 
 pub struct RsyncProviderConfig {
@@ -198,78 +197,39 @@ impl MirrorProvider for RsyncProvider {
             });
         }
 
-        let result = if self.config.common.timeout == Duration::ZERO {
-            // Timeout disabled — still honour cancellation
-            tokio::select! {
-                wait_res = spawned_child.wait() => {
-                    match wait_res {
-                        Ok(status) => {
-                            if status.success() {
-                                Ok(())
-                            } else {
-                                let (code, msg) = translate_rsync_exit_status(&status);
-                                let code = code.unwrap_or(-1);
-                                if let Some(ref m) = msg {
-                                    use tokio::io::AsyncWriteExt;
-                                    let _ = log_file.write_all(m.as_bytes()).await;
-                                    let _ = log_file.write_all(b"\n").await;
-                                }
-                                let msg = msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                                log_provider_failure("Rsync", &self.config.common.name, &msg, &effective_log_file).await;
-                                Err(ProviderError::Execution { code, msg })
-                            }
-                        }
-                        Err(e) => Err(ProviderError::Io(e)),
+        let result = match run_child_with_cancellation(
+            &mut spawned_child,
+            self.config.common.timeout,
+            &ctx.cancel,
+            &self.running_pgid,
+            &self.config.common.name,
+        )
+        .await
+        {
+            Ok(status) => {
+                if status.success() {
+                    Ok(())
+                } else {
+                    let (code, msg) = translate_rsync_exit_status(&status);
+                    let code = code.unwrap_or(-1);
+                    if let Some(ref m) = msg {
+                        use tokio::io::AsyncWriteExt;
+                        let _ = log_file.write_all(m.as_bytes()).await;
+                        let _ = log_file.write_all(b"\n").await;
                     }
-                }
-                _ = ctx.cancel.cancelled() => {
-                    tracing::warn!("Rsync provider {} cancelled", self.config.common.name);
-                    let _ = self.terminate().await;
-                    let _ = spawned_child.wait().await;
-                    Err(ProviderError::Terminated)
+                    let msg =
+                        msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
+                    log_provider_failure(
+                        "Rsync",
+                        &self.config.common.name,
+                        &msg,
+                        &effective_log_file,
+                    )
+                    .await;
+                    Err(ProviderError::Execution { code, msg })
                 }
             }
-        } else {
-            match timeout(self.config.common.timeout, async {
-                tokio::select! {
-                    wait_res = spawned_child.wait() => wait_res.map(Some),
-                    _ = ctx.cancel.cancelled() => Ok(None),
-                }
-            })
-            .await
-            {
-                Ok(Ok(Some(status))) => {
-                    if status.success() {
-                        Ok(())
-                    } else {
-                        let (code, msg) = translate_rsync_exit_status(&status);
-                        let code = code.unwrap_or(-1);
-                        if let Some(ref m) = msg {
-                            use tokio::io::AsyncWriteExt;
-                            let _ = log_file.write_all(m.as_bytes()).await;
-                            let _ = log_file.write_all(b"\n").await;
-                        }
-                        let msg =
-                            msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                        log_provider_failure("Rsync", &self.config.common.name, &msg, &effective_log_file).await;
-                        Err(ProviderError::Execution { code, msg })
-                    }
-                }
-                Ok(Ok(None)) => {
-                    // cancelled
-                    tracing::warn!("Rsync provider {} cancelled", self.config.common.name);
-                    let _ = self.terminate().await;
-                    let _ = spawned_child.wait().await;
-                    Err(ProviderError::Terminated)
-                }
-                Ok(Err(e)) => Err(ProviderError::Io(e)),
-                Err(_elapsed) => {
-                    tracing::warn!("Timeout occurred for {}", self.config.common.name);
-                    let _ = self.terminate().await;
-                    let _ = spawned_child.wait().await;
-                    Err(ProviderError::Timeout(self.config.common.timeout))
-                }
-            }
+            Err(e) => Err(e),
         };
 
         self.running_pgid.store(0, Ordering::Release);
@@ -314,6 +274,7 @@ impl MirrorProvider for RsyncProvider {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     fn make_config(
         upstream_url: &str,

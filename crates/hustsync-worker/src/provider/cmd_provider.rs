@@ -1,12 +1,9 @@
 use std::process::Stdio;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use regex::Regex;
 use tokio::fs::{File, create_dir_all};
 use tokio::process::Command;
-use tokio::time::timeout;
-
 use tokio::sync::Mutex;
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,6 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use super::{
     CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
     impl_provider_getters, inject_provider_env, log_provider_failure,
+    run_child_with_cancellation,
 };
 
 pub struct CmdProviderConfig {
@@ -143,66 +141,29 @@ impl MirrorProvider for CmdProvider {
             self.running_pgid.store(pid, Ordering::Release);
         }
 
-        // Wait for the process to complete, respecting both timeout and cancellation
-        let result = if self.config.common.timeout == Duration::ZERO {
-            tokio::select! {
-                wait_res = spawned_child.wait() => {
-                    match wait_res {
-                        Ok(status) => {
-                            if status.success() {
-                                Ok(())
-                            } else {
-                                let code = status.code().unwrap_or(-1);
-                                let msg = format!("Command exited with status: {}", status);
-                                log_provider_failure("Cmd", &self.config.common.name, &msg, &effective_log_file).await;
-                                Err(ProviderError::Execution { code, msg })
-                            }
-                        }
-                        Err(e) => Err(ProviderError::Io(e)),
-                    }
-                }
-                _ = ctx.cancel.cancelled() => {
-                    tracing::warn!("Cmd provider {} cancelled", self.config.common.name);
-                    let _ = self.terminate().await;
-                    let _ = spawned_child.wait().await;
-                    Err(ProviderError::Terminated)
+        // Wait for the process to complete, respecting both timeout and cancellation.
+        // Terminated/Timeout/Io variants propagate via `?` at the call site.
+        let result = match run_child_with_cancellation(
+            &mut spawned_child,
+            self.config.common.timeout,
+            &ctx.cancel,
+            &self.running_pgid,
+            &self.config.common.name,
+        )
+        .await
+        {
+            Ok(status) => {
+                if status.success() {
+                    Ok(())
+                } else {
+                    let code = status.code().unwrap_or(-1);
+                    let msg = format!("Command exited with status: {}", status);
+                    log_provider_failure("Cmd", &self.config.common.name, &msg, &effective_log_file)
+                        .await;
+                    Err(ProviderError::Execution { code, msg })
                 }
             }
-        } else {
-            match timeout(self.config.common.timeout, async {
-                tokio::select! {
-                    wait_res = spawned_child.wait() => wait_res.map(Some),
-                    _ = ctx.cancel.cancelled() => Ok(None),
-                }
-            })
-            .await
-            {
-                Ok(Ok(Some(status))) => {
-                    if status.success() {
-                        Ok(())
-                    } else {
-                        let code = status.code().unwrap_or(-1);
-                        let msg = format!("Command exited with status: {}", status);
-                        log_provider_failure("Cmd", &self.config.common.name, &msg, &effective_log_file).await;
-                        Err(ProviderError::Execution { code, msg })
-                    }
-                }
-                Ok(Ok(None)) => {
-                    tracing::warn!("Cmd provider {} cancelled", self.config.common.name);
-                    let _ = self.terminate().await;
-                    let _ = spawned_child.wait().await;
-                    Err(ProviderError::Terminated)
-                }
-                Ok(Err(e)) => Err(ProviderError::Io(e)),
-                Err(_elapsed) => {
-                    // Timeout occurred, kill the child explicitly
-                    tracing::warn!("Timeout occurred for {}", self.config.common.name);
-                    let _ = self.terminate().await;
-                    // Wait for it to actually die after sending the signal
-                    let _ = spawned_child.wait().await;
-                    Err(ProviderError::Timeout(self.config.common.timeout))
-                }
-            }
+            Err(e) => Err(e),
         };
 
         // Clear the PID
@@ -265,6 +226,7 @@ impl MirrorProvider for CmdProvider {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     fn setup_provider(
