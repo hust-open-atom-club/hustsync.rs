@@ -42,6 +42,7 @@ mod cmd_provider_contract {
                 timeout,
                 env: HashMap::new(),
                 is_master: true,
+                success_exit_codes: vec![],
             },
             command: command.to_string(),
             fail_on_match,

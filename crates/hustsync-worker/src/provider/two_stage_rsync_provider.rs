@@ -260,6 +260,16 @@ impl TwoStageRsyncProvider {
             Ok(status) => {
                 if status.success() {
                     Ok(())
+                } else if let Some(code) = status.code()
+                    && self.config.common.success_exit_codes.contains(&code)
+                {
+                    tracing::info!(
+                        "{} stage {} exited with code {} (in success_exit_codes allowlist)",
+                        self.config.common.name,
+                        stage,
+                        code
+                    );
+                    Ok(())
                 } else {
                     let (code, msg) = translate_rsync_exit_status(&status);
                     let code = code.unwrap_or(-1);

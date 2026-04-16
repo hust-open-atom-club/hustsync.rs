@@ -55,6 +55,7 @@ fn make_config(
             timeout: Duration::from_secs(5),
             env,
             is_master: true,
+            success_exit_codes: vec![],
         },
         command: fake_rsync_path(),
         stage1_profile: "debian".to_string(),

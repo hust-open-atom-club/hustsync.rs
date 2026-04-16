@@ -71,6 +71,12 @@ pub struct CommonProviderConfig {
     pub timeout: Duration,
     pub env: HashMap<String, String>,
     pub is_master: bool,
+    /// Exit codes that are treated as success in addition to 0.
+    ///
+    /// Merged from global and per-mirror config at construction time.
+    /// Rsync-specific codes are only included for rsync/two-stage-rsync
+    /// providers.
+    pub success_exit_codes: Vec<i32>,
 }
 
 /// Read the last `max_lines` non-empty lines from a log file.
@@ -455,6 +461,45 @@ pub fn build_provider(
     let is_master = m_cfg.role.as_deref() != Some("slave");
     let p_type = m_cfg.provider.as_deref().unwrap_or("rsync");
 
+    // Merge success exit code allowlists.  Order mirrors Go worker/provider.go:
+    // global generic → per-mirror generic → global rsync-specific →
+    // per-mirror rsync-specific.  Rsync-specific codes only apply to
+    // rsync/two-stage-rsync; a non-rsync mirror that sets
+    // rsync_success_exit_codes gets a warning and the codes are dropped.
+    let success_exit_codes = {
+        let mut codes: Vec<i32> = Vec::new();
+
+        if let Some(gc) = global.and_then(|g| g.dangerous_global_success_exit_codes.as_ref()) {
+            codes.extend(gc);
+        }
+        if let Some(mc) = m_cfg.success_exit_codes.as_ref() {
+            codes.extend(mc);
+        }
+
+        let is_rsync_provider = matches!(p_type, "rsync" | "two-stage-rsync");
+        if is_rsync_provider {
+            if let Some(grc) = global
+                .and_then(|g| g.dangerous_global_rsync_success_exit_codes.as_ref())
+            {
+                codes.extend(grc);
+            }
+            if let Some(mrc) = m_cfg.rsync_success_exit_codes.as_ref() {
+                codes.extend(mrc);
+            }
+        } else if m_cfg.rsync_success_exit_codes.is_some() {
+            tracing::warn!(
+                "mirror {}: rsync_success_exit_codes is set but provider is '{}', ignoring",
+                name,
+                p_type
+            );
+        }
+
+        // Deduplicate while preserving insertion order.
+        let mut seen = std::collections::HashSet::new();
+        codes.retain(|c| seen.insert(*c));
+        codes
+    };
+
     let common = CommonProviderConfig {
         name: name.to_string(),
         upstream_url: m_cfg.upstream.clone().unwrap_or_default(),
@@ -466,6 +511,7 @@ pub fn build_provider(
         timeout: Duration::from_secs(timeout as u64),
         env: m_cfg.env.clone().unwrap_or_default(),
         is_master,
+        success_exit_codes,
     };
 
     match p_type {

@@ -191,6 +191,15 @@ impl MirrorProvider for RsyncProvider {
             Ok(status) => {
                 if status.success() {
                     Ok(())
+                } else if let Some(code) = status.code()
+                    && self.config.common.success_exit_codes.contains(&code)
+                {
+                    tracing::info!(
+                        "{} exited with code {} (in success_exit_codes allowlist)",
+                        self.config.common.name,
+                        code
+                    );
+                    Ok(())
                 } else {
                     let (code, msg) = translate_rsync_exit_status(&status);
                     let code = code.unwrap_or(-1);
@@ -268,6 +277,38 @@ mod tests {
         command: &str,
         retry: u32,
     ) -> RsyncProviderConfig {
+        make_config_with_exit_codes(
+            upstream_url,
+            rsync_override,
+            rsync_override_only,
+            rsync_no_timeout,
+            rsync_timeout,
+            use_ipv6,
+            use_ipv4,
+            rsync_options,
+            global_options,
+            exclude_file,
+            command,
+            retry,
+            vec![],
+        )
+    }
+
+    fn make_config_with_exit_codes(
+        upstream_url: &str,
+        rsync_override: Option<Vec<String>>,
+        rsync_override_only: bool,
+        rsync_no_timeout: bool,
+        rsync_timeout: Option<u32>,
+        use_ipv6: bool,
+        use_ipv4: bool,
+        rsync_options: Vec<String>,
+        global_options: Vec<String>,
+        exclude_file: Option<String>,
+        command: &str,
+        retry: u32,
+        success_exit_codes: Vec<i32>,
+    ) -> RsyncProviderConfig {
         RsyncProviderConfig {
             common: CommonProviderConfig {
                 name: "test".to_string(),
@@ -280,6 +321,7 @@ mod tests {
                 timeout: Duration::from_secs(3600),
                 env: HashMap::new(),
                 is_master: true,
+                success_exit_codes,
             },
             command: command.to_string(),
             username: None,
@@ -440,5 +482,50 @@ mod tests {
                     .contains("rsync_override_only is set but no rsync_override provided")
             ),
         }
+    }
+
+    /// A provider with success_exit_codes = [23] must return Ok(()) when the
+    /// command exits with code 23, even though rsync treats 23 as a partial
+    /// transfer error.
+    #[tokio::test]
+    async fn test_rsync_success_exit_code_allowlist() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let log_file = dir.path().join("test.log");
+
+        // Use `sh -c 'exit 23'` as a stand-in for rsync exiting with code 23.
+        let config = make_config_with_exit_codes(
+            "rsync://example.com/test/",
+            // Override the rsync binary with sh so we can control the exit code
+            // without needing a real rsync upstream.
+            Some(vec!["-c".to_string(), "exit 23".to_string()]),
+            true,
+            true,
+            None,
+            false,
+            false,
+            vec![],
+            vec![],
+            None,
+            "sh",
+            2,
+            vec![23],
+        );
+
+        // Patch working_dir and log paths to the temp dir.
+        let mut cfg = config;
+        cfg.common.working_dir = dir.path().to_str().unwrap().to_string();
+        cfg.common.log_dir = dir.path().to_str().unwrap().to_string();
+        cfg.common.log_file = log_file.to_str().unwrap().to_string();
+
+        let provider = RsyncProvider::new(cfg).unwrap();
+        let result = provider.run(RunContext::default()).await;
+
+        assert!(
+            result.is_ok(),
+            "expected Ok(()) for allowlisted exit code 23, got {:?}",
+            result
+        );
     }
 }

@@ -85,6 +85,7 @@ fn config_from_fixture(f: &ArgvFixture) -> RsyncProviderConfig {
             timeout: Duration::from_secs(7200),
             env: f.env.clone(),
             is_master: true,
+            success_exit_codes: vec![],
         },
         command: "rsync".to_string(),
         username: f.config.username.clone(),
@@ -192,6 +193,7 @@ fn zero_rsync_timeout_falls_back_to_default_not_zero() {
             timeout: Duration::from_secs(7200),
             env: HashMap::new(),
             is_master: true,
+            success_exit_codes: vec![],
         },
         command: "rsync".to_string(),
         username: None,
@@ -247,6 +249,7 @@ async fn run_returns_timeout_error_when_deadline_exceeded() {
             timeout: Duration::from_secs(1),
             env: HashMap::new(),
             is_master: true,
+            success_exit_codes: vec![],
         },
         // Use `sh` as the executable with the sleep command as an override so
         // the binary validation in RsyncProvider::new does not reject it.
@@ -306,6 +309,7 @@ async fn run_returns_terminated_on_cancel() {
             timeout: Duration::ZERO,
             env: HashMap::new(),
             is_master: true,
+            success_exit_codes: vec![],
         },
         command: "sh".to_string(),
         username: None,

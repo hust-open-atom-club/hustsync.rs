@@ -151,6 +151,15 @@ impl MirrorProvider for CmdProvider {
             Ok(status) => {
                 if status.success() {
                     Ok(())
+                } else if let Some(code) = status.code()
+                    && self.config.common.success_exit_codes.contains(&code)
+                {
+                    tracing::info!(
+                        "{} exited with code {} (in success_exit_codes allowlist)",
+                        self.config.common.name,
+                        code
+                    );
+                    Ok(())
                 } else {
                     let code = status.code().unwrap_or(-1);
                     let msg = format!("Command exited with status: {}", status);
@@ -244,6 +253,7 @@ mod tests {
                 timeout: Duration::from_secs(timeout_secs),
                 env: HashMap::new(),
                 is_master: true,
+                success_exit_codes: vec![],
             },
             command: command.to_string(),
             fail_on_match: None,
