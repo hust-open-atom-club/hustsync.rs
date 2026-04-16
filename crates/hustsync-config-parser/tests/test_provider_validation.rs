@@ -18,6 +18,7 @@ fn worker_with_single_mirror(mirror: MirrorConfig) -> WorkerConfig {
         cgroup: None,
         server: None,
         mirrors: Some(vec![mirror]),
+        include: None,
     }
 }
 

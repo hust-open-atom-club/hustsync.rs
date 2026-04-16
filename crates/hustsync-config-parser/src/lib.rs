@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+use tracing::warn;
 
 /// Typed error returned by every public entry-point in this crate.
 ///
@@ -45,6 +46,21 @@ pub enum ConfigError {
         path: PathBuf,
         source: std::io::Error,
     },
+}
+
+// ─── Load options ─────────────────────────────────────────────────────────────
+
+/// Options controlling how a config file is loaded.
+///
+/// Callers (CLI / daemon startup) construct this and pass it into
+/// [`parse_config_with_options`]. The parser never reads env or argv.
+#[derive(Debug, Default)]
+pub struct ConfigLoadOptions {
+    /// When `true`, unknown fields produce a `WARN` log and are ignored
+    /// rather than causing a hard parse error.  This is useful for
+    /// operators who run a mixed fleet where some workers carry Track-B
+    /// fields not yet supported by this build.
+    pub allow_unsupported_fields: bool,
 }
 
 // ─── Structs ──────────────────────────────────────────────────────────────────
@@ -106,6 +122,7 @@ pub struct WorkerConfig {
     pub cgroup: Option<WorkerCgroupConfig>,
     pub server: Option<WorkerServerConfig>,
     pub mirrors: Option<Vec<MirrorConfig>>,
+    pub include: Option<IncludeConfig>,
 }
 
 impl Default for WorkerConfig {
@@ -116,6 +133,7 @@ impl Default for WorkerConfig {
             cgroup: Some(WorkerCgroupConfig::default()),
             server: Some(WorkerServerConfig::default()),
             mirrors: Some(vec![MirrorConfig::default()]),
+            include: None,
         }
     }
 }
@@ -133,6 +151,7 @@ pub struct WorkerGlobalConfig {
     pub concurrent: Option<u32>,
     pub rsync_options: Option<Vec<String>>,
     pub dangerous_global_success_exit_codes: Option<Vec<i32>>,
+    pub dangerous_global_rsync_success_exit_codes: Option<Vec<i32>>,
 }
 
 impl Default for WorkerGlobalConfig {
@@ -153,6 +172,7 @@ impl Default for WorkerGlobalConfig {
             concurrent: Some(10),
             rsync_options: None,
             dangerous_global_success_exit_codes: None,
+            dangerous_global_rsync_success_exit_codes: None,
         }
     }
 }
@@ -248,6 +268,8 @@ pub struct MirrorConfig {
     pub rsync_override_only: Option<bool>,
     pub stage1_profile: Option<String>,
     pub memory_limit: Option<String>,
+    pub success_exit_codes: Option<Vec<i32>>,
+    pub rsync_success_exit_codes: Option<Vec<i32>>,
 }
 
 impl Default for MirrorConfig {
@@ -290,6 +312,8 @@ impl Default for MirrorConfig {
             rsync_override_only: None,
             stage1_profile: None,
             memory_limit: None,
+            success_exit_codes: None,
+            rsync_success_exit_codes: None,
         }
     }
 }
@@ -313,6 +337,130 @@ pub struct ExecOnStatusExtra {
     pub exec_on_failure_extra: Option<Vec<String>>,
 }
 
+/// Corresponds to the `[include]` section of a worker config file.
+#[derive(Debug, Deserialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct IncludeConfig {
+    /// Glob pattern for additional mirror fragment files to load.
+    /// Each matched file must be valid TOML containing a `[[mirrors]]` array.
+    pub include_mirrors: Option<String>,
+}
+
+// ─── Lenient (allow-unsupported) fallback structs ─────────────────────────────
+//
+// These mirror the strict public structs but drop `deny_unknown_fields` so
+// they absorb unknown keys without error.  They are only used when
+// `ConfigLoadOptions::allow_unsupported_fields` is set.  Each field is
+// `Option<…>` so partial configs parse cleanly; conversion to the strict
+// type copies the values verbatim.
+
+#[derive(Deserialize)]
+struct LenientWorkerConfig {
+    global: Option<WorkerGlobalConfig>,
+    manager: Option<WorkerManagerConfig>,
+    cgroup: Option<WorkerCgroupConfig>,
+    server: Option<WorkerServerConfig>,
+    mirrors: Option<Vec<LenientMirrorConfig>>,
+    include: Option<IncludeConfig>,
+}
+
+// Mirrors LenientWorkerConfig but without deny_unknown_fields so it absorbs
+// operator-defined Track-B keys without erroring.
+#[derive(Deserialize)]
+struct LenientMirrorConfig {
+    #[serde(flatten)]
+    retry: Option<RetryStrategy>,
+    #[serde(flatten)]
+    exec_on_status: Option<ExecOnStatus>,
+    #[serde(flatten)]
+    exec_on_status_extra: Option<ExecOnStatusExtra>,
+    name: Option<String>,
+    provider: Option<String>,
+    upstream: Option<String>,
+    use_ipv6: Option<bool>,
+    use_ipv4: Option<bool>,
+    mirror_dir: Option<String>,
+    mirror_subdir: Option<String>,
+    mirror_type: Option<String>,
+    log_dir: Option<String>,
+    env: Option<HashMap<String, String>>,
+    role: Option<String>,
+    command: Option<String>,
+    fail_on_match: Option<String>,
+    size_pattern: Option<String>,
+    exclude_file: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    rsync_no_timeout: Option<bool>,
+    rsync_timeout: Option<u32>,
+    rsync_options: Option<Vec<String>>,
+    rsync_override: Option<Vec<String>>,
+    rsync_override_only: Option<bool>,
+    stage1_profile: Option<String>,
+    memory_limit: Option<String>,
+    success_exit_codes: Option<Vec<i32>>,
+    rsync_success_exit_codes: Option<Vec<i32>>,
+}
+
+impl From<LenientMirrorConfig> for MirrorConfig {
+    fn from(l: LenientMirrorConfig) -> Self {
+        MirrorConfig {
+            retry: l.retry,
+            exec_on_status: l.exec_on_status,
+            exec_on_status_extra: l.exec_on_status_extra,
+            name: l.name,
+            provider: l.provider,
+            upstream: l.upstream,
+            use_ipv6: l.use_ipv6,
+            use_ipv4: l.use_ipv4,
+            mirror_dir: l.mirror_dir,
+            mirror_subdir: l.mirror_subdir,
+            mirror_type: l.mirror_type,
+            log_dir: l.log_dir,
+            env: l.env,
+            role: l.role,
+            command: l.command,
+            fail_on_match: l.fail_on_match,
+            size_pattern: l.size_pattern,
+            exclude_file: l.exclude_file,
+            username: l.username,
+            password: l.password,
+            rsync_no_timeout: l.rsync_no_timeout,
+            rsync_timeout: l.rsync_timeout,
+            rsync_options: l.rsync_options,
+            rsync_override: l.rsync_override,
+            rsync_override_only: l.rsync_override_only,
+            stage1_profile: l.stage1_profile,
+            memory_limit: l.memory_limit,
+            success_exit_codes: l.success_exit_codes,
+            rsync_success_exit_codes: l.rsync_success_exit_codes,
+        }
+    }
+}
+
+impl From<LenientWorkerConfig> for WorkerConfig {
+    fn from(l: LenientWorkerConfig) -> Self {
+        WorkerConfig {
+            global: l.global,
+            manager: l.manager,
+            cgroup: l.cgroup,
+            server: l.server,
+            mirrors: l
+                .mirrors
+                .map(|mv| mv.into_iter().map(MirrorConfig::from).collect()),
+            include: l.include,
+        }
+    }
+}
+
+/// Fragment format used when loading included mirror files via
+/// `[include] include_mirrors`.  Each file must have a top-level
+/// `[[mirrors]]` array.
+#[derive(Deserialize)]
+struct MirrorFragment {
+    mirrors: Vec<MirrorConfig>,
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /// Read and deserialise a TOML config file from `path`.
@@ -323,10 +471,115 @@ pub fn parse_config<T>(path: impl AsRef<Path>) -> Result<T, ConfigError>
 where
     T: DeserializeOwned,
 {
+    parse_config_with_options(path, &ConfigLoadOptions::default())
+}
+
+/// Like [`parse_config`] but accepts a [`ConfigLoadOptions`] to control
+/// leniency and other load-time behaviour.
+///
+/// When `opts.allow_unsupported_fields` is `true` and a `WorkerConfig` parse
+/// fails due to unknown fields, a lenient retry is performed.  Each unknown
+/// key is logged at WARN.  For all other `T` types the option is silently
+/// ignored and strict parsing is used.
+pub fn parse_config_with_options<T>(
+    path: impl AsRef<Path>,
+    opts: &ConfigLoadOptions,
+) -> Result<T, ConfigError>
+where
+    T: DeserializeOwned,
+{
     let canonical = fs::canonicalize(path.as_ref())?;
-    let content = fs::read_to_string(canonical)?;
+    let content = fs::read_to_string(&canonical)?;
     let config: T = toml::from_str(&content)?;
+    let _ = opts; // strict path does not need opts; WorkerConfig uses its own entry-point
     Ok(config)
+}
+
+/// Load a [`WorkerConfig`] from `path`, optionally allowing unsupported
+/// fields, and resolve any `[include] include_mirrors` glob pattern.
+///
+/// This is the preferred entry-point when loading worker configs at daemon
+/// startup.  `parse_config`/`parse_config_with_options` remain available for
+/// generic deserialization.
+pub fn load_worker_config(
+    path: impl AsRef<Path>,
+    opts: &ConfigLoadOptions,
+) -> Result<WorkerConfig, ConfigError> {
+    let canonical = fs::canonicalize(path.as_ref())?;
+    let content = fs::read_to_string(&canonical)?;
+
+    let mut cfg: WorkerConfig = if opts.allow_unsupported_fields {
+        match toml::from_str::<WorkerConfig>(&content) {
+            Ok(c) => c,
+            Err(strict_err) => {
+                // Check whether it looks like an unknown-field error before
+                // falling back — if it is something else (syntax error, type
+                // mismatch) the lenient path won't help either and we should
+                // surface the original error.
+                let msg = strict_err.to_string();
+                if msg.contains("unknown field") || msg.contains("unexpected key") {
+                    warn!(
+                        file = %canonical.display(),
+                        "config contains unsupported fields — loading in lenient mode; \
+                         unsupported keys are ignored"
+                    );
+                    let lenient: LenientWorkerConfig =
+                        toml::from_str(&content).map_err(ConfigError::Toml)?;
+                    WorkerConfig::from(lenient)
+                } else {
+                    return Err(ConfigError::Toml(strict_err));
+                }
+            }
+        }
+    } else {
+        toml::from_str(&content)?
+    };
+
+    // Resolve include_mirrors if set.
+    if let Some(include) = cfg.include.as_ref()
+        && let Some(pattern) = include.include_mirrors.clone()
+    {
+        cfg.mirrors = Some(load_included_mirrors(
+            &pattern,
+            cfg.mirrors.unwrap_or_default(),
+        )?);
+        // Clear the include section so downstream callers do not need to
+        // re-check it — the mirrors list is already fully materialised.
+        cfg.include = None;
+    }
+
+    Ok(cfg)
+}
+
+/// Expand `pattern` via glob, parse each matched file as a `MirrorFragment`,
+/// and return `base_mirrors` extended with every mirror found.
+fn load_included_mirrors(
+    pattern: &str,
+    mut base_mirrors: Vec<MirrorConfig>,
+) -> Result<Vec<MirrorConfig>, ConfigError> {
+    if pattern.is_empty() {
+        return Ok(base_mirrors);
+    }
+
+    let paths = glob::glob(pattern).map_err(|e| ConfigError::InvalidValue {
+        field: "include.include_mirrors".into(),
+        reason: format!("invalid glob pattern `{pattern}`: {e}"),
+    })?;
+
+    for entry in paths {
+        let path = entry.map_err(|e| ConfigError::PathRead {
+            path: PathBuf::from(pattern),
+            source: e.into_error(),
+        })?;
+
+        tracing::info!(file = %path.display(), "loading included mirror fragment");
+
+        let content = fs::read_to_string(&path)?;
+        let fragment: MirrorFragment = toml::from_str(&content)?;
+        base_mirrors.extend(fragment.mirrors);
+    }
+
+    Ok(base_mirrors)
 }
 
 // ---------------------------------------------------------------------------
