@@ -9,6 +9,47 @@ use hustsync_manager::Manager;
 use hustsync_worker::Worker;
 use tracing::{info, warn};
 
+/// Wait for SIGTERM or SIGINT on Unix; Ctrl-C on other platforms.
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to install SIGTERM handler: {}", e);
+            return;
+        }
+    };
+    let mut sigint = match signal(SignalKind::interrupt()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to install SIGINT handler: {}", e);
+            return;
+        }
+    };
+    wait_for_unix_signal(&mut sigterm, &mut sigint).await;
+}
+
+#[cfg(unix)]
+async fn wait_for_unix_signal(
+    sigterm: &mut tokio::signal::unix::Signal,
+    sigint: &mut tokio::signal::unix::Signal,
+) {
+    tokio::select! {
+        _ = sigterm.recv() => tracing::info!("Received SIGTERM, shutting down..."),
+        _ = sigint.recv() => tracing::info!("Received SIGINT, shutting down..."),
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    if let Err(e) = tokio::signal::ctrl_c().await {
+        tracing::error!("Failed to install Ctrl-C handler: {}", e);
+        return;
+    }
+    tracing::info!("Received Ctrl-C, shutting down...");
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "hustsync-cli",
@@ -136,8 +177,9 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<()> {
     };
     info!("Run hustsync manager server.");
 
-    Arc::new(manager)
-        .run()
+    let manager = Arc::new(manager);
+    Arc::clone(&manager)
+        .run(shutdown_signal())
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| "manager start")?;
@@ -166,6 +208,14 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
     info!("Initializing HustSync Worker...");
 
     let worker = Worker::new(config);
+    // Signal delivery is decoupled from the worker's exit_token so the
+    // worker's existing shutdown path (exit_token.cancelled() → shutdown())
+    // handles cleanup without any changes to worker internals.
+    let exit_token = worker.exit_token.clone();
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        exit_token.cancel();
+    });
     worker.run().await;
 
     Ok(())

@@ -108,7 +108,10 @@ impl Manager {
         router.with_state(self)
     }
 
-    pub async fn run(self: Arc<Self>) -> Result<(), ManagerError> {
+    pub async fn run<F>(self: Arc<Self>, shutdown: F) -> Result<(), ManagerError>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
         let addr = format!("{}:{}", self.config.server.addr, self.config.server.port);
         let socket_addr: std::net::SocketAddr = addr
             .parse()
@@ -130,6 +133,7 @@ impl Manager {
                 .map_err(|e| ManagerError::Bind(e.to_string()))?;
             tracing::info!("Manager (HTTP) listening on {}", addr);
             axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown)
                 .await
                 .map_err(|e| ManagerError::Bind(e.to_string()))?;
         } else {
@@ -141,7 +145,16 @@ impl Manager {
             .map_err(|e| ManagerError::Tls(e.to_string()))?;
 
             tracing::info!("Manager (HTTPS) listening on {}", addr);
+            let handle = axum_server::Handle::new();
+            tokio::spawn({
+                let handle = handle.clone();
+                async move {
+                    shutdown.await;
+                    handle.graceful_shutdown(Some(Duration::from_secs(30)));
+                }
+            });
             axum_server::bind_rustls(socket_addr, tls_config)
+                .handle(handle)
                 .serve(app.into_make_service())
                 .await
                 .map_err(|e| ManagerError::Bind(e.to_string()))?;
