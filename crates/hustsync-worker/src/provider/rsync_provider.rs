@@ -305,7 +305,12 @@ impl MirrorProvider for RsyncProvider {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::too_many_arguments
+)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
