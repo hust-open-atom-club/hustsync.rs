@@ -20,6 +20,8 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+**/.DS_Store
+.DS_Store
 .local
 
 # Local Claude Code harness state — not shared across collaborators
