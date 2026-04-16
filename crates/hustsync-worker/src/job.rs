@@ -2,7 +2,7 @@ use hustsync_internal::status::SyncStatus;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep};
+use tokio::time::Duration;
 
 use crate::JobMessage;
 use crate::provider::{MirrorProvider, ProviderError};
@@ -261,7 +261,6 @@ impl JobActor {
         for i in 0..retries {
             if i > 0 {
                 tracing::info!("Job {} retrying sync (attempt {}/{})", name, i + 1, retries);
-                sleep(Duration::from_secs(2)).await;
             }
             hook_ctx.attempt = i + 1;
 
