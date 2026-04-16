@@ -85,7 +85,9 @@ impl ScheduleQueue {
         let sched_time = if diff.num_milliseconds() <= 0 {
             Instant::now()
         } else {
-            Instant::now() + std::time::Duration::from_millis(diff.num_milliseconds() as u64)
+            #[allow(clippy::cast_sign_loss)] // guarded by `diff > 0` above
+            let millis = diff.num_milliseconds() as u64;
+            Instant::now() + std::time::Duration::from_millis(millis)
         };
 
         if self.jobs_time.contains_key(&job.name) {

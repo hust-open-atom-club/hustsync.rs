@@ -309,7 +309,7 @@ impl MirrorProvider for CmdProvider {
             #[cfg(unix)]
             {
                 // Send SIGKILL to the entire process group (negative PID)
-                let pgid = Pid::from_raw(-(pid as i32));
+                let pgid = Pid::from_raw(-i32::try_from(pid).unwrap_or(i32::MAX));
                 if let Err(e) = signal::kill(pgid, Signal::SIGKILL) {
                     tracing::debug!("Failed to send SIGKILL to pgid {}: {}", pgid, e);
                 }
@@ -410,7 +410,9 @@ mod tests {
     #[tokio::test]
     async fn test_cmd_fail_on_match() {
         let (mut provider, _dir) = setup_provider("test_fail", "echo 'ERROR: disk full'", 5);
-        provider.fail_on_match = Some(Regex::new("ERROR").unwrap());
+        #[allow(clippy::trivial_regex)]
+        let re = Regex::new("ERROR").unwrap();
+        provider.fail_on_match = Some(re);
         let res = provider.run(RunContext::default()).await;
 
         assert!(res.is_err());

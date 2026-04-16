@@ -353,7 +353,7 @@ impl MirrorProvider for RsyncProvider {
             tracing::warn!("Terminating rsync provider for {}", self.config.name);
             #[cfg(unix)]
             {
-                let pgid = Pid::from_raw(-(pid as i32));
+                let pgid = Pid::from_raw(-i32::try_from(pid).unwrap_or(i32::MAX));
                 if let Err(e) = signal::kill(pgid, Signal::SIGKILL) {
                     tracing::debug!("Failed to send SIGKILL to pgid {}: {}", pgid, e);
                 }
