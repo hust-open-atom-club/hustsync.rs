@@ -330,7 +330,12 @@ impl JobActor {
                     return Ok(());
                 }
                 Err(e) => {
-                    tracing::warn!("Job {} sync failed: {}", name, e);
+                    tracing::warn!(
+                        "Job {} sync failed: {} (see log: {})",
+                        name,
+                        e,
+                        provider.log_file().display()
+                    );
                     Self::run_post(PostPhase::PostFail, &hooks, pre_exec_count, &mut hook_ctx)
                         .await;
 

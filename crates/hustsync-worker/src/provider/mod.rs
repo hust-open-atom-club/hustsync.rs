@@ -16,6 +16,19 @@ pub mod cmd_provider;
 pub mod rsync_provider;
 pub mod two_stage_rsync_provider;
 
+/// Read the last `max_lines` non-empty lines from a log file.
+/// Returns an empty string on any I/O error — callers use this for
+/// best-effort diagnostic context, never for control flow.
+pub(crate) async fn tail_log_file(path: &str, max_lines: usize) -> String {
+    let content = match tokio::fs::read_to_string(path).await {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
+}
+
 /// Execution context passed into every `run()` call.
 ///
 /// `cancel` carries the operator cancellation signal — providers must select on

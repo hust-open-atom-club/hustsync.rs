@@ -17,7 +17,7 @@ use nix::unistd::Pid;
 
 use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
 
-use super::{MirrorProvider, ProviderError, ProviderType, RunContext};
+use super::{MirrorProvider, ProviderError, ProviderType, RunContext, tail_log_file};
 
 pub struct RsyncProviderConfig {
     pub name: String,
@@ -277,7 +277,12 @@ impl MirrorProvider for RsyncProvider {
                                     let _ = log_file.write_all(b"\n").await;
                                 }
                                 let msg = msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                                tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
+                                let tail = tail_log_file(&effective_log_file, 5).await;
+                                if tail.is_empty() {
+                                    tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
+                                } else {
+                                    tracing::error!("Rsync failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
+                                }
                                 Err(ProviderError::Execution { code, msg })
                             }
                         }
@@ -313,7 +318,12 @@ impl MirrorProvider for RsyncProvider {
                         }
                         let msg =
                             msg.unwrap_or_else(|| format!("rsync exited with status: {}", status));
-                        tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
+                        let tail = tail_log_file(&effective_log_file, 5).await;
+                        if tail.is_empty() {
+                            tracing::error!("Rsync failed for {}: {}", self.config.name, msg);
+                        } else {
+                            tracing::error!("Rsync failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
+                        }
                         Err(ProviderError::Execution { code, msg })
                     }
                 }

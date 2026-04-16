@@ -17,7 +17,7 @@ use nix::unistd::Pid;
 
 use hustsync_internal::util::{extract_size_from_rsync_log, translate_rsync_exit_status};
 
-use super::{MirrorProvider, ProviderError, ProviderType, RunContext};
+use super::{MirrorProvider, ProviderError, ProviderType, RunContext, tail_log_file};
 
 /// Stage-1 option sets keyed by profile name.
 ///
@@ -229,6 +229,7 @@ impl TwoStageRsyncProvider {
         &self,
         stage: u8,
         log_file: &mut File,
+        effective_log_file: &str,
         ctx: &RunContext,
     ) -> Result<(), ProviderError> {
         let args = self.build_args_for_stage(stage)?;
@@ -310,12 +311,23 @@ impl TwoStageRsyncProvider {
                             let msg = msg.unwrap_or_else(|| {
                                 format!("rsync stage {} exited with status: {}", stage, status)
                             });
-                            tracing::error!(
-                                "Two-stage-rsync stage {} failed for {}: {}",
-                                stage,
-                                self.config.name,
-                                msg
-                            );
+                            let tail = tail_log_file(effective_log_file, 5).await;
+                            if tail.is_empty() {
+                                tracing::error!(
+                                    "Two-stage-rsync stage {} failed for {}: {}",
+                                    stage,
+                                    self.config.name,
+                                    msg
+                                );
+                            } else {
+                                tracing::error!(
+                                    "Two-stage-rsync stage {} failed for {}: {}\n  log tail:\n{}",
+                                    stage,
+                                    self.config.name,
+                                    msg,
+                                    tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n")
+                                );
+                            }
                             Err(ProviderError::Execution { code, msg })
                         }
                     }
@@ -426,9 +438,11 @@ impl MirrorProvider for TwoStageRsyncProvider {
         // Wrap the entire two-stage run in a single timeout budget.
         let run_body = async {
             // Stage 1: quick sync of metadata-critical files
-            self.run_stage(1, &mut log_file, &ctx).await?;
+            self.run_stage(1, &mut log_file, &effective_log_file, &ctx)
+                .await?;
             // Stage 2: full sync — only reached if stage 1 succeeded
-            self.run_stage(2, &mut log_file, &ctx).await
+            self.run_stage(2, &mut log_file, &effective_log_file, &ctx)
+                .await
         };
 
         let result = if self.config.timeout == Duration::ZERO {

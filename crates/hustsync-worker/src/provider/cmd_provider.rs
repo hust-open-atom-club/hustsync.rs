@@ -14,7 +14,7 @@ use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
 
-use super::{MirrorProvider, ProviderError, ProviderType, RunContext};
+use super::{MirrorProvider, ProviderError, ProviderType, RunContext, tail_log_file};
 
 use tokio::sync::Mutex;
 
@@ -212,10 +212,15 @@ impl MirrorProvider for CmdProvider {
                             if status.success() {
                                 Ok(())
                             } else {
-                                Err(ProviderError::Execution {
-                                    code: status.code().unwrap_or(-1),
-                                    msg: format!("Command exited with status: {}", status),
-                                })
+                                let code = status.code().unwrap_or(-1);
+                                let msg = format!("Command exited with status: {}", status);
+                                let tail = tail_log_file(&effective_log_file, 5).await;
+                                if tail.is_empty() {
+                                    tracing::error!("Cmd failed for {}: {}", self.config.name, msg);
+                                } else {
+                                    tracing::error!("Cmd failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
+                                }
+                                Err(ProviderError::Execution { code, msg })
                             }
                         }
                         Err(e) => Err(ProviderError::Io(e)),
@@ -241,10 +246,15 @@ impl MirrorProvider for CmdProvider {
                     if status.success() {
                         Ok(())
                     } else {
-                        Err(ProviderError::Execution {
-                            code: status.code().unwrap_or(-1),
-                            msg: format!("Command exited with status: {}", status),
-                        })
+                        let code = status.code().unwrap_or(-1);
+                        let msg = format!("Command exited with status: {}", status);
+                        let tail = tail_log_file(&effective_log_file, 5).await;
+                        if tail.is_empty() {
+                            tracing::error!("Cmd failed for {}: {}", self.config.name, msg);
+                        } else {
+                            tracing::error!("Cmd failed for {}: {}\n  log tail:\n{}", self.config.name, msg, tail.lines().map(|l| format!("    {l}")).collect::<Vec<_>>().join("\n"));
+                        }
+                        Err(ProviderError::Execution { code, msg })
                     }
                 }
                 Ok(Ok(None)) => {
