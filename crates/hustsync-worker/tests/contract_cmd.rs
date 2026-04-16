@@ -38,7 +38,7 @@ mod contract_cmd {
     ) -> (MirrorJob, mpsc::Receiver<hustsync_worker::job::CtrlAction>) {
         let (tx, rx) = mpsc::channel(32);
         let job = MirrorJob {
-            name: name.to_string(),
+            name: name.into(),
             tx,
             state: Arc::new(AtomicU32::new(hustsync_worker::job::STATE_NONE)),
             disabled: Arc::new(tokio::sync::Notify::new()),

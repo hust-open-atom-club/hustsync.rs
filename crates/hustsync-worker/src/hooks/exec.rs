@@ -103,9 +103,10 @@ fn build_env(ctx: &HookCtx, phase: &str) -> Vec<(String, String)> {
         ("LOG_FILE", ctx.log_file.to_string_lossy().into_owned()),
     ];
     let mut env = Vec::with_capacity(pairs.len() * 2 + 2);
-    for (key, val) in &pairs {
-        env.push((format!("TUNASYNC_{key}"), val.clone()));
-        env.push((format!("HUSTSYNC_{key}"), val.clone()));
+    for (key, val) in pairs {
+        let hustsync_val = val.clone();
+        env.push((format!("TUNASYNC_{key}"), val));
+        env.push((format!("HUSTSYNC_{key}"), hustsync_val));
     }
     if !status.is_empty() {
         env.push(("TUNASYNC_JOB_EXIT_STATUS".to_string(), status.to_string()));

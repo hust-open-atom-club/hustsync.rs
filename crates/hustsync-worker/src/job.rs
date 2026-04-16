@@ -41,7 +41,7 @@ pub const STATE_HALTING: u32 = 4; // worker is halting
 
 #[derive(Clone)]
 pub struct MirrorJob {
-    pub name: String,
+    pub name: Box<str>,
     pub tx: mpsc::Sender<CtrlAction>,
     pub state: Arc<AtomicU32>,
     pub disabled: Arc<tokio::sync::Notify>,
@@ -66,7 +66,7 @@ impl MirrorJob {
 }
 
 pub struct JobActor {
-    pub name: String,
+    pub name: Box<str>,
     pub rx: mpsc::Receiver<CtrlAction>,
     pub state: Arc<AtomicU32>,
     pub disabled: Arc<tokio::sync::Notify>,
@@ -92,6 +92,8 @@ impl JobActor {
         let state = Arc::new(AtomicU32::new(STATE_NONE));
         let disabled = Arc::new(tokio::sync::Notify::new());
         let interval = provider.interval();
+
+        let name: Box<str> = name.into_boxed_str();
 
         let job = MirrorJob {
             name: name.clone(),
@@ -217,7 +219,7 @@ impl JobActor {
 
     #[allow(clippy::cognitive_complexity)]
     async fn run_sync_loop(
-        name: String,
+        name: Box<str>,
         provider: Arc<dyn MirrorProvider>,
         semaphore: Arc<tokio::sync::Semaphore>,
         manager_tx: mpsc::Sender<JobMessage>,
@@ -256,6 +258,12 @@ impl JobActor {
             }
         };
 
+        // Closure that binds the invariant parameters so each call site only
+        // supplies the per-invocation values (status, msg, schedule).
+        let report = |status: SyncStatus, msg: String, schedule: bool| {
+            Self::report_status(&manager_tx, &name, status, msg, schedule, &provider)
+        };
+
         // 3. Retry Loop
         let retries = provider.retry();
         for i in 0..retries {
@@ -264,15 +272,7 @@ impl JobActor {
             }
             hook_ctx.attempt = i + 1;
 
-            Self::report_status(
-                &manager_tx,
-                &name,
-                SyncStatus::PreSyncing,
-                "".into(),
-                false,
-                &provider,
-            )
-            .await;
+            report(SyncStatus::PreSyncing, "".into(), false).await;
 
             // 3a. pre_exec — may rotate log files, mutate ctx.env / ctx.log_file.
             let pre_exec_count = match Self::run_pre(PrePhase::PreExec, &hooks, &mut hook_ctx).await
@@ -289,15 +289,7 @@ impl JobActor {
                 }
             };
 
-            Self::report_status(
-                &manager_tx,
-                &name,
-                SyncStatus::Syncing,
-                "".into(),
-                false,
-                &provider,
-            )
-            .await;
+            report(SyncStatus::Syncing, "".into(), false).await;
 
             // 3b. Provider run with hook-injected env.
             let provider_env = hook_ctx.env.clone();
@@ -317,15 +309,7 @@ impl JobActor {
                     )
                     .await;
                     let is_ready = state.load(Ordering::Acquire) == STATE_READY;
-                    Self::report_status(
-                        &manager_tx,
-                        &name,
-                        SyncStatus::Success,
-                        "".into(),
-                        is_ready,
-                        &provider,
-                    )
-                    .await;
+                    report(SyncStatus::Success, "".into(), is_ready).await;
                     return Ok(());
                 }
                 Err(e) => {
@@ -351,15 +335,7 @@ impl JobActor {
                     let is_last_retry = i == retries - 1;
                     let is_ready = current_state == STATE_READY;
 
-                    Self::report_status(
-                        &manager_tx,
-                        &name,
-                        SyncStatus::Failed,
-                        e.to_string(),
-                        is_last_retry && is_ready,
-                        &provider,
-                    )
-                    .await;
+                    report(SyncStatus::Failed, e.to_string(), is_last_retry && is_ready).await;
 
                     if let ProviderError::Terminated = e {
                         return Err(e);

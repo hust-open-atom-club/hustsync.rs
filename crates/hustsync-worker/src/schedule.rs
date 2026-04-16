@@ -44,7 +44,7 @@ impl Ord for ScheduledJob {
 pub struct ScheduleQueue {
     heap: BinaryHeap<ScheduledJob>,
     // Store exact scheduled time by job name for O(1) existence and removal check logic
-    jobs_time: HashMap<String, Instant>,
+    jobs_time: HashMap<Box<str>, Instant>,
 }
 
 impl Default for ScheduleQueue {
@@ -68,7 +68,7 @@ impl ScheduleQueue {
             // Only report if it's the valid currently scheduled instance
             if self.jobs_time.get(&item.job.name) == Some(&item.sched_time) {
                 jobs.push(JobScheduleInfo {
-                    job_name: item.job.name.clone(),
+                    job_name: item.job.name.to_string(),
                     next_scheduled: item.real_time,
                 });
             }
@@ -148,7 +148,7 @@ mod tests {
     fn create_dummy_job(name: &str) -> MirrorJob {
         let (tx, _) = mpsc::channel(1);
         MirrorJob {
-            name: name.to_string(),
+            name: name.into(),
             tx,
             state: Arc::new(AtomicU32::new(0)),
             disabled: Arc::new(tokio::sync::Notify::new()),
@@ -178,7 +178,7 @@ mod tests {
 
         // Should pop "immediate" first
         let popped = queue.pop_if_ready().expect("Should pop immediate job");
-        assert_eq!(popped.name, "immediate");
+        assert_eq!(&*popped.name, "immediate");
 
         // Others should not be ready yet
         assert!(queue.pop_if_ready().is_none());
@@ -214,6 +214,6 @@ mod tests {
 
         // Should pop now
         let popped = queue.pop_if_ready().expect("Should pop job1");
-        assert_eq!(popped.name, "job1");
+        assert_eq!(&*popped.name, "job1");
     }
 }
