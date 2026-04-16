@@ -364,6 +364,11 @@ impl MirrorProvider for RsyncProvider {
             #[cfg(unix)]
             {
                 let pgid = Pid::from_raw(-i32::try_from(pid).unwrap_or(i32::MAX));
+                // Give the process group a chance to clean up before forcing death.
+                // Mirrors Go worker/runner.go: SIGTERM → 2s wait → SIGKILL.
+                let _ = signal::kill(pgid, Signal::SIGTERM);
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                // SIGKILL after an already-exited group returns ESRCH — harmless.
                 if let Err(e) = signal::kill(pgid, Signal::SIGKILL) {
                     tracing::debug!("Failed to send SIGKILL to pgid {}: {}", pgid, e);
                 }
