@@ -1,6 +1,6 @@
 //! Always-on built-in hook that ensures `working_dir` exists with mode
-//! `0o755` before the sync runs. Never creates parents recursively — a
-//! missing parent is an operator mistake that should surface loudly.
+//! `0o755` before the sync runs. Creates parents recursively, matching
+//! Go `os.MkdirAll(workingDir, 0755)` in `runner.go`.
 
 use async_trait::async_trait;
 use tokio::fs;
@@ -34,19 +34,7 @@ impl JobHook for WorkingDirHook {
         if fs::metadata(dir).await.map(|m| m.is_dir()).unwrap_or(false) {
             return Ok(());
         }
-        // Parent MUST exist — refuse to create it recursively.
-        if let Some(parent) = dir.parent()
-            && fs::metadata(parent).await.is_err()
-        {
-            return Err(HookError::config(
-                HOOK_NAME,
-                format!(
-                    "parent directory of working_dir does not exist: {}",
-                    parent.display()
-                ),
-            ));
-        }
-        fs::create_dir(dir)
+        fs::create_dir_all(dir)
             .await
             .map_err(|e| HookError::io(HOOK_NAME, e))?;
         #[cfg(unix)]

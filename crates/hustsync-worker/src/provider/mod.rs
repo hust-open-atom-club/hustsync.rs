@@ -151,12 +151,22 @@ pub fn build_provider(
     let log_dir = format_path(log_dir_base, name);
     let log_file = format!("{}/latest.log", log_dir.trim_end_matches('/'));
 
-    let mirror_dir_base = m_cfg
-        .mirror_dir
-        .as_deref()
-        .or_else(|| global.and_then(|g| g.mirror_dir.as_deref()))
-        .unwrap_or("/tmp/hustsync");
-    let mirror_dir = format_path(mirror_dir_base, name);
+    let mirror_dir = if let Some(ref explicit) = m_cfg.mirror_dir {
+        // Per-mirror mirror_dir is set — use as-is (template-expanded).
+        format_path(explicit, name)
+    } else {
+        // No per-mirror mirror_dir: Go joins global.mirror_dir / sub_dir / name.
+        let base = global
+            .and_then(|g| g.mirror_dir.as_deref())
+            .unwrap_or("/tmp/hustsync");
+        let sub = m_cfg.mirror_subdir.as_deref().unwrap_or("");
+        let mut p = std::path::PathBuf::from(base);
+        if !sub.is_empty() {
+            p.push(sub);
+        }
+        p.push(name);
+        p.to_string_lossy().into_owned()
+    };
 
     let is_master = m_cfg.role.as_deref() != Some("slave");
     let p_type = m_cfg.provider.as_deref().unwrap_or("rsync");
