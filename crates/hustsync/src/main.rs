@@ -4,7 +4,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, ValueHint::FilePath};
-use hustsync_config_parser::{WorkerConfig, parse_config};
+use hustsync_config_parser::{
+    ConfigLoadOptions, WorkerConfig, load_worker_config, validate_worker_config,
+};
 use hustsync_manager::Manager;
 use hustsync_worker::Worker;
 use tracing::{info, warn};
@@ -186,6 +188,26 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<()> {
     Ok(())
 }
 
+fn load_runtime_worker_config(config_path: &std::path::Path) -> Result<WorkerConfig> {
+    let config = load_worker_config(config_path, &ConfigLoadOptions::default())
+        .with_context(|| format!("load worker config from {}", config_path.display()))?;
+    validate_worker_config(&config)
+        .with_context(|| format!("validate worker config {}", config_path.display()))?;
+    Ok(config)
+}
+
+async fn reload_worker_from_path(worker: &Worker, config_path: &std::path::Path) {
+    tracing::info!("Reloading worker config from {}", config_path.display());
+    match load_runtime_worker_config(config_path) {
+        Ok(new_cfg) => {
+            worker
+                .reload_mirror_config(new_cfg.mirrors.unwrap_or_default())
+                .await;
+        }
+        Err(e) => tracing::error!("Failed to reload config: {:#}", e),
+    }
+}
+
 async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
     hustsync_internal::logger::init_logger(
         worker_args.verbose,
@@ -197,7 +219,7 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
         .config
         .unwrap_or_else(|| PathBuf::from("worker.conf"));
 
-    let config: WorkerConfig = match parse_config(&config_path) {
+    let config: WorkerConfig = match load_runtime_worker_config(&config_path) {
         Ok(cfg) => cfg,
         Err(err) => {
             warn!("Error loading worker config from {:?}: {err}.", config_path);
@@ -219,14 +241,24 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
         exit_token.cancel();
     });
 
-    // SIGHUP → reload config file and apply mirror diff without restarting.
-    // The loop runs for the lifetime of the process; each signal triggers
-    // one reload attempt. Config parse errors are logged but do not affect
-    // the currently-running worker state.
-    #[cfg(unix)]
+    let (reload_tx, mut reload_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     {
         let worker_reload = Arc::clone(&worker);
         let reload_path = config_path.clone();
+        tokio::spawn(async move {
+            while reload_rx.recv().await.is_some() {
+                reload_worker_from_path(worker_reload.as_ref(), &reload_path).await;
+            }
+        });
+    }
+
+    // SIGHUP → reload config file and apply mirror diff without restarting.
+    // The loop runs for the lifetime of the process; each signal enqueues
+    // one reload request onto the same controller used by the HTTP reload
+    // command path.
+    #[cfg(unix)]
+    {
+        let reload_tx_signal = reload_tx.clone();
         tokio::spawn(async move {
             use tokio::signal::unix::{SignalKind, signal};
             let mut sighup = match signal(SignalKind::hangup()) {
@@ -238,20 +270,16 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
             };
             loop {
                 sighup.recv().await;
-                tracing::info!("Received SIGHUP, reloading config...");
-                match parse_config::<WorkerConfig>(&reload_path) {
-                    Ok(new_cfg) => {
-                        if let Some(mirrors) = new_cfg.mirrors {
-                            worker_reload.reload_mirror_config(mirrors).await;
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to reload config: {}", e),
+                tracing::info!("Received SIGHUP, enqueuing reload request...");
+                if reload_tx_signal.send(()).is_err() {
+                    tracing::error!("Reload controller closed; stopping SIGHUP watcher");
+                    break;
                 }
             }
         });
     }
 
-    worker.run().await;
+    worker.run_with_reload_trigger(Some(reload_tx)).await;
 
     Ok(())
 }

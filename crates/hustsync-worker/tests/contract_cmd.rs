@@ -52,6 +52,7 @@ mod contract_cmd {
         Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            reload_tx: None,
         })
     }
 
@@ -69,6 +70,7 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(jobs)),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            reload_tx: None,
         });
         (state, rx)
     }
@@ -145,11 +147,20 @@ mod contract_cmd {
     /// Worker-level Reload (empty mirror_id) → 200 {"msg": "Reload triggered"}
     #[tokio::test]
     async fn test_reload_worker_level_returns_reload_triggered() {
-        let state = empty_state();
+        let (reload_tx, mut reload_rx) = mpsc::unbounded_channel();
+        let state = Arc::new(AppState {
+            jobs: Arc::new(RwLock::new(HashMap::new())),
+            schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            reload_tx: Some(reload_tx),
+        });
 
         let (status, body) = post_cmd(state, worker_cmd("", CmdVerb::Reload)).await;
 
         assert_eq!(status, 200);
         assert_eq!(body["msg"], "Reload triggered");
+        assert!(
+            reload_rx.recv().await.is_some(),
+            "worker-level reload must enqueue a reload request"
+        );
     }
 }

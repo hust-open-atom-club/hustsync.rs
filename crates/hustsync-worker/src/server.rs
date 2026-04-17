@@ -3,13 +3,14 @@ use hustsync_internal::msg::{CmdVerb, WorkerCmd};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 use crate::MirrorJob;
 
 pub struct AppState {
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
     pub schedule_queue: Arc<tokio::sync::Mutex<crate::schedule::ScheduleQueue>>,
+    pub reload_tx: Option<mpsc::UnboundedSender<()>>,
 }
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
@@ -28,7 +29,20 @@ async fn handle_cmd(
         match cmd.cmd {
             CmdVerb::Reload => {
                 tracing::info!("Reloading worker...");
-                // TODO: trigger SIGHUP or reload logic
+                let Some(reload_tx) = state.reload_tx.as_ref() else {
+                    tracing::error!("Reload requested but no reload handler is configured");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"msg": "Reload unavailable"})),
+                    );
+                };
+                if let Err(e) = reload_tx.send(()) {
+                    tracing::error!("Failed to enqueue reload request: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"msg": "Reload unavailable"})),
+                    );
+                }
                 return (StatusCode::OK, Json(json!({"msg": "Reload triggered"})));
             }
             _ => {
