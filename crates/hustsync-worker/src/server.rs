@@ -1,4 +1,4 @@
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::{get, post}};
 use hustsync_internal::msg::{CmdVerb, WorkerCmd};
 use serde_json::json;
 use std::collections::HashMap;
@@ -13,7 +13,10 @@ pub struct AppState {
 }
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
-    Router::new().route("/", post(handle_cmd)).with_state(state)
+    Router::new()
+        .route("/", post(handle_cmd))
+        .route("/metrics", get(crate::metrics::metrics_handler))
+        .with_state(state)
 }
 
 #[allow(clippy::cognitive_complexity, clippy::significant_drop_tightening)]
