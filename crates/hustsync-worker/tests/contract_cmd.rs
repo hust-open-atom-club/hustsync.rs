@@ -27,6 +27,7 @@ mod contract_cmd {
     use hustsync_worker::server::{AppState, make_http_server};
     use serde_json::Value;
     use tokio::sync::{Mutex, RwLock, mpsc};
+    use tokio::time::{Duration, timeout};
     use tower::ServiceExt as _;
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -147,7 +148,7 @@ mod contract_cmd {
     /// Worker-level Reload (empty mirror_id) → 200 {"msg": "Reload triggered"}
     #[tokio::test]
     async fn test_reload_worker_level_returns_reload_triggered() {
-        let (reload_tx, mut reload_rx) = mpsc::unbounded_channel();
+        let (reload_tx, mut reload_rx) = mpsc::channel(1);
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
@@ -161,6 +162,37 @@ mod contract_cmd {
         assert!(
             reload_rx.recv().await.is_some(),
             "worker-level reload must enqueue a reload request"
+        );
+    }
+
+    /// Repeated worker-level Reload requests coalesce into a single pending
+    /// queue entry while preserving the same success response.
+    #[tokio::test]
+    async fn test_reload_worker_level_coalesces_pending_requests() {
+        let (reload_tx, mut reload_rx) = mpsc::channel(1);
+        let state = Arc::new(AppState {
+            jobs: Arc::new(RwLock::new(HashMap::new())),
+            schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            reload_tx: Some(reload_tx),
+        });
+
+        let (status1, body1) = post_cmd(Arc::clone(&state), worker_cmd("", CmdVerb::Reload)).await;
+        let (status2, body2) = post_cmd(state, worker_cmd("", CmdVerb::Reload)).await;
+
+        assert_eq!(status1, 200);
+        assert_eq!(body1["msg"], "Reload triggered");
+        assert_eq!(status2, 200);
+        assert_eq!(body2["msg"], "Reload triggered");
+        assert!(
+            reload_rx.recv().await.is_some(),
+            "first reload must enqueue one pending request"
+        );
+        assert!(
+            !matches!(
+                timeout(Duration::from_millis(50), reload_rx.recv()).await,
+                Ok(Some(()))
+            ),
+            "second reload should be coalesced instead of enqueuing another request"
         );
     }
 }
