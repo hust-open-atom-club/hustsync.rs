@@ -241,7 +241,7 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
         exit_token.cancel();
     });
 
-    let (reload_tx, mut reload_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let (reload_tx, mut reload_rx) = tokio::sync::mpsc::channel::<()>(1);
     {
         let worker_reload = Arc::clone(&worker);
         let reload_path = config_path.clone();
@@ -271,9 +271,15 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
             loop {
                 sighup.recv().await;
                 tracing::info!("Received SIGHUP, enqueuing reload request...");
-                if reload_tx_signal.send(()).is_err() {
-                    tracing::error!("Reload controller closed; stopping SIGHUP watcher");
-                    break;
+                match reload_tx_signal.try_send(()) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        tracing::info!("Reload already pending; coalescing SIGHUP request");
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        tracing::error!("Reload controller closed; stopping SIGHUP watcher");
+                        break;
+                    }
                 }
             }
         });

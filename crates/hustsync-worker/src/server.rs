@@ -10,7 +10,7 @@ use crate::MirrorJob;
 pub struct AppState {
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
     pub schedule_queue: Arc<tokio::sync::Mutex<crate::schedule::ScheduleQueue>>,
-    pub reload_tx: Option<mpsc::UnboundedSender<()>>,
+    pub reload_tx: Option<mpsc::Sender<()>>,
 }
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
@@ -36,12 +36,18 @@ async fn handle_cmd(
                         Json(json!({"msg": "Reload unavailable"})),
                     );
                 };
-                if let Err(e) = reload_tx.send(()) {
-                    tracing::error!("Failed to enqueue reload request: {}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"msg": "Reload unavailable"})),
-                    );
+                match reload_tx.try_send(()) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        tracing::info!("Reload already pending; coalescing HTTP request");
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                        tracing::error!("Failed to enqueue reload request: channel closed");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"msg": "Reload unavailable"})),
+                        );
+                    }
                 }
                 return (StatusCode::OK, Json(json!({"msg": "Reload triggered"})));
             }

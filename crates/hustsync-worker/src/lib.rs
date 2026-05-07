@@ -506,7 +506,7 @@ impl Worker {
 
     /// Bind and spawn the HTTP (or HTTPS) control server, hooked to the exit token.
     /// Returns `false` if the server could not be started (address parse or TLS error).
-    async fn start_http_server(&self, reload_tx: Option<mpsc::UnboundedSender<()>>) -> bool {
+    async fn start_http_server(&self, reload_tx: Option<mpsc::Sender<()>>) -> bool {
         let app_state = Arc::new(server::AppState {
             jobs: Arc::clone(&self.jobs),
             schedule_queue: Arc::clone(&self.schedule_queue),
@@ -860,7 +860,7 @@ impl Worker {
         self.apply_added_mirrors(&diff.added, &new_mirrors).await;
     }
 
-    pub async fn run_with_reload_trigger(&self, reload_tx: Option<mpsc::UnboundedSender<()>>) {
+    pub async fn run_with_reload_trigger(&self, reload_tx: Option<mpsc::Sender<()>>) {
         tracing::info!("Worker started.");
         self.register_worker().await;
 
