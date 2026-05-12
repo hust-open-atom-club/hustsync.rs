@@ -126,6 +126,40 @@ async fn stage1_success_leads_to_stage2_success() {
 }
 
 #[tokio::test]
+async fn run_injects_tunasync_and_hustsync_env_vars() {
+    let dir = TempDir::new().unwrap();
+    let dump_path = dir.path().join("env-dump.txt");
+    let mut env = HashMap::new();
+    env.insert("FAKE_STAGE1_EXIT".to_string(), "0".to_string());
+    env.insert("FAKE_STAGE2_EXIT".to_string(), "0".to_string());
+    env.insert(
+        "FAKE_ENV_DUMP".to_string(),
+        dump_path.to_string_lossy().into_owned(),
+    );
+
+    let cfg = make_config("m-env", &dir, env);
+    let working_dir = cfg.common.working_dir.clone();
+    let log_dir = cfg.common.log_dir.clone();
+    let log_file = cfg.common.log_file.clone();
+    let upstream = cfg.common.upstream_url.clone();
+
+    let provider = TwoStageRsyncProvider::new(cfg).unwrap();
+    run(&provider).await.expect("both stages must succeed");
+
+    let dump = std::fs::read_to_string(&dump_path).unwrap();
+    assert!(dump.contains("TUNASYNC_MIRROR_NAME=m-env"));
+    assert!(dump.contains(&format!("TUNASYNC_WORKING_DIR={working_dir}")));
+    assert!(dump.contains(&format!("TUNASYNC_UPSTREAM_URL={upstream}")));
+    assert!(dump.contains(&format!("TUNASYNC_LOG_DIR={log_dir}")));
+    assert!(dump.contains(&format!("TUNASYNC_LOG_FILE={log_file}")));
+    assert!(dump.contains("HUSTSYNC_MIRROR_NAME=m-env"));
+    assert!(dump.contains(&format!("HUSTSYNC_WORKING_DIR={working_dir}")));
+    assert!(dump.contains(&format!("HUSTSYNC_UPSTREAM_URL={upstream}")));
+    assert!(dump.contains(&format!("HUSTSYNC_LOG_DIR={log_dir}")));
+    assert!(dump.contains(&format!("HUSTSYNC_LOG_FILE={log_file}")));
+}
+
+#[tokio::test]
 async fn stage2_failure_fails_run() {
     let dir = TempDir::new().unwrap();
     let mut env = HashMap::new();

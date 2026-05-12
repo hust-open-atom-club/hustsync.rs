@@ -5,7 +5,7 @@ mirror_dir = "/tmp/hustsync_test/mirrors"
 concurrent = 10
 
 [manager]
-api_base = "http://127.0.0.1:12345"
+api_base = "http://127.0.0.1:14242"
 token = "secret"
 ca_cert = ""
 

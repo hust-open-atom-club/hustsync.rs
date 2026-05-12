@@ -24,6 +24,8 @@ pub use job::{CtrlAction, MirrorJob};
 use provider::MirrorProvider;
 use schedule::ScheduleQueue;
 
+const DEFAULT_MANAGER_API_BASE: &str = "http://localhost:14242";
+
 pub struct JobMessage {
     pub status: SyncStatus,
     pub name: String,
@@ -51,7 +53,7 @@ fn resolve_api_bases(cfg: &hustsync_config_parser::WorkerManagerConfig) -> Vec<S
     }
     cfg.api_base
         .as_deref()
-        .unwrap_or("http://localhost:12345")
+        .unwrap_or(DEFAULT_MANAGER_API_BASE)
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -95,6 +97,49 @@ struct MirrorDiff {
     added: Vec<String>,
     removed: Vec<String>,
     modified: Vec<String>,
+}
+
+fn choose_exec_list(
+    mirror_list: Option<&[String]>,
+    global_list: Option<&[String]>,
+) -> Vec<String> {
+    if let Some(list) = mirror_list
+        && !list.is_empty()
+    {
+        return list.to_vec();
+    }
+    global_list.map(<[String]>::to_vec).unwrap_or_default()
+}
+
+fn resolve_exec_commands(
+    m_cfg: &hustsync_config_parser::MirrorConfig,
+    g_cfg: &WorkerConfig,
+) -> (Vec<String>, Vec<String>) {
+    let mirror_status = m_cfg.exec_on_status.as_ref();
+    let global_status = g_cfg
+        .global
+        .as_ref()
+        .and_then(|g| g.exec_on_status.as_ref());
+
+    let mut on_success = choose_exec_list(
+        mirror_status.and_then(|s| s.exec_on_success.as_deref()),
+        global_status.and_then(|s| s.exec_on_success.as_deref()),
+    );
+    let mut on_failure = choose_exec_list(
+        mirror_status.and_then(|s| s.exec_on_failure.as_deref()),
+        global_status.and_then(|s| s.exec_on_failure.as_deref()),
+    );
+
+    if let Some(extra) = &m_cfg.exec_on_status_extra {
+        if let Some(list) = &extra.exec_on_success_extra {
+            on_success.extend(list.iter().cloned());
+        }
+        if let Some(list) = &extra.exec_on_failure_extra {
+            on_failure.extend(list.iter().cloned());
+        }
+    }
+
+    (on_success, on_failure)
 }
 
 /// Compare the set of currently-running jobs against a new config slice.
@@ -246,7 +291,7 @@ impl Worker {
         let root = api_bases
             .first()
             .map(|s| s.as_str())
-            .unwrap_or("http://localhost:12345");
+            .unwrap_or(DEFAULT_MANAGER_API_BASE);
         let url = format_manager_url(root, &format!("workers/{}/jobs", self.name()));
 
         match hustsync_internal::util::get_json::<Vec<hustsync_internal::msg::MirrorStatus>>(
@@ -275,7 +320,7 @@ impl Worker {
     /// runs in this vec order, `post_*` in reverse (LIFO).
     fn build_hooks(
         m_cfg: &hustsync_config_parser::MirrorConfig,
-        _g_cfg: &WorkerConfig,
+        g_cfg: &WorkerConfig,
     ) -> Vec<Arc<dyn hooks::JobHook>> {
         let mut chain: Vec<Arc<dyn hooks::JobHook>> = Vec::new();
         // 1. Built-in: ensure working_dir exists before anything else.
@@ -287,24 +332,7 @@ impl Worker {
         // 3. User-configured exec_on_{success,failure}. `exec_on_status_extra`
         //    (mirror-level additions to global defaults) is appended after
         //    the base list, matching Go's "append extra to the end".
-        let mut on_success: Vec<String> = Vec::new();
-        let mut on_failure: Vec<String> = Vec::new();
-        if let Some(status) = &m_cfg.exec_on_status {
-            if let Some(list) = &status.exec_on_success {
-                on_success.extend(list.iter().cloned());
-            }
-            if let Some(list) = &status.exec_on_failure {
-                on_failure.extend(list.iter().cloned());
-            }
-        }
-        if let Some(extra) = &m_cfg.exec_on_status_extra {
-            if let Some(list) = &extra.exec_on_success_extra {
-                on_success.extend(list.iter().cloned());
-            }
-            if let Some(list) = &extra.exec_on_failure_extra {
-                on_failure.extend(list.iter().cloned());
-            }
-        }
+        let (on_success, on_failure) = resolve_exec_commands(m_cfg, g_cfg);
         if !on_success.is_empty() || !on_failure.is_empty() {
             chain.push(Arc::new(hooks::ExecPostHook::new(on_success, on_failure)));
         }
@@ -886,9 +914,12 @@ impl Worker {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use hustsync_config_parser::WorkerManagerConfig;
+    use hustsync_config_parser::{
+        ExecOnStatus, ExecOnStatusExtra, MirrorConfig, WorkerConfig, WorkerGlobalConfig,
+        WorkerManagerConfig,
+    };
 
-    use super::resolve_api_bases;
+    use super::{resolve_api_bases, resolve_exec_commands};
 
     fn make_cfg(api_base: Option<&str>, api_base_list: Option<Vec<&str>>) -> WorkerManagerConfig {
         WorkerManagerConfig {
@@ -928,7 +959,7 @@ mod tests {
     fn resolve_defaults_when_both_absent() {
         let cfg = make_cfg(None, None);
         let bases = resolve_api_bases(&cfg);
-        assert_eq!(bases, vec!["http://localhost:12345"]);
+        assert_eq!(bases, vec!["http://localhost:14242"]);
     }
 
     #[test]
@@ -936,5 +967,95 @@ mod tests {
         let cfg = make_cfg(Some("http://manager:14242"), None);
         let bases = resolve_api_bases(&cfg);
         assert_eq!(bases, vec!["http://manager:14242"]);
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    fn worker_with_global(success: &[&str], failure: &[&str]) -> WorkerConfig {
+        WorkerConfig {
+            global: Some(WorkerGlobalConfig {
+                exec_on_status: Some(ExecOnStatus {
+                    exec_on_success: Some(strings(success)),
+                    exec_on_failure: Some(strings(failure)),
+                }),
+                ..WorkerGlobalConfig::default()
+            }),
+            ..WorkerConfig::default()
+        }
+    }
+
+    fn mirror_with_exec(
+        success: Option<&[&str]>,
+        failure: Option<&[&str]>,
+        success_extra: Option<&[&str]>,
+        failure_extra: Option<&[&str]>,
+    ) -> MirrorConfig {
+        MirrorConfig {
+            exec_on_status: Some(ExecOnStatus {
+                exec_on_success: success.map(strings),
+                exec_on_failure: failure.map(strings),
+            }),
+            exec_on_status_extra: Some(ExecOnStatusExtra {
+                exec_on_success_extra: success_extra.map(strings),
+                exec_on_failure_extra: failure_extra.map(strings),
+            }),
+            ..MirrorConfig::default()
+        }
+    }
+
+    #[test]
+    fn exec_commands_fall_back_to_global_when_mirror_unset() {
+        let worker = worker_with_global(&["global-success"], &["global-failure"]);
+        let mirror = mirror_with_exec(None, None, None, None);
+
+        let (success, failure) = resolve_exec_commands(&mirror, &worker);
+
+        assert_eq!(success, strings(&["global-success"]));
+        assert_eq!(failure, strings(&["global-failure"]));
+    }
+
+    #[test]
+    fn exec_commands_mirror_non_empty_list_overrides_global() {
+        let worker = worker_with_global(&["global-success"], &["global-failure"]);
+        let mirror = mirror_with_exec(
+            Some(&["mirror-success"]),
+            Some(&["mirror-failure"]),
+            None,
+            None,
+        );
+
+        let (success, failure) = resolve_exec_commands(&mirror, &worker);
+
+        assert_eq!(success, strings(&["mirror-success"]));
+        assert_eq!(failure, strings(&["mirror-failure"]));
+    }
+
+    #[test]
+    fn exec_commands_empty_mirror_list_falls_back_to_global() {
+        let worker = worker_with_global(&["global-success"], &["global-failure"]);
+        let mirror = mirror_with_exec(Some(&[]), Some(&[]), None, None);
+
+        let (success, failure) = resolve_exec_commands(&mirror, &worker);
+
+        assert_eq!(success, strings(&["global-success"]));
+        assert_eq!(failure, strings(&["global-failure"]));
+    }
+
+    #[test]
+    fn exec_commands_extra_appends_after_selected_base() {
+        let worker = worker_with_global(&["global-success"], &["global-failure"]);
+        let mirror = mirror_with_exec(
+            Some(&["mirror-success"]),
+            None,
+            Some(&["extra-success"]),
+            Some(&["extra-failure"]),
+        );
+
+        let (success, failure) = resolve_exec_commands(&mirror, &worker);
+
+        assert_eq!(success, strings(&["mirror-success", "extra-success"]));
+        assert_eq!(failure, strings(&["global-failure", "extra-failure"]));
     }
 }

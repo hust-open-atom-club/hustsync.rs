@@ -2,6 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use hustsync_config_parser::ManagerConfig;
+use hustsync_manager::load_config;
 use std::fs;
 use std::io::Write;
 #[cfg(unix)]
@@ -32,6 +33,13 @@ fn toml_decoding_should_work() {
     assert_eq!(cfg.server.addr, "0.0.0.0");
     assert_eq!(cfg.server.port, 5000);
     assert_eq!(cfg.files.db_file, "/var/lib/hustsync/hustsync.db");
+}
+
+#[test]
+fn empty_config_path_uses_defaults() {
+    let cfg = load_config("").expect("empty config path should load defaults");
+    assert_eq!(cfg, ManagerConfig::default());
+    assert_eq!(cfg.server.port, 14242);
 }
 
 // TODO 创建 clap 应用以测试更完整的加载流程
