@@ -221,6 +221,72 @@ fn zero_rsync_timeout_falls_back_to_default_not_zero() {
     );
 }
 
+#[tokio::test]
+async fn run_injects_tunasync_and_hustsync_env_vars() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let working_dir = tmp.path().join("work");
+    let log_dir = tmp.path().join("log");
+    let log_file = log_dir.join("run.log");
+    let working_dir_str = working_dir.to_string_lossy().into_owned();
+    let log_dir_str = log_dir.to_string_lossy().into_owned();
+    let log_file_str = log_file.to_string_lossy().into_owned();
+
+    let script = r#"printf '%s\n' \
+"TUNASYNC_MIRROR_NAME=$TUNASYNC_MIRROR_NAME" \
+"TUNASYNC_WORKING_DIR=$TUNASYNC_WORKING_DIR" \
+"TUNASYNC_UPSTREAM_URL=$TUNASYNC_UPSTREAM_URL" \
+"TUNASYNC_LOG_DIR=$TUNASYNC_LOG_DIR" \
+"TUNASYNC_LOG_FILE=$TUNASYNC_LOG_FILE" \
+"HUSTSYNC_MIRROR_NAME=$HUSTSYNC_MIRROR_NAME" \
+"HUSTSYNC_WORKING_DIR=$HUSTSYNC_WORKING_DIR" \
+"HUSTSYNC_UPSTREAM_URL=$HUSTSYNC_UPSTREAM_URL" \
+"HUSTSYNC_LOG_DIR=$HUSTSYNC_LOG_DIR" \
+"HUSTSYNC_LOG_FILE=$HUSTSYNC_LOG_FILE""#;
+
+    let config = RsyncProviderConfig {
+        common: CommonProviderConfig {
+            name: "env-test".to_string(),
+            upstream_url: "rsync://example.com/repo/".to_string(),
+            working_dir: working_dir_str.clone(),
+            log_dir: log_dir_str.clone(),
+            log_file: log_file_str.clone(),
+            interval: Duration::from_secs(3600),
+            retry: 2,
+            timeout: Duration::from_secs(5),
+            env: HashMap::new(),
+            is_master: true,
+            success_exit_codes: vec![],
+        },
+        command: "sh".to_string(),
+        username: None,
+        password: None,
+        exclude_file: None,
+        rsync_options: vec![],
+        global_options: vec![],
+        rsync_override: Some(vec!["-c".to_string(), script.to_string()]),
+        rsync_override_only: true,
+        rsync_no_timeout: false,
+        rsync_timeout: None,
+        use_ipv6: false,
+        use_ipv4: false,
+    };
+
+    let provider = RsyncProvider::new(config).unwrap();
+    provider.run(RunContext::default()).await.unwrap();
+
+    let log = tokio::fs::read_to_string(&log_file).await.unwrap();
+    assert!(log.contains("TUNASYNC_MIRROR_NAME=env-test"));
+    assert!(log.contains(&format!("TUNASYNC_WORKING_DIR={working_dir_str}")));
+    assert!(log.contains("TUNASYNC_UPSTREAM_URL=rsync://example.com/repo/"));
+    assert!(log.contains(&format!("TUNASYNC_LOG_DIR={log_dir_str}")));
+    assert!(log.contains(&format!("TUNASYNC_LOG_FILE={log_file_str}")));
+    assert!(log.contains("HUSTSYNC_MIRROR_NAME=env-test"));
+    assert!(log.contains(&format!("HUSTSYNC_WORKING_DIR={working_dir_str}")));
+    assert!(log.contains("HUSTSYNC_UPSTREAM_URL=rsync://example.com/repo/"));
+    assert!(log.contains(&format!("HUSTSYNC_LOG_DIR={log_dir_str}")));
+    assert!(log.contains(&format!("HUSTSYNC_LOG_FILE={log_file_str}")));
+}
+
 // ---------------------------------------------------------------------------
 // timeout enforcement — provider.run() returns ProviderError::Timeout
 //

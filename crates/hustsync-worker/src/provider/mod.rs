@@ -136,7 +136,7 @@ pub(crate) async fn terminate_pgid(pgid: &AtomicU32, name: &str) {
     }
 }
 
-/// Inject the standard HUSTSYNC_* environment variables into `cmd`.
+/// Inject the standard TUNASYNC_* and HUSTSYNC_* environment variables into `cmd`.
 ///
 /// Called after any provider-specific credentials (USER, RSYNC_PASSWORD) have
 /// already been set, so those are not overwritten here. Hook-injected variables
@@ -147,7 +147,12 @@ pub(crate) fn inject_provider_env(
     effective_log_file: &str,
     ctx_env: &HashMap<String, String>,
 ) {
-    cmd.env("HUSTSYNC_MIRROR_NAME", &common.name)
+    cmd.env("TUNASYNC_MIRROR_NAME", &common.name)
+        .env("TUNASYNC_WORKING_DIR", &common.working_dir)
+        .env("TUNASYNC_UPSTREAM_URL", &common.upstream_url)
+        .env("TUNASYNC_LOG_DIR", &common.log_dir)
+        .env("TUNASYNC_LOG_FILE", effective_log_file)
+        .env("HUSTSYNC_MIRROR_NAME", &common.name)
         .env("HUSTSYNC_WORKING_DIR", &common.working_dir)
         .env("HUSTSYNC_UPSTREAM_URL", &common.upstream_url)
         .env("HUSTSYNC_LOG_DIR", &common.log_dir)

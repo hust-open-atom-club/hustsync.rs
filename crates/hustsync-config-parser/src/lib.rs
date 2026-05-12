@@ -86,7 +86,7 @@ impl Default for ManagerServerConfig {
     fn default() -> Self {
         ManagerServerConfig {
             addr: "127.0.0.1".into(),
-            port: 12345,
+            port: 14242,
             ssl_cert: "".into(),
             ssl_key: "".into(),
         }
@@ -194,7 +194,7 @@ pub struct WorkerManagerConfig {
 impl Default for WorkerManagerConfig {
     fn default() -> Self {
         WorkerManagerConfig {
-            api_base: Some("http://localhost:12345".into()),
+            api_base: Some("http://localhost:14242".into()),
             api_base_list: None,
             token: Some("".into()),
             ca_cert: Some("".into()),

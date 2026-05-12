@@ -20,6 +20,21 @@ for arg in "$@"; do
     esac
 done
 
+if [[ -n "$FAKE_ENV_DUMP" ]]; then
+    {
+        echo "TUNASYNC_MIRROR_NAME=${TUNASYNC_MIRROR_NAME:-}"
+        echo "TUNASYNC_WORKING_DIR=${TUNASYNC_WORKING_DIR:-}"
+        echo "TUNASYNC_UPSTREAM_URL=${TUNASYNC_UPSTREAM_URL:-}"
+        echo "TUNASYNC_LOG_DIR=${TUNASYNC_LOG_DIR:-}"
+        echo "TUNASYNC_LOG_FILE=${TUNASYNC_LOG_FILE:-}"
+        echo "HUSTSYNC_MIRROR_NAME=${HUSTSYNC_MIRROR_NAME:-}"
+        echo "HUSTSYNC_WORKING_DIR=${HUSTSYNC_WORKING_DIR:-}"
+        echo "HUSTSYNC_UPSTREAM_URL=${HUSTSYNC_UPSTREAM_URL:-}"
+        echo "HUSTSYNC_LOG_DIR=${HUSTSYNC_LOG_DIR:-}"
+        echo "HUSTSYNC_LOG_FILE=${HUSTSYNC_LOG_FILE:-}"
+    } >> "$FAKE_ENV_DUMP"
+fi
+
 if [[ -n "$FAKE_SLEEP" ]]; then
     sleep "$FAKE_SLEEP" &
     sleep_pid=$!
