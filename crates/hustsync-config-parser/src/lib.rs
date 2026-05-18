@@ -183,9 +183,8 @@ pub struct WorkerManagerConfig {
     pub api_base: Option<String>,
     /// List of manager API base URLs for HA deployments. When set and
     /// non-empty, this takes precedence over `api_base`. Write operations
-    /// (register, status push, schedule push) broadcast to all entries
-    /// and stop on the first success; read operations use only the first
-    /// entry.
+    /// (register, status push, schedule push) broadcast to every entry;
+    /// read operations use only the first entry.
     pub api_base_list: Option<Vec<String>>,
     pub token: Option<String>,
     pub ca_cert: Option<String>,

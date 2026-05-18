@@ -13,6 +13,8 @@
 //! 5. Worker unreachable (connection refused) → 500 (Go does not
 //!    discriminate 502; all forward errors collapse to 500).
 //! 6. Worker timeout (accepts but never responds) → 500.
+//! 7. Stop command pre-sets manager-side status to `paused`, even when
+//!    the previous status was `disabled` and forwarding fails.
 //!
 //! Mock worker strategy: `tokio::net::TcpListener` on an ephemeral port —
 //! no new crate dependencies required.
@@ -24,6 +26,7 @@ mod contract;
 use axum::http::Request;
 use axum::{body::Body, http::StatusCode};
 use hustsync_internal::msg::{ClientCmd, CmdVerb, WorkerStatus};
+use serde_json::json;
 use std::collections::HashMap;
 use tokio::io::AsyncWriteExt;
 use tower::ServiceExt;
@@ -63,8 +66,13 @@ async fn register_worker(app: axum::Router, url: &str) -> axum::Router {
 
 /// Build the JSON body for a `POST /cmd` request.
 fn cmd_body(worker_id: &str, mirror_id: &str) -> Vec<u8> {
+    cmd_body_with_verb(worker_id, mirror_id, CmdVerb::Start)
+}
+
+/// Build the JSON body for a `POST /cmd` request with a specific command.
+fn cmd_body_with_verb(worker_id: &str, mirror_id: &str, cmd: CmdVerb) -> Vec<u8> {
     let cmd = ClientCmd {
-        cmd: CmdVerb::Start,
+        cmd,
         worker_id: worker_id.to_string(),
         mirror_id: mirror_id.to_string(),
         args: vec![],
@@ -132,6 +140,98 @@ async fn cmd_happy_path_returns_fixed_message() {
     let got = contract::body_json(resp).await;
     let want = contract::load_fixture("cmd/response_happy.json");
     contract::assert_json_eq_masked(&got, &want, &[]);
+}
+
+/// POST /cmd `stop` pre-sets manager-side job status to `paused`
+/// unconditionally, including rows that were already `disabled`.
+///
+/// Go updates the stored status before forwarding to the worker. The mock
+/// worker URL here is intentionally closed, so the command returns 500 after
+/// the pre-status write; the stored row must still be `paused`.
+#[tokio::test]
+async fn cmd_stop_pre_sets_disabled_job_to_paused_even_when_forward_fails() {
+    let closed_port = {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let p = l.local_addr().unwrap().port();
+        drop(l);
+        p
+    };
+    let worker_url = format!("http://127.0.0.1:{}/", closed_port);
+
+    let (app, _dir) = contract::spawn_manager();
+    let app = register_worker(app, &worker_url).await;
+
+    let disabled_status = json!({
+    "name": "archlinux",
+    "worker": "mirror-01",
+    "upstream": "rsync://mirror.example/archlinux/",
+    "size": "0",
+    "error_msg": "",
+    "last_update": "1970-01-01T00:00:00Z",
+    "last_started": "1970-01-01T00:00:00Z",
+    "last_ended": "1970-01-01T00:00:00Z",
+    "next_schedule": "1970-01-01T00:00:00Z",
+    "status": "disabled",
+    "is_master": true
+    });
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/workers/mirror-01/jobs/archlinux")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&disabled_status).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let created = contract::body_json(resp).await;
+    assert_eq!(created["status"], "disabled");
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/cmd")
+                .header("Content-Type", "application/json")
+                .body(Body::from(cmd_body_with_verb(
+                    "mirror-01",
+                    "archlinux",
+                    CmdVerb::Stop,
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "closed worker URL forces the forward-error path after the pre-status write"
+    );
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/workers/mirror-01/jobs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let jobs = contract::body_json(resp).await;
+    let job = jobs
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["name"] == "archlinux")
+        .unwrap();
+    assert_eq!(job["status"], "paused");
 }
 
 // ---------------------------------------------------------------------------

@@ -309,7 +309,7 @@ pub async fn handle_cmd(
     };
 
     // Pre-forward status bookkeeping: Disable flips the row to Disabled,
-    // Stop flips a non-Disabled row to Paused. Go does the same at
+    // Stop flips the row to Paused, including Disabled rows. Go does the same at
     // `handleClientCmd` around line 450. These are best-effort — do not
     // gate the forward on their outcome.
     if client_cmd.cmd == CmdVerb::Disable
@@ -320,7 +320,6 @@ pub async fn handle_cmd(
         let _ = adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status);
     } else if client_cmd.cmd == CmdVerb::Stop
         && let Ok(status) = adapter.get_mirror_status(worker_id, &client_cmd.mirror_id)
-        && status.status != SyncStatus::Disabled
     {
         let mut new_status = status;
         new_status.status = SyncStatus::Paused;
