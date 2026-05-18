@@ -88,21 +88,18 @@ fn format_manager_url(base: &str, path: &str) -> String {
     )
 }
 
-/// Records the names of mirrors that differ between the running jobs map
-/// and a freshly-loaded config slice. Names that appear only in the old
-/// map are `removed`; names only in the new config are `added`; names in
-/// both are `modified` (the actor is torn down and rebuilt so the new
-/// provider takes effect).
+/// Records the names of mirrors that differ between the current mirror
+/// config snapshot and a freshly-loaded config slice. Names that appear
+/// only in the old snapshot are `removed`; names only in the new config are
+/// `added`; names in both are `modified` only when their full config differs,
+/// matching Go's `reflect.DeepEqual`-based hot-reload diff.
 struct MirrorDiff {
     added: Vec<String>,
     removed: Vec<String>,
     modified: Vec<String>,
 }
 
-fn choose_exec_list(
-    mirror_list: Option<&[String]>,
-    global_list: Option<&[String]>,
-) -> Vec<String> {
+fn choose_exec_list(mirror_list: Option<&[String]>, global_list: Option<&[String]>) -> Vec<String> {
     if let Some(list) = mirror_list
         && !list.is_empty()
     {
@@ -142,34 +139,28 @@ fn resolve_exec_commands(
     (on_success, on_failure)
 }
 
-/// Compare the set of currently-running jobs against a new config slice.
-///
-/// Because `MirrorJob` does not retain its originating `MirrorConfig`, a
-/// deep-equal comparison is not possible without storing extra state. The
-/// caller rebuilds the actor for every name that appears in both sets —
-/// identical to Go's behaviour for the modify path.
+/// Compare the current mirror config snapshot against a new config slice.
 fn diff_mirror_configs(
-    old: &HashMap<String, MirrorJob>,
+    old: &HashMap<String, hustsync_config_parser::MirrorConfig>,
     new_cfg: &[hustsync_config_parser::MirrorConfig],
 ) -> MirrorDiff {
-    let new_names: std::collections::HashSet<&str> = new_cfg
+    let new_by_name: HashMap<&str, &hustsync_config_parser::MirrorConfig> = new_cfg
         .iter()
-        .filter_map(|m| m.name.as_deref())
+        .filter_map(|m| m.name.as_deref().map(|name| (name, m)))
         .collect();
 
     let mut removed = Vec::new();
     let mut modified = Vec::new();
 
-    for name in old.keys() {
-        if new_names.contains(name.as_str()) {
-            modified.push(name.clone());
-        } else {
-            removed.push(name.clone());
+    for (name, old_cfg) in old {
+        match new_by_name.get(name.as_str()) {
+            Some(new_cfg) if *new_cfg != old_cfg => modified.push(name.clone()),
+            Some(_) => {}
+            None => removed.push(name.clone()),
         }
     }
 
-    let old_names: std::collections::HashSet<&str> =
-        old.keys().map(|s| s.as_str()).collect();
+    let old_names: std::collections::HashSet<&str> = old.keys().map(|s| s.as_str()).collect();
 
     let added: Vec<String> = new_cfg
         .iter()
@@ -188,6 +179,7 @@ fn diff_mirror_configs(
 pub struct Worker {
     pub cfg: Arc<WorkerConfig>,
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
+    mirror_configs: Arc<RwLock<HashMap<String, hustsync_config_parser::MirrorConfig>>>,
     pub job_handles: Mutex<JoinSet<()>>,
 
     pub manager_tx: mpsc::Sender<JobMessage>,
@@ -230,6 +222,7 @@ impl Worker {
         let exit_token = CancellationToken::new();
 
         let mut jobs_map = HashMap::new();
+        let mut mirror_configs = HashMap::new();
         let mut handles = JoinSet::new();
 
         if let Some(mirrors) = &cfg.mirrors {
@@ -252,6 +245,7 @@ impl Worker {
                         hooks,
                     );
                     jobs_map.insert(name.clone(), job);
+                    mirror_configs.insert(name.clone(), m_cfg.clone());
                     handles.spawn(actor.run());
                 }
             }
@@ -260,6 +254,7 @@ impl Worker {
         let mut worker = Worker {
             cfg: Arc::clone(&cfg),
             jobs: Arc::new(RwLock::new(jobs_map)),
+            mirror_configs: Arc::new(RwLock::new(mirror_configs)),
             job_handles: Mutex::new(handles),
             manager_tx,
             manager_rx: Mutex::new(Some(manager_rx)),
@@ -457,8 +452,7 @@ impl Worker {
             let worker_name = self.name();
 
             for root in api_bases {
-                let url =
-                    format_manager_url(&root, &format!("workers/{}/schedules", worker_name));
+                let url = format_manager_url(&root, &format!("workers/{}/schedules", worker_name));
                 tokio::spawn({
                     let client = client.clone();
                     let url = url.clone();
@@ -774,12 +768,12 @@ impl Worker {
         name: &str,
         m_cfg: &hustsync_config_parser::MirrorConfig,
         initial_state: u32,
-    ) {
+    ) -> bool {
         let provider = match Self::create_provider(name, m_cfg, &self.cfg) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("Failed to create provider for {}: {}", name, e);
-                return;
+                return false;
             }
         };
 
@@ -810,12 +804,14 @@ impl Worker {
 
         self.job_handles.lock().await.spawn(actor.run());
         self.jobs.write().await.insert(name.to_owned(), job);
+        true
     }
 
     /// Remove mirrors dropped from the config.
     async fn apply_removed_mirrors(&self, removed: &[String]) {
         for name in removed {
             self.disable_and_remove_job(name).await;
+            self.mirror_configs.write().await.remove(name);
             tracing::info!("Mirror {} removed by config reload", name);
         }
     }
@@ -832,8 +828,13 @@ impl Worker {
                 continue;
             };
             let state = prev.unwrap_or(crate::job::STATE_NONE);
-            self.spawn_mirror_from_cfg(name, m_cfg, state).await;
-            tracing::info!("Mirror {} reloaded by config reload", name);
+            if self.spawn_mirror_from_cfg(name, m_cfg, state).await {
+                self.mirror_configs
+                    .write()
+                    .await
+                    .insert(name.clone(), m_cfg.clone());
+                tracing::info!("Mirror {} reloaded by config reload", name);
+            }
         }
     }
 
@@ -847,9 +848,16 @@ impl Worker {
             let Some(m_cfg) = new_mirrors.iter().find(|m| m.name.as_deref() == Some(name)) else {
                 continue;
             };
-            self.spawn_mirror_from_cfg(name, m_cfg, crate::job::STATE_NONE)
-                .await;
-            tracing::info!("Mirror {} added by config reload", name);
+            if self
+                .spawn_mirror_from_cfg(name, m_cfg, crate::job::STATE_NONE)
+                .await
+            {
+                self.mirror_configs
+                    .write()
+                    .await
+                    .insert(name.clone(), m_cfg.clone());
+                tracing::info!("Mirror {} added by config reload", name);
+            }
         }
     }
 
@@ -867,8 +875,8 @@ impl Worker {
         tracing::info!("Reloading mirror configs");
 
         let diff = {
-            let jobs = self.jobs.read().await;
-            diff_mirror_configs(&jobs, &new_mirrors)
+            let old_configs = self.mirror_configs.read().await;
+            diff_mirror_configs(&old_configs, &new_mirrors)
         };
 
         self.apply_removed_mirrors(&diff.removed).await;
@@ -903,6 +911,7 @@ impl Worker {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
     use std::time::Duration;
@@ -919,7 +928,10 @@ mod tests {
     use tokio::time::{Instant, sleep};
 
     use super::job::{CtrlAction, STATE_NONE};
-    use super::{JobMessage, MirrorJob, Worker, resolve_api_bases, resolve_exec_commands};
+    use super::{
+        JobMessage, MirrorJob, Worker, diff_mirror_configs, resolve_api_bases,
+        resolve_exec_commands,
+    };
 
     type RequestLog = Arc<Mutex<Vec<String>>>;
 
@@ -998,11 +1010,27 @@ mod tests {
         (job, rx)
     }
 
+    fn command_mirror(name: &str, command: &str) -> MirrorConfig {
+        MirrorConfig {
+            name: Some(name.to_string()),
+            provider: Some("command".to_string()),
+            command: Some(command.to_string()),
+            ..MirrorConfig::default()
+        }
+    }
+
+    fn worker_with_mirrors(mirrors: Vec<MirrorConfig>) -> WorkerConfig {
+        WorkerConfig {
+            manager: None,
+            mirrors: Some(mirrors),
+            ..WorkerConfig::default()
+        }
+    }
+
     fn make_cfg(api_base: Option<&str>, api_base_list: Option<Vec<&str>>) -> WorkerManagerConfig {
         WorkerManagerConfig {
             api_base: api_base.map(String::from),
-            api_base_list: api_base_list
-                .map(|v| v.into_iter().map(String::from).collect()),
+            api_base_list: api_base_list.map(|v| v.into_iter().map(String::from).collect()),
             token: None,
             ca_cert: None,
         }
@@ -1044,6 +1072,85 @@ mod tests {
         let cfg = make_cfg(Some("http://manager:14242"), None);
         let bases = resolve_api_bases(&cfg);
         assert_eq!(bases, vec!["http://manager:14242"]);
+    }
+
+    #[test]
+    fn diff_mirror_configs_unchanged_same_name_is_not_modified() {
+        let mirror = command_mirror("archlinux", "true");
+        let old = HashMap::from([("archlinux".to_string(), mirror.clone())]);
+
+        let diff = diff_mirror_configs(&old, &[mirror]);
+
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+        assert!(diff.modified.is_empty());
+    }
+
+    #[test]
+    fn diff_mirror_configs_only_marks_changed_same_name_modified() {
+        let old_mirror = command_mirror("archlinux", "true");
+        let new_mirror = command_mirror("archlinux", "false");
+        let old = HashMap::from([("archlinux".to_string(), old_mirror)]);
+
+        let diff = diff_mirror_configs(&old, &[new_mirror]);
+
+        assert!(diff.added.is_empty());
+        assert!(diff.removed.is_empty());
+        assert_eq!(diff.modified, vec!["archlinux"]);
+    }
+
+    #[test]
+    fn diff_mirror_configs_reports_added_and_removed() {
+        let old = HashMap::from([("old".to_string(), command_mirror("old", "true"))]);
+        let new_mirror = command_mirror("new", "true");
+
+        let diff = diff_mirror_configs(&old, &[new_mirror]);
+
+        assert_eq!(diff.added, vec!["new"]);
+        assert_eq!(diff.removed, vec!["old"]);
+        assert!(diff.modified.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reload_unchanged_mirror_keeps_existing_job() {
+        let mirror = command_mirror("archlinux", "true");
+        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()]));
+        let before_state = {
+            let jobs = worker.jobs.read().await;
+            Arc::clone(&jobs.get("archlinux").unwrap().state)
+        };
+
+        worker.reload_mirror_config(vec![mirror]).await;
+
+        let after_state = {
+            let jobs = worker.jobs.read().await;
+            Arc::clone(&jobs.get("archlinux").unwrap().state)
+        };
+        assert!(Arc::ptr_eq(&before_state, &after_state));
+
+        worker.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn reload_changed_mirror_rebuilds_existing_job() {
+        let mirror = command_mirror("archlinux", "true");
+        let worker = Worker::new(worker_with_mirrors(vec![mirror]));
+        let before_state = {
+            let jobs = worker.jobs.read().await;
+            Arc::clone(&jobs.get("archlinux").unwrap().state)
+        };
+
+        worker
+            .reload_mirror_config(vec![command_mirror("archlinux", "false")])
+            .await;
+
+        let after_state = {
+            let jobs = worker.jobs.read().await;
+            Arc::clone(&jobs.get("archlinux").unwrap().state)
+        };
+        assert!(!Arc::ptr_eq(&before_state, &after_state));
+
+        worker.shutdown().await;
     }
 
     #[tokio::test]
