@@ -86,12 +86,19 @@ async fn handle_cmd(
             CmdVerb::Restart => crate::job::CtrlAction::Restart,
             CmdVerb::Stop => {
                 if job.state() == crate::job::STATE_DISABLED {
-                    return (StatusCode::OK, Json(json!({"msg": "Job is disabled"})));
+                    return (StatusCode::OK, Json(json!({"msg": "OK"})));
                 }
                 crate::job::CtrlAction::Stop
             }
-            CmdVerb::Disable => crate::job::CtrlAction::Disable,
-            CmdVerb::Ping => crate::job::CtrlAction::Ping,
+            CmdVerb::Disable => {
+                if job.state() == crate::job::STATE_DISABLED {
+                    return (StatusCode::OK, Json(json!({"msg": "OK"})));
+                }
+                crate::job::CtrlAction::Disable
+            }
+            CmdVerb::Ping => {
+                return (StatusCode::OK, Json(json!({"msg": "OK"})));
+            }
             _ => {
                 return (
                     StatusCode::NOT_ACCEPTABLE,
@@ -101,16 +108,27 @@ async fn handle_cmd(
         }
     };
 
-    // Re-borrow jobs for the ctrl dispatch; the earlier guard is gone.
-    let jobs = state.jobs.read().await;
-    let Some(job) = jobs.get(&cmd.mirror_id) else {
-        return (
-            StatusCode::OK,
-            Json(
-                json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)}),
-            ),
-        );
+    // Re-borrow and clone the job for ctrl dispatch; the earlier guard is gone.
+    let job = {
+        let jobs = state.jobs.read().await;
+        let Some(job) = jobs.get(&cmd.mirror_id) else {
+            return (
+                StatusCode::OK,
+                Json(
+                    json!({"msg": format!("Mirror '{}' is not configured on this worker", cmd.mirror_id)}),
+                ),
+            );
+        };
+        job.clone()
     };
+
+    let disabled = if action == crate::job::CtrlAction::Disable {
+        Some(Arc::clone(&job.disabled))
+    } else {
+        None
+    };
+
+    let disabled_notified = disabled.as_ref().map(|disabled| disabled.notified());
 
     if let Err(e) = job.send_ctrl(action).await {
         tracing::error!("Failed to send action to job {}: {}", cmd.mirror_id, e);
@@ -118,6 +136,10 @@ async fn handle_cmd(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"msg": "Internal server error"})),
         );
+    }
+
+    if let Some(disabled_notified) = disabled_notified {
+        disabled_notified.await;
     }
 
     (StatusCode::OK, Json(json!({"msg": "OK"})))

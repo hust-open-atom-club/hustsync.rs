@@ -397,10 +397,9 @@ impl Worker {
 
         for root in resolve_api_bases(manager_cfg) {
             let url = format_manager_url(&root, "workers");
-            if try_register(client, &url, &msg).await {
-                break;
+            if !try_register(client, &url, &msg).await {
+                tracing::warn!("Failed to register to manager after retries: {}", url);
             }
-            tracing::warn!("Failed to register to manager after retries: {}", url);
         }
     }
 
@@ -639,7 +638,7 @@ impl Worker {
 
                 let api_bases = resolve_api_bases(manager_cfg);
 
-                // Status push: broadcast, break on first success.
+                // Status push: broadcast to every configured manager.
                 let mut status_sent = false;
                 for root in &api_bases {
                     let url = format_manager_url(
@@ -649,12 +648,9 @@ impl Worker {
                     match client.post(&url).json(&smsg).send().await {
                         Ok(resp) if resp.status().is_success() => {
                             status_sent = true;
-                            break;
                         }
                         Ok(resp) => {
-                            tracing::warn!(
-                                "Status push to {} returned {}", url, resp.status()
-                            );
+                            tracing::warn!("Status push to {} returned {}", url, resp.status());
                         }
                         Err(e) => {
                             tracing::warn!("Status push to {} failed: {}", url, e);
@@ -662,9 +658,7 @@ impl Worker {
                     }
                 }
                 if !status_sent {
-                    tracing::error!(
-                        "Failed to push status for {} to all managers", msg.name
-                    );
+                    tracing::error!("Failed to push status for {} to any manager", msg.name);
                 }
 
                 if msg.schedule {
@@ -687,22 +681,17 @@ impl Worker {
                     .collect();
                 let sched_msg = hustsync_internal::msg::MirrorSchedules { schedules: s };
 
-                // Schedule push: broadcast, break on first success.
+                // Schedule push: broadcast to every configured manager.
                 let mut sched_sent = false;
                 for root in &api_bases {
-                    let url = format_manager_url(
-                        root,
-                        &format!("workers/{}/schedules", worker_name),
-                    );
+                    let url =
+                        format_manager_url(root, &format!("workers/{}/schedules", worker_name));
                     match client.post(&url).json(&sched_msg).send().await {
                         Ok(resp) if resp.status().is_success() => {
                             sched_sent = true;
-                            break;
                         }
                         Ok(resp) => {
-                            tracing::warn!(
-                                "Schedule push to {} returned {}", url, resp.status()
-                            );
+                            tracing::warn!("Schedule push to {} returned {}", url, resp.status());
                         }
                         Err(e) => {
                             tracing::warn!("Schedule push to {} failed: {}", url, e);
@@ -710,7 +699,7 @@ impl Worker {
                     }
                 }
                 if !sched_sent {
-                    tracing::error!("Failed to push schedule to all managers");
+                    tracing::error!("Failed to push schedule to any manager");
                 }
             }
         });
@@ -914,12 +903,100 @@ impl Worker {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+    use std::time::Duration;
+
+    use axum::extract::State;
+    use axum::http::{StatusCode, Uri};
+    use axum::routing::any;
     use hustsync_config_parser::{
         ExecOnStatus, ExecOnStatusExtra, MirrorConfig, WorkerConfig, WorkerGlobalConfig,
-        WorkerManagerConfig,
+        WorkerManagerConfig, WorkerServerConfig,
     };
+    use hustsync_internal::status::SyncStatus;
+    use tokio::sync::{Mutex, mpsc};
+    use tokio::time::{Instant, sleep};
 
-    use super::{resolve_api_bases, resolve_exec_commands};
+    use super::job::{CtrlAction, STATE_NONE};
+    use super::{JobMessage, MirrorJob, Worker, resolve_api_bases, resolve_exec_commands};
+
+    type RequestLog = Arc<Mutex<Vec<String>>>;
+
+    async fn record_path(State(log): State<RequestLog>, uri: Uri) -> StatusCode {
+        log.lock().await.push(uri.path().to_string());
+        StatusCode::OK
+    }
+
+    async fn spawn_recording_manager() -> (String, RequestLog, tokio::task::JoinHandle<()>) {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new()
+            .fallback(any(record_path))
+            .with_state(Arc::clone(&log));
+
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (format!("http://{}", addr), log, handle)
+    }
+
+    async fn wait_for_paths(log: &RequestLog, expected: &[&str]) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let seen = log.lock().await.clone();
+            if expected
+                .iter()
+                .all(|path| seen.iter().any(|got| got == path))
+            {
+                return;
+            }
+
+            if Instant::now() >= deadline {
+                panic!("timed out waiting for paths {:?}; saw {:?}", expected, seen);
+            }
+
+            sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn worker_config_with_managers(manager_urls: Vec<String>) -> WorkerConfig {
+        WorkerConfig {
+            global: Some(WorkerGlobalConfig {
+                name: Some("broadcast-worker".to_string()),
+                ..WorkerGlobalConfig::default()
+            }),
+            manager: Some(WorkerManagerConfig {
+                api_base: None,
+                api_base_list: Some(manager_urls),
+                token: Some("token".to_string()),
+                ca_cert: Some("".to_string()),
+            }),
+            server: Some(WorkerServerConfig {
+                hostname: Some("localhost".to_string()),
+                listen_addr: Some("127.0.0.1".to_string()),
+                listen_port: Some(6000),
+                ssl_cert: Some("".to_string()),
+                ssl_key: Some("".to_string()),
+            }),
+            mirrors: None,
+            ..WorkerConfig::default()
+        }
+    }
+
+    fn make_mirror_job(name: &str) -> (MirrorJob, mpsc::Receiver<CtrlAction>) {
+        let (tx, rx) = mpsc::channel(32);
+        let job = MirrorJob {
+            name: name.into(),
+            tx,
+            state: Arc::new(AtomicU32::new(STATE_NONE)),
+            disabled: Arc::new(tokio::sync::Notify::new()),
+            interval: tokio::time::Duration::from_secs(60),
+        };
+        (job, rx)
+    }
 
     fn make_cfg(api_base: Option<&str>, api_base_list: Option<Vec<&str>>) -> WorkerManagerConfig {
         WorkerManagerConfig {
@@ -967,6 +1044,60 @@ mod tests {
         let cfg = make_cfg(Some("http://manager:14242"), None);
         let bases = resolve_api_bases(&cfg);
         assert_eq!(bases, vec!["http://manager:14242"]);
+    }
+
+    #[tokio::test]
+    async fn register_worker_broadcasts_to_all_manager_bases() {
+        let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
+        let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+
+        worker.register_worker().await;
+
+        wait_for_paths(&log_a, &["/workers"]).await;
+        wait_for_paths(&log_b, &["/workers"]).await;
+
+        handle_a.abort();
+        handle_b.abort();
+    }
+
+    #[tokio::test]
+    async fn relay_broadcasts_status_and_schedule_to_all_manager_bases() {
+        let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
+        let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+
+        let (job, _rx) = make_mirror_job("archlinux");
+        worker
+            .jobs
+            .write()
+            .await
+            .insert("archlinux".to_string(), job);
+        worker.start_message_relay().await;
+
+        worker
+            .manager_tx
+            .send(JobMessage {
+                status: SyncStatus::Success,
+                name: "archlinux".to_string(),
+                msg: String::new(),
+                schedule: true,
+                upstream: "rsync://mirror.example/archlinux/".to_string(),
+                size: Some("1".to_string()),
+                is_master: true,
+            })
+            .await
+            .unwrap();
+
+        let expected = [
+            "/workers/broadcast-worker/jobs/archlinux",
+            "/workers/broadcast-worker/schedules",
+        ];
+        wait_for_paths(&log_a, &expected).await;
+        wait_for_paths(&log_b, &expected).await;
+
+        handle_a.abort();
+        handle_b.abort();
     }
 
     fn strings(items: &[&str]) -> Vec<String> {

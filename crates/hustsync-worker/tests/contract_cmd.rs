@@ -20,8 +20,10 @@ mod contract_cmd {
     use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
 
+    use chrono::{Duration as ChronoDuration, Utc};
     use http_body_util::BodyExt as _;
     use hustsync_internal::msg::{CmdVerb, WorkerCmd};
+    use hustsync_worker::job::{CtrlAction, STATE_DISABLED};
     use hustsync_worker::MirrorJob;
     use hustsync_worker::schedule::ScheduleQueue;
     use hustsync_worker::server::{AppState, make_http_server};
@@ -107,6 +109,61 @@ mod contract_cmd {
         .unwrap()
     }
 
+    async fn schedule_job(state: &Arc<AppState>, name: &str) {
+        let job = state
+            .jobs
+            .read()
+            .await
+            .get(name)
+            .expect("job must exist")
+            .clone();
+        state
+            .schedule_queue
+            .lock()
+            .await
+            .add_job(Utc::now() + ChronoDuration::minutes(5), job);
+        assert!(
+            state
+                .schedule_queue
+                .lock()
+                .await
+                .get_jobs()
+                .iter()
+                .any(|job| job.job_name == name),
+            "test setup must schedule {name}"
+        );
+    }
+
+    async fn assert_schedule_flushed(state: &Arc<AppState>, name: &str) {
+        assert!(
+            !state
+                .schedule_queue
+                .lock()
+                .await
+                .get_jobs()
+                .iter()
+                .any(|job| job.job_name == name),
+            "{name} must be removed from the schedule queue"
+        );
+    }
+
+    async fn expect_action(rx: &mut mpsc::Receiver<CtrlAction>, expected: CtrlAction) {
+        let got = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("timed out waiting for ctrl action")
+            .expect("ctrl channel closed before expected action");
+        assert_eq!(got, expected);
+    }
+
+    async fn expect_no_action(rx: &mut mpsc::Receiver<CtrlAction>) {
+        assert!(
+            timeout(Duration::from_millis(50), rx.recv())
+                .await
+                .is_err(),
+            "command must not send a ctrl action"
+        );
+    }
+
     // ── tests ─────────────────────────────────────────────────────────────────
 
     /// Configured mirror + valid verb → 200 {"msg": "OK"}
@@ -143,6 +200,149 @@ mod contract_cmd {
 
         assert_eq!(status, 406);
         assert_eq!(body["msg"], "Invalid Command");
+    }
+
+    /// Stop on an active/non-disabled mirror flushes schedule and sends Stop.
+    #[tokio::test]
+    async fn test_stop_known_mirror_flushes_schedule_and_sends_stop() {
+        let (state, mut rx) = state_with_job("archlinux");
+        schedule_job(&state, "archlinux").await;
+
+        let (status, body) = post_cmd(
+            Arc::clone(&state),
+            worker_cmd("archlinux", CmdVerb::Stop),
+        )
+        .await;
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+        assert_schedule_flushed(&state, "archlinux").await;
+        expect_action(&mut rx, CtrlAction::Stop).await;
+    }
+
+    /// Stop on a disabled mirror still returns Go's fixed OK body and does
+    /// not send an action because no Go job goroutine would be receiving it.
+    #[tokio::test]
+    async fn test_stop_disabled_mirror_returns_ok_without_action() {
+        let (state, mut rx) = state_with_job("archlinux");
+        {
+            let jobs = state.jobs.read().await;
+            jobs.get("archlinux").unwrap().set_state(STATE_DISABLED);
+        }
+        schedule_job(&state, "archlinux").await;
+
+        let (status, body) = post_cmd(
+            Arc::clone(&state),
+            worker_cmd("archlinux", CmdVerb::Stop),
+        )
+        .await;
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+        assert_schedule_flushed(&state, "archlinux").await;
+        expect_no_action(&mut rx).await;
+    }
+
+    /// Disable flushes any pending schedule, dispatches Disable to the job,
+    /// and waits for the job's disabled notification before returning.
+    #[tokio::test]
+    async fn test_disable_known_mirror_flushes_schedule_sends_disable_and_waits() {
+        let (state, mut rx) = state_with_job("archlinux");
+        let disabled = {
+            let jobs = state.jobs.read().await;
+            Arc::clone(&jobs.get("archlinux").unwrap().disabled)
+        };
+        schedule_job(&state, "archlinux").await;
+
+        let mut post = tokio::spawn(post_cmd(
+            Arc::clone(&state),
+            worker_cmd("archlinux", CmdVerb::Disable),
+        ));
+
+        let got = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("timed out waiting for Disable action")
+            .expect("ctrl channel closed before Disable action");
+        assert_eq!(got, CtrlAction::Disable);
+
+        assert!(
+            timeout(Duration::from_millis(50), &mut post).await.is_err(),
+            "disable response must wait for the disabled notification"
+        );
+
+        disabled.notify_waiters();
+
+        let (status, body) = post.await.unwrap();
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+        assert_schedule_flushed(&state, "archlinux").await;
+    }
+
+    /// Disable on an already-disabled mirror is a Go-compatible no-op after
+    /// schedule flush: it returns OK and does not send another Disable action.
+    #[tokio::test]
+    async fn test_disable_disabled_mirror_returns_ok_without_action() {
+        let (state, mut rx) = state_with_job("archlinux");
+        {
+            let jobs = state.jobs.read().await;
+            jobs.get("archlinux").unwrap().set_state(STATE_DISABLED);
+        }
+        schedule_job(&state, "archlinux").await;
+
+        let (status, body) = post_cmd(
+            Arc::clone(&state),
+            worker_cmd("archlinux", CmdVerb::Disable),
+        )
+        .await;
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+        assert_schedule_flushed(&state, "archlinux").await;
+        expect_no_action(&mut rx).await;
+    }
+
+    /// Restart flushes any pending schedule and dispatches Restart. Go starts
+    /// a disabled job goroutine before sending this action; Rust's actor stays
+    /// alive and accepts the same Restart action while disabled.
+    #[tokio::test]
+    async fn test_restart_disabled_mirror_flushes_schedule_and_sends_restart() {
+        let (state, mut rx) = state_with_job("archlinux");
+        {
+            let jobs = state.jobs.read().await;
+            jobs.get("archlinux").unwrap().set_state(STATE_DISABLED);
+        }
+        schedule_job(&state, "archlinux").await;
+
+        let (status, body) = post_cmd(
+            Arc::clone(&state),
+            worker_cmd("archlinux", CmdVerb::Restart),
+        )
+        .await;
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+        assert_schedule_flushed(&state, "archlinux").await;
+        expect_action(&mut rx, CtrlAction::Restart).await;
+    }
+
+    /// Ping is Go-compatible no-op bookkeeping: it flushes schedule and
+    /// returns OK without sending anything to the job control channel.
+    #[tokio::test]
+    async fn test_ping_known_mirror_flushes_schedule_without_action() {
+        let (state, mut rx) = state_with_job("archlinux");
+        schedule_job(&state, "archlinux").await;
+
+        let (status, body) = post_cmd(
+            Arc::clone(&state),
+            worker_cmd("archlinux", CmdVerb::Ping),
+        )
+        .await;
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+        assert_schedule_flushed(&state, "archlinux").await;
+        expect_no_action(&mut rx).await;
     }
 
     /// Worker-level Reload (empty mirror_id) → 200 {"msg": "Reload triggered"}
