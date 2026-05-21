@@ -16,7 +16,9 @@ mod cmd_provider_contract {
     use std::time::Duration;
 
     use hustsync_worker::provider::cmd_provider::{CmdProvider, CmdProviderConfig};
-    use hustsync_worker::provider::{CommonProviderConfig, MirrorProvider, ProviderError, RunContext};
+    use hustsync_worker::provider::{
+        CommonProviderConfig, MirrorProvider, ProviderError, RunContext,
+    };
     use tempfile::tempdir;
     use tokio_util::sync::CancellationToken;
 
@@ -29,6 +31,26 @@ mod cmd_provider_contract {
         fail_on_match: Option<String>,
         size_pattern: Option<String>,
     ) -> CmdProvider {
+        make_provider_with_env(
+            dir,
+            name,
+            command,
+            timeout,
+            fail_on_match,
+            size_pattern,
+            HashMap::new(),
+        )
+    }
+
+    fn make_provider_with_env(
+        dir: &tempfile::TempDir,
+        name: &str,
+        command: &str,
+        timeout: Duration,
+        fail_on_match: Option<String>,
+        size_pattern: Option<String>,
+        env: HashMap<String, String>,
+    ) -> CmdProvider {
         let log_file = dir.path().join("run.log");
         let cfg = CmdProviderConfig {
             common: CommonProviderConfig {
@@ -40,7 +62,7 @@ mod cmd_provider_contract {
                 interval: Duration::from_secs(3600),
                 retry: 1,
                 timeout,
-                env: HashMap::new(),
+                env,
                 is_master: true,
                 success_exit_codes: vec![],
             },
@@ -51,51 +73,11 @@ mod cmd_provider_contract {
         CmdProvider::new(cfg).unwrap()
     }
 
-    // ── 1. TUNASYNC_* env injection ──────────────────────────────────────────
+    // ── 1. HUSTSYNC_* env injection ──────────────────────────────────────────
 
-    /// All five TUNASYNC_* variables must be present in the child's env.
-    /// A `sh -c 'env | grep TUNASYNC_'` command writes them to the log file;
-    /// we count distinct TUNASYNC_-prefixed lines.
-    #[tokio::test]
-    async fn tunasync_env_vars_are_injected() {
-        let dir = tempdir().unwrap();
-        let provider = make_provider(
-            &dir,
-            "test-mirror",
-            "sh -c 'env | grep TUNASYNC_'",
-            Duration::ZERO,
-            None,
-            None,
-        );
-
-        provider.run(RunContext::default()).await.unwrap();
-
-        let log = tokio::fs::read_to_string(provider.log_file())
-            .await
-            .unwrap();
-        let tunasync_count = log.lines().filter(|l| l.starts_with("TUNASYNC_")).count();
-
-        assert!(
-            tunasync_count >= 5,
-            "expected ≥5 TUNASYNC_* lines, got {tunasync_count}; log:\n{log}"
-        );
-
-        // Verify the exact Go-compat variable names.
-        for var in &[
-            "TUNASYNC_MIRROR_NAME",
-            "TUNASYNC_WORKING_DIR",
-            "TUNASYNC_UPSTREAM_URL",
-            "TUNASYNC_LOG_DIR",
-            "TUNASYNC_LOG_FILE",
-        ] {
-            assert!(log.contains(var), "missing env var {var} in log:\n{log}");
-        }
-    }
-
-    // ── 2. HUSTSYNC_* dual-prefix injection ──────────────────────────────────
-
-    /// The five HUSTSYNC_* synonyms must also be
-    /// set so that scripts written for hustsync.rs do not need a TUNASYNC_ shim.
+    /// All five canonical HUSTSYNC_* variables must be present in the child env.
+    /// TUNASYNC_* remains a legacy alias, but HUSTSYNC_* is the primary
+    /// contract new scripts should depend on.
     #[tokio::test]
     async fn hustsync_env_vars_are_injected() {
         let dir = tempdir().unwrap();
@@ -129,6 +111,102 @@ mod cmd_provider_contract {
         ] {
             assert!(log.contains(var), "missing env var {var} in log:\n{log}");
         }
+    }
+
+    // ── 2. legacy alias sync / conflict handling ─────────────────────────────
+
+    /// Legacy TUNASYNC_* aliases are still exported, but they mirror the
+    /// canonical HUSTSYNC_* value so scripts do not see conflicting data.
+    #[tokio::test]
+    async fn tunasync_legacy_aliases_mirror_canonical_values() {
+        let dir = tempdir().unwrap();
+        let provider = make_provider(
+            &dir,
+            "test-mirror",
+            "sh -c 'printf \"%s\\n\" \"$HUSTSYNC_MIRROR_NAME|$TUNASYNC_MIRROR_NAME\" \"$HUSTSYNC_WORKING_DIR|$TUNASYNC_WORKING_DIR\" \"$HUSTSYNC_UPSTREAM_URL|$TUNASYNC_UPSTREAM_URL\" \"$HUSTSYNC_LOG_DIR|$TUNASYNC_LOG_DIR\" \"$HUSTSYNC_LOG_FILE|$TUNASYNC_LOG_FILE\"'",
+            Duration::ZERO,
+            None,
+            None,
+        );
+
+        provider.run(RunContext::default()).await.unwrap();
+
+        let log = tokio::fs::read_to_string(provider.log_file())
+            .await
+            .unwrap();
+
+        for line in log.lines() {
+            let (canonical, legacy) = line.split_once('|').unwrap();
+            assert_eq!(
+                canonical, legacy,
+                "legacy alias must mirror canonical: {line}"
+            );
+        }
+    }
+
+    /// If both prefixes are configured for the same semantic field, HUSTSYNC_*
+    /// wins and both exported names are normalised to that value.
+    #[tokio::test]
+    async fn hustsync_env_wins_when_prefixes_conflict() {
+        let dir = tempdir().unwrap();
+        let mut env = HashMap::new();
+        env.insert("HUSTSYNC_UPSTREAM_URL".into(), "canonical".into());
+        env.insert("TUNASYNC_UPSTREAM_URL".into(), "legacy".into());
+        let provider = make_provider_with_env(
+            &dir,
+            "test-mirror",
+            "sh -c 'printf \"%s\\n\" \"$HUSTSYNC_UPSTREAM_URL\" \"$TUNASYNC_UPSTREAM_URL\"'",
+            Duration::ZERO,
+            None,
+            None,
+            env,
+        );
+
+        provider.run(RunContext::default()).await.unwrap();
+
+        let log = tokio::fs::read_to_string(provider.log_file())
+            .await
+            .unwrap();
+        let lines: Vec<_> = log.lines().collect();
+        assert_eq!(lines, vec!["canonical", "canonical"]);
+    }
+
+    /// Runtime hook env is layered after config env. A HUSTSYNC_LOG_FILE /
+    /// TUNASYNC_LOG_FILE conflict must choose HUSTSYNC_LOG_FILE for both the
+    /// actual log path and the child process env.
+    #[tokio::test]
+    async fn hustsync_log_file_wins_over_legacy_log_file_conflict() {
+        let dir = tempdir().unwrap();
+        let canonical_log = dir.path().join("canonical.log");
+        let legacy_log = dir.path().join("legacy.log");
+        let provider = make_provider(
+            &dir,
+            "test-mirror",
+            "sh -c 'printf \"%s\\n\" \"$HUSTSYNC_LOG_FILE\" \"$TUNASYNC_LOG_FILE\"'",
+            Duration::ZERO,
+            None,
+            None,
+        );
+        let mut ctx = RunContext::default();
+        ctx.env.insert(
+            "HUSTSYNC_LOG_FILE".into(),
+            canonical_log.to_string_lossy().into_owned(),
+        );
+        ctx.env.insert(
+            "TUNASYNC_LOG_FILE".into(),
+            legacy_log.to_string_lossy().into_owned(),
+        );
+
+        provider.run(ctx).await.unwrap();
+
+        let log = tokio::fs::read_to_string(&canonical_log).await.unwrap();
+        let lines: Vec<_> = log.lines().collect();
+        let canonical = canonical_log.to_string_lossy();
+        assert_eq!(lines, vec![canonical.as_ref(), canonical.as_ref()]);
+        assert!(
+            !legacy_log.exists(),
+            "legacy log path must not be used when canonical path is present"
+        );
     }
 
     // ── 3. fail_on_match ─────────────────────────────────────────────────────

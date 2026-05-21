@@ -196,6 +196,10 @@ fn load_runtime_worker_config(config_path: &std::path::Path) -> Result<WorkerCon
     Ok(config)
 }
 
+fn format_error_chain(err: &anyhow::Error) -> String {
+    format!("{err:#}")
+}
+
 async fn reload_worker_from_path(worker: &Worker, config_path: &std::path::Path) {
     tracing::info!("Reloading worker config from {}", config_path.display());
     match load_runtime_worker_config(config_path) {
@@ -222,7 +226,11 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
     let config: WorkerConfig = match load_runtime_worker_config(&config_path) {
         Ok(cfg) => cfg,
         Err(err) => {
-            warn!("Error loading worker config from {:?}: {err}.", config_path);
+            warn!(
+                "Error loading worker config from {:?}: {}.",
+                config_path,
+                format_error_chain(&err)
+            );
             std::process::exit(1);
         }
     };
@@ -296,5 +304,22 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Manager(m) => start_manager(m).await.with_context(|| "manager start"),
         Commands::Worker(w) => start_worker(w).await.with_context(|| "worker start"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[test]
+    fn format_error_chain_includes_context_and_root_cause() {
+        let err = anyhow!("TOML parse error: unknown field `docker_image`")
+            .context("load worker config from /tmp/worker.toml");
+
+        let msg = format_error_chain(&err);
+
+        assert!(msg.contains("load worker config from /tmp/worker.toml"));
+        assert!(msg.contains("unknown field `docker_image`"));
     }
 }

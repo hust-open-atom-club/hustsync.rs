@@ -36,14 +36,14 @@ fn marker(dir: &TempDir, name: &str) -> PathBuf {
 }
 
 #[tokio::test]
-async fn post_success_runs_each_command_with_tunasync_env() {
+async fn post_success_runs_each_command_with_canonical_env_and_legacy_alias() {
     let tmp = TempDir::new().unwrap();
     let marker_a = marker(&tmp, "a.marker");
     let marker_b = marker(&tmp, "b.marker");
     let hook = ExecPostHook::new(
         vec![
             format!(
-                "echo \"$TUNASYNC_MIRROR_NAME|$TUNASYNC_JOB_EXIT_STATUS\" > {}",
+                "echo \"$HUSTSYNC_MIRROR_NAME|$TUNASYNC_MIRROR_NAME|$HUSTSYNC_JOB_EXIT_STATUS|$TUNASYNC_JOB_EXIT_STATUS\" > {}",
                 marker_a.display()
             ),
             format!("echo \"$HUSTSYNC_UPSTREAM_URL\" > {}", marker_b.display()),
@@ -55,9 +55,32 @@ async fn post_success_runs_each_command_with_tunasync_env() {
     hook.post_success(&mut ctx).await.unwrap();
 
     let a = std::fs::read_to_string(&marker_a).unwrap();
-    assert_eq!(a.trim(), "archlinux|success");
+    assert_eq!(a.trim(), "archlinux|archlinux|success|success");
     let b = std::fs::read_to_string(&marker_b).unwrap();
     assert_eq!(b.trim(), "rsync://up.test/m/");
+}
+
+#[tokio::test]
+async fn post_success_prefers_hustsync_env_when_alias_conflicts() {
+    let tmp = TempDir::new().unwrap();
+    let out = marker(&tmp, "env.marker");
+    let hook = ExecPostHook::new(
+        vec![format!(
+            "echo \"$HUSTSYNC_LOG_FILE|$TUNASYNC_LOG_FILE\" > {}",
+            out.display()
+        )],
+        vec![],
+    );
+    let mut ctx = make_ctx(&tmp, "archlinux");
+    ctx.env
+        .insert("HUSTSYNC_LOG_FILE".into(), "canonical.log".into());
+    ctx.env
+        .insert("TUNASYNC_LOG_FILE".into(), "legacy.log".into());
+
+    hook.post_success(&mut ctx).await.unwrap();
+
+    let content = std::fs::read_to_string(out).unwrap();
+    assert_eq!(content.trim(), "canonical.log|canonical.log");
 }
 
 #[tokio::test]

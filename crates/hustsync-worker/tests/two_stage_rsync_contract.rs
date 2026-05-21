@@ -126,7 +126,7 @@ async fn stage1_success_leads_to_stage2_success() {
 }
 
 #[tokio::test]
-async fn run_injects_tunasync_and_hustsync_env_vars() {
+async fn run_injects_canonical_env_and_legacy_aliases() {
     let dir = TempDir::new().unwrap();
     let dump_path = dir.path().join("env-dump.txt");
     let mut env = HashMap::new();
@@ -147,16 +147,16 @@ async fn run_injects_tunasync_and_hustsync_env_vars() {
     run(&provider).await.expect("both stages must succeed");
 
     let dump = std::fs::read_to_string(&dump_path).unwrap();
-    assert!(dump.contains("TUNASYNC_MIRROR_NAME=m-env"));
-    assert!(dump.contains(&format!("TUNASYNC_WORKING_DIR={working_dir}")));
-    assert!(dump.contains(&format!("TUNASYNC_UPSTREAM_URL={upstream}")));
-    assert!(dump.contains(&format!("TUNASYNC_LOG_DIR={log_dir}")));
-    assert!(dump.contains(&format!("TUNASYNC_LOG_FILE={log_file}")));
     assert!(dump.contains("HUSTSYNC_MIRROR_NAME=m-env"));
     assert!(dump.contains(&format!("HUSTSYNC_WORKING_DIR={working_dir}")));
     assert!(dump.contains(&format!("HUSTSYNC_UPSTREAM_URL={upstream}")));
     assert!(dump.contains(&format!("HUSTSYNC_LOG_DIR={log_dir}")));
     assert!(dump.contains(&format!("HUSTSYNC_LOG_FILE={log_file}")));
+    assert!(dump.contains("TUNASYNC_MIRROR_NAME=m-env"));
+    assert!(dump.contains(&format!("TUNASYNC_WORKING_DIR={working_dir}")));
+    assert!(dump.contains(&format!("TUNASYNC_UPSTREAM_URL={upstream}")));
+    assert!(dump.contains(&format!("TUNASYNC_LOG_DIR={log_dir}")));
+    assert!(dump.contains(&format!("TUNASYNC_LOG_FILE={log_file}")));
 }
 
 #[tokio::test]

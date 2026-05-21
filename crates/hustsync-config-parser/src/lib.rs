@@ -788,6 +788,18 @@ fn contains_unbracketed_ipv6(upstream: &str) -> bool {
 /// 4. `size_pattern`, when set, must compile and have exactly one capture group.
 /// 5. `stage1_profile`, when set, must be one of the known profiles.
 pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
+    if cfg
+        .cgroup
+        .as_ref()
+        .and_then(|cgroup| cgroup.enable)
+        .unwrap_or(false)
+    {
+        return Err(ConfigError::UnsupportedField {
+            field: "cgroup.enable".into(),
+            tracked_in: "parity-checklist: Cgroup enforcement parity",
+        });
+    }
+
     let Some(mirrors) = cfg.mirrors.as_deref() else {
         return Ok(());
     };
