@@ -161,9 +161,10 @@ impl JobHook for LogLimitHook {
         self.point_symlink(&new_file, &self.latest_symlink(ctx))
             .await?;
         // Surface the log_file to subsequent hooks / provider env.
+        // HUSTSYNC_LOG_FILE is canonical; TUNASYNC_LOG_FILE is a legacy alias.
         let as_str = new_file.to_string_lossy().into_owned();
-        ctx.env.insert("TUNASYNC_LOG_FILE".into(), as_str.clone());
-        ctx.env.insert("HUSTSYNC_LOG_FILE".into(), as_str);
+        ctx.env.insert("HUSTSYNC_LOG_FILE".into(), as_str.clone());
+        ctx.env.insert("TUNASYNC_LOG_FILE".into(), as_str);
 
         Ok(())
     }

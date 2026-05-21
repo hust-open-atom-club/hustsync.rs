@@ -136,32 +136,92 @@ pub(crate) async fn terminate_pgid(pgid: &AtomicU32, name: &str) {
     }
 }
 
-/// Inject the standard TUNASYNC_* and HUSTSYNC_* environment variables into `cmd`.
+const PROVIDER_ENV_SUFFIXES: &[&str] = &[
+    "MIRROR_NAME",
+    "WORKING_DIR",
+    "UPSTREAM_URL",
+    "LOG_DIR",
+    "LOG_FILE",
+];
+
+fn sync_env_keys(suffix: &str) -> (String, String) {
+    (format!("HUSTSYNC_{suffix}"), format!("TUNASYNC_{suffix}"))
+}
+
+fn set_sync_env_pair(env: &mut HashMap<String, String>, suffix: &str, value: String) {
+    let (canonical, legacy) = sync_env_keys(suffix);
+    env.insert(canonical, value.clone());
+    env.insert(legacy, value);
+}
+
+fn known_sync_suffix<'a>(key: &str, suffixes: &'a [&str]) -> Option<&'a str> {
+    let suffix = key
+        .strip_prefix("HUSTSYNC_")
+        .or_else(|| key.strip_prefix("TUNASYNC_"))?;
+    suffixes
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == suffix)
+}
+
+fn apply_env_layer(
+    env: &mut HashMap<String, String>,
+    layer: &HashMap<String, String>,
+    suffixes: &[&str],
+) {
+    for (key, value) in layer {
+        if known_sync_suffix(key, suffixes).is_none() {
+            env.insert(key.clone(), value.clone());
+        }
+    }
+
+    for suffix in suffixes {
+        let (canonical, legacy) = sync_env_keys(suffix);
+        match (layer.get(&canonical), layer.get(&legacy)) {
+            (Some(canonical_value), Some(legacy_value)) => {
+                if canonical_value != legacy_value {
+                    tracing::warn!("conflicting {canonical}/{legacy}; using canonical {canonical}");
+                }
+                set_sync_env_pair(env, suffix, canonical_value.clone());
+            }
+            (Some(value), None) | (None, Some(value)) => {
+                set_sync_env_pair(env, suffix, value.clone());
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+/// Inject the standard HUSTSYNC_* environment variables into `cmd`, plus
+/// TUNASYNC_* legacy aliases with the same values.
 ///
 /// Called after any provider-specific credentials (USER, RSYNC_PASSWORD) have
 /// already been set, so those are not overwritten here. Hook-injected variables
 /// from `ctx_env` are layered on top so they win over the config defaults.
+/// Within a HUSTSYNC_/TUNASYNC_ pair, HUSTSYNC_* is canonical and wins when
+/// both prefixes are present with different values.
 pub(crate) fn inject_provider_env(
     cmd: &mut tokio::process::Command,
     common: &CommonProviderConfig,
     effective_log_file: &str,
     ctx_env: &HashMap<String, String>,
 ) {
-    cmd.env("TUNASYNC_MIRROR_NAME", &common.name)
-        .env("TUNASYNC_WORKING_DIR", &common.working_dir)
-        .env("TUNASYNC_UPSTREAM_URL", &common.upstream_url)
-        .env("TUNASYNC_LOG_DIR", &common.log_dir)
-        .env("TUNASYNC_LOG_FILE", effective_log_file)
-        .env("HUSTSYNC_MIRROR_NAME", &common.name)
-        .env("HUSTSYNC_WORKING_DIR", &common.working_dir)
-        .env("HUSTSYNC_UPSTREAM_URL", &common.upstream_url)
-        .env("HUSTSYNC_LOG_DIR", &common.log_dir)
-        .env("HUSTSYNC_LOG_FILE", effective_log_file);
-    for (k, v) in &common.env {
-        cmd.env(k, v);
+    let mut env = HashMap::new();
+    for (suffix, value) in [
+        ("MIRROR_NAME", common.name.clone()),
+        ("WORKING_DIR", common.working_dir.clone()),
+        ("UPSTREAM_URL", common.upstream_url.clone()),
+        ("LOG_DIR", common.log_dir.clone()),
+        ("LOG_FILE", effective_log_file.to_string()),
+    ] {
+        set_sync_env_pair(&mut env, suffix, value);
     }
-    for (k, v) in ctx_env {
-        cmd.env(k, v);
+
+    apply_env_layer(&mut env, &common.env, PROVIDER_ENV_SUFFIXES);
+    apply_env_layer(&mut env, ctx_env, PROVIDER_ENV_SUFFIXES);
+
+    for (key, value) in env {
+        cmd.env(key, value);
     }
 }
 
@@ -172,10 +232,21 @@ pub(crate) fn inject_provider_env(
 /// key is present it takes precedence; otherwise the provider's
 /// configured default is used.
 pub(crate) fn resolve_log_file(ctx: &RunContext, default: &str) -> String {
-    ctx.env
-        .get("TUNASYNC_LOG_FILE")
-        .cloned()
-        .unwrap_or_else(|| default.to_string())
+    match (
+        ctx.env.get("HUSTSYNC_LOG_FILE"),
+        ctx.env.get("TUNASYNC_LOG_FILE"),
+    ) {
+        (Some(canonical), Some(legacy)) => {
+            if canonical != legacy {
+                tracing::warn!(
+                    "conflicting HUSTSYNC_LOG_FILE/TUNASYNC_LOG_FILE; using HUSTSYNC_LOG_FILE"
+                );
+            }
+            canonical.clone()
+        }
+        (Some(value), None) | (None, Some(value)) => value.clone(),
+        (None, None) => default.to_string(),
+    }
 }
 
 /// Store the total transfer size parsed from an rsync log file.
@@ -184,12 +255,8 @@ pub(crate) fn resolve_log_file(ctx: &RunContext, default: &str) -> String {
 /// non-empty. A parse failure (malformed or absent stats block) is
 /// silently treated as "no size available" — callers use this for
 /// informational reporting only, never for control flow.
-pub(crate) async fn store_rsync_data_size(
-    data_size: &Mutex<Option<String>>,
-    log_file: &str,
-) {
-    let size =
-        hustsync_internal::util::extract_size_from_rsync_log(log_file).unwrap_or_default();
+pub(crate) async fn store_rsync_data_size(data_size: &Mutex<Option<String>>, log_file: &str) {
+    let size = hustsync_internal::util::extract_size_from_rsync_log(log_file).unwrap_or_default();
     if !size.is_empty() {
         *data_size.lock().await = Some(size);
     }
@@ -322,8 +389,9 @@ pub(crate) async fn run_child_with_cancellation(
 /// loop runs outside provider.Run().
 ///
 /// `env` contains hook-injected variables (e.g. the rotated
-/// `TUNASYNC_LOG_FILE` from the loglimit hook). Providers layer it on
-/// top of their standard env vars so hook overrides win.
+/// `HUSTSYNC_LOG_FILE` from the loglimit hook). Providers layer it on
+/// top of their standard env vars so hook overrides win; TUNASYNC_* aliases
+/// are accepted as fallback but HUSTSYNC_* wins on conflict.
 #[derive(Debug, Clone, Default)]
 pub struct RunContext {
     pub cancel: CancellationToken,
@@ -483,8 +551,8 @@ pub fn build_provider(
 
         let is_rsync_provider = matches!(p_type, "rsync" | "two-stage-rsync");
         if is_rsync_provider {
-            if let Some(grc) = global
-                .and_then(|g| g.dangerous_global_rsync_success_exit_codes.as_ref())
+            if let Some(grc) =
+                global.and_then(|g| g.dangerous_global_rsync_success_exit_codes.as_ref())
             {
                 codes.extend(grc);
             }

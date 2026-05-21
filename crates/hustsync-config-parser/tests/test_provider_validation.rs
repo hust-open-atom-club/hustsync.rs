@@ -5,7 +5,9 @@
 // illegal input that must produce `ConfigError::InvalidValue`.
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::panic)]
-use hustsync_config_parser::{ConfigError, MirrorConfig, WorkerConfig, validate_worker_config};
+use hustsync_config_parser::{
+    ConfigError, MirrorConfig, WorkerCgroupConfig, WorkerConfig, validate_worker_config,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,6 +31,31 @@ fn named_rsync_mirror(name: &str, upstream: &str) -> MirrorConfig {
         upstream: Some(upstream.into()),
         ..MirrorConfig::default()
     }
+}
+
+#[test]
+fn reject_enabled_cgroup_until_runtime_support_exists() {
+    let mut cfg = worker_with_single_mirror(named_rsync_mirror(
+        "arch",
+        "rsync://mirror.example.org/archlinux/",
+    ));
+    cfg.cgroup = Some(WorkerCgroupConfig {
+        enable: Some(true),
+        base_path: Some("/sys/fs/cgroup".into()),
+        group: Some("hustsync".into()),
+    });
+
+    let err = validate_worker_config(&cfg).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ConfigError::UnsupportedField {
+                ref field,
+                ..
+            } if field == "cgroup.enable"
+        ),
+        "enabled cgroup must be rejected instead of silently ignored, got {err:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

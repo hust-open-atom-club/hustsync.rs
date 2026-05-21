@@ -23,8 +23,8 @@ mod contract_cmd {
     use chrono::{Duration as ChronoDuration, Utc};
     use http_body_util::BodyExt as _;
     use hustsync_internal::msg::{CmdVerb, WorkerCmd};
-    use hustsync_worker::job::{CtrlAction, STATE_DISABLED};
     use hustsync_worker::MirrorJob;
+    use hustsync_worker::job::{CtrlAction, STATE_DISABLED};
     use hustsync_worker::schedule::ScheduleQueue;
     use hustsync_worker::server::{AppState, make_http_server};
     use serde_json::Value;
@@ -157,9 +157,7 @@ mod contract_cmd {
 
     async fn expect_no_action(rx: &mut mpsc::Receiver<CtrlAction>) {
         assert!(
-            timeout(Duration::from_millis(50), rx.recv())
-                .await
-                .is_err(),
+            timeout(Duration::from_millis(50), rx.recv()).await.is_err(),
             "command must not send a ctrl action"
         );
     }
@@ -172,6 +170,25 @@ mod contract_cmd {
         let (state, _rx) = state_with_job("archlinux");
 
         let (status, body) = post_cmd(state, worker_cmd("archlinux", CmdVerb::Start)).await;
+
+        assert_eq!(status, 200);
+        assert_eq!(body["msg"], "OK");
+    }
+
+    /// Go's manager can encode omitted command payloads as JSON null. The Rust
+    /// worker must treat those as empty collections instead of rejecting the
+    /// request at Axum's JSON extractor boundary.
+    #[tokio::test]
+    async fn test_valid_cmd_accepts_null_args_and_options() {
+        let (state, _rx) = state_with_job("archlinux");
+        let body = serde_json::json!({
+            "options": null,
+            "args": null,
+            "mirror_id": "archlinux",
+            "cmd": "ping"
+        });
+
+        let (status, body) = post_cmd(state, body).await;
 
         assert_eq!(status, 200);
         assert_eq!(body["msg"], "OK");
@@ -208,11 +225,8 @@ mod contract_cmd {
         let (state, mut rx) = state_with_job("archlinux");
         schedule_job(&state, "archlinux").await;
 
-        let (status, body) = post_cmd(
-            Arc::clone(&state),
-            worker_cmd("archlinux", CmdVerb::Stop),
-        )
-        .await;
+        let (status, body) =
+            post_cmd(Arc::clone(&state), worker_cmd("archlinux", CmdVerb::Stop)).await;
 
         assert_eq!(status, 200);
         assert_eq!(body["msg"], "OK");
@@ -231,11 +245,8 @@ mod contract_cmd {
         }
         schedule_job(&state, "archlinux").await;
 
-        let (status, body) = post_cmd(
-            Arc::clone(&state),
-            worker_cmd("archlinux", CmdVerb::Stop),
-        )
-        .await;
+        let (status, body) =
+            post_cmd(Arc::clone(&state), worker_cmd("archlinux", CmdVerb::Stop)).await;
 
         assert_eq!(status, 200);
         assert_eq!(body["msg"], "OK");
@@ -333,11 +344,8 @@ mod contract_cmd {
         let (state, mut rx) = state_with_job("archlinux");
         schedule_job(&state, "archlinux").await;
 
-        let (status, body) = post_cmd(
-            Arc::clone(&state),
-            worker_cmd("archlinux", CmdVerb::Ping),
-        )
-        .await;
+        let (status, body) =
+            post_cmd(Arc::clone(&state), worker_cmd("archlinux", CmdVerb::Ping)).await;
 
         assert_eq!(status, 200);
         assert_eq!(body["msg"], "OK");

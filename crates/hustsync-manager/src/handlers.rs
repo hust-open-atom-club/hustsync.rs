@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use chrono::Utc;
 use hustsync_internal::msg::{
     ClientCmd, CmdVerb, MirrorSchedules, MirrorStatus, WorkerCmd, WorkerStatus,
@@ -10,6 +10,7 @@ use hustsync_internal::msg::{
 use hustsync_internal::status::SyncStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::path::Path as FsPath;
 use std::sync::Arc;
 
 use crate::database::DbAdapterTrait;
@@ -25,6 +26,36 @@ fn ok_json(data: impl Serialize) -> Response {
 
 fn ok_message(msg: &str) -> Response {
     (StatusCode::OK, Json(json!({ INFO_KEY: msg }))).into_response()
+}
+
+fn write_status_file(manager: &Manager, adapter: &dyn DbAdapterTrait) -> Result<(), String> {
+    let status_file = manager.config.files.status_file.trim();
+    if status_file.is_empty() {
+        return Ok(());
+    }
+
+    let statuses = adapter
+        .list_all_mirror_status()
+        .map_err(|e| format!("list all mirror status: {e}"))?;
+    let web_statuses: Vec<hustsync_internal::status_web::WebMirrorStatus> =
+        statuses.into_iter().map(|s| s.into()).collect();
+    let data = serde_json::to_vec(&web_statuses).map_err(|e| format!("serialize status: {e}"))?;
+
+    let expanded = hustsync_internal::util::expand_tilde(status_file);
+    let path = FsPath::new(&expanded);
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create parent directory {}: {e}", parent.display()))?;
+    }
+    std::fs::write(path, data).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
+fn refresh_status_file(manager: &Manager, adapter: &dyn DbAdapterTrait) {
+    if let Err(e) = write_status_file(manager, adapter) {
+        tracing::error!("Failed to refresh status file: {}", e);
+    }
 }
 
 // Custom Extractor for the database adapter
@@ -114,10 +145,7 @@ pub async fn list_jobs_of_worker(
     }
 }
 
-pub async fn delete_worker(
-    Database(adapter): Database,
-    Path(worker_id): Path<String>,
-) -> Response {
+pub async fn delete_worker(Database(adapter): Database, Path(worker_id): Path<String>) -> Response {
     match adapter.delete_worker(&worker_id) {
         Ok(_) => {
             tracing::info!("Worker <{}> deleted", worker_id);
@@ -130,9 +158,15 @@ pub async fn delete_worker(
     }
 }
 
-pub async fn flush_disabled_jobs(Database(adapter): Database) -> Response {
+pub async fn flush_disabled_jobs(
+    State(manager): State<Arc<Manager>>,
+    Database(adapter): Database,
+) -> Response {
     match adapter.flush_disabled_jobs() {
-        Ok(_) => ok_message("flushed"),
+        Ok(_) => {
+            refresh_status_file(&manager, adapter.as_ref());
+            ok_message("flushed")
+        }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to flush disabled jobs: {}", e),
@@ -141,6 +175,7 @@ pub async fn flush_disabled_jobs(Database(adapter): Database) -> Response {
 }
 
 pub async fn update_job_of_worker(
+    State(manager): State<Arc<Manager>>,
     Database(adapter): Database,
     Path((worker_id, mirror_id)): Path<(String, String)>,
     Json(mut status): Json<MirrorStatus>,
@@ -189,7 +224,10 @@ pub async fn update_job_of_worker(
     }
 
     match adapter.update_mirror_status(&worker_id, &mirror_id, status) {
-        Ok(new_status) => ok_json(new_status),
+        Ok(new_status) => {
+            refresh_status_file(&manager, adapter.as_ref());
+            ok_json(new_status)
+        }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to update job: {}", e),
@@ -208,6 +246,7 @@ pub struct SizeMsg {
 }
 
 pub async fn update_mirror_size(
+    State(manager): State<Arc<Manager>>,
     Database(adapter): Database,
     Path((worker_id, mirror_id)): Path<(String, String)>,
     Json(msg): Json<SizeMsg>,
@@ -219,7 +258,10 @@ pub async fn update_mirror_size(
             if !msg.size.is_empty() && msg.size != "unknown" {
                 status.size = msg.size;
                 match adapter.update_mirror_status(&worker_id, &mirror_id, status) {
-                    Ok(new_status) => ok_json(new_status),
+                    Ok(new_status) => {
+                        refresh_status_file(&manager, adapter.as_ref());
+                        ok_json(new_status)
+                    }
                     Err(e) => error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Failed to save size: {}", e),
@@ -237,6 +279,7 @@ pub async fn update_mirror_size(
 }
 
 pub async fn update_schedules_of_worker(
+    State(manager): State<Arc<Manager>>,
     Database(adapter): Database,
     Path(worker_id): Path<String>,
     Json(schedules): Json<MirrorSchedules>,
@@ -275,6 +318,7 @@ pub async fn update_schedules_of_worker(
         }
     }
 
+    refresh_status_file(&manager, adapter.as_ref());
     ok_json(json!({}))
 }
 
@@ -317,25 +361,49 @@ pub async fn handle_cmd(
     {
         let mut new_status = status;
         new_status.status = SyncStatus::Disabled;
-        let _ = adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status);
+        match adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status) {
+            Ok(_) => refresh_status_file(&manager, adapter.as_ref()),
+            Err(e) => tracing::error!("Failed to pre-set disabled status: {}", e),
+        }
     } else if client_cmd.cmd == CmdVerb::Stop
         && let Ok(status) = adapter.get_mirror_status(worker_id, &client_cmd.mirror_id)
     {
         let mut new_status = status;
         new_status.status = SyncStatus::Paused;
-        let _ = adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status);
+        match adapter.update_mirror_status(worker_id, &client_cmd.mirror_id, new_status) {
+            Ok(_) => refresh_status_file(&manager, adapter.as_ref()),
+            Err(e) => tracing::error!("Failed to pre-set paused status: {}", e),
+        }
     }
 
     let Some(ref client) = manager.http_client else {
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "HTTP client not initialized");
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "HTTP client not initialized",
+        );
     };
 
     // Workers accept commands at POST / (worker URL ends with "/").
-    // Go forwards any request error (connect refused, timeout, non-2xx) as
-    // 500 with a unified error JSON — no 502/504 discrimination.
+    // Transport errors still collapse to 500 for compatibility with the old
+    // manager path, but worker-side non-2xx responses must not be reported as
+    // a successful command dispatch.
     let url = worker.url.clone();
     match client.post(&url).json(&worker_cmd).send().await {
-        Ok(_) => ok_message(&format!("successfully send command to worker {}", worker_id)),
+        Ok(resp) if resp.status().is_success() => ok_message(&format!(
+            "successfully send command to worker {}",
+            worker_id
+        )),
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            error_response(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "post command to worker {}({}) returned {}: {}",
+                    worker_id, url, status, body
+                ),
+            )
+        }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("post command to worker {}({}) fail: {}", worker_id, url, e),

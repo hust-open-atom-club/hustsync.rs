@@ -222,7 +222,7 @@ fn zero_rsync_timeout_falls_back_to_default_not_zero() {
 }
 
 #[tokio::test]
-async fn run_injects_tunasync_and_hustsync_env_vars() {
+async fn run_injects_canonical_env_and_legacy_aliases() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let working_dir = tmp.path().join("work");
     let log_dir = tmp.path().join("log");
@@ -275,16 +275,16 @@ async fn run_injects_tunasync_and_hustsync_env_vars() {
     provider.run(RunContext::default()).await.unwrap();
 
     let log = tokio::fs::read_to_string(&log_file).await.unwrap();
-    assert!(log.contains("TUNASYNC_MIRROR_NAME=env-test"));
-    assert!(log.contains(&format!("TUNASYNC_WORKING_DIR={working_dir_str}")));
-    assert!(log.contains("TUNASYNC_UPSTREAM_URL=rsync://example.com/repo/"));
-    assert!(log.contains(&format!("TUNASYNC_LOG_DIR={log_dir_str}")));
-    assert!(log.contains(&format!("TUNASYNC_LOG_FILE={log_file_str}")));
     assert!(log.contains("HUSTSYNC_MIRROR_NAME=env-test"));
     assert!(log.contains(&format!("HUSTSYNC_WORKING_DIR={working_dir_str}")));
     assert!(log.contains("HUSTSYNC_UPSTREAM_URL=rsync://example.com/repo/"));
     assert!(log.contains(&format!("HUSTSYNC_LOG_DIR={log_dir_str}")));
     assert!(log.contains(&format!("HUSTSYNC_LOG_FILE={log_file_str}")));
+    assert!(log.contains("TUNASYNC_MIRROR_NAME=env-test"));
+    assert!(log.contains(&format!("TUNASYNC_WORKING_DIR={working_dir_str}")));
+    assert!(log.contains("TUNASYNC_UPSTREAM_URL=rsync://example.com/repo/"));
+    assert!(log.contains(&format!("TUNASYNC_LOG_DIR={log_dir_str}")));
+    assert!(log.contains(&format!("TUNASYNC_LOG_FILE={log_file_str}")));
 }
 
 // ---------------------------------------------------------------------------

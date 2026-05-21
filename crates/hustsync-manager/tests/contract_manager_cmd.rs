@@ -13,7 +13,8 @@
 //! 5. Worker unreachable (connection refused) → 500 (Go does not
 //!    discriminate 502; all forward errors collapse to 500).
 //! 6. Worker timeout (accepts but never responds) → 500.
-//! 7. Stop command pre-sets manager-side status to `paused`, even when
+//! 7. Worker non-2xx response → manager returns 502 instead of a false success.
+//! 8. Stop command pre-sets manager-side status to `paused`, even when
 //!    the previous status was `disabled` and forwarding fails.
 //!
 //! Mock worker strategy: `tokio::net::TcpListener` on an ephemeral port —
@@ -140,6 +141,52 @@ async fn cmd_happy_path_returns_fixed_message() {
     let got = contract::body_json(resp).await;
     let want = contract::load_fixture("cmd/response_happy.json");
     contract::assert_json_eq_masked(&got, &want, &[]);
+}
+
+/// POST /cmd must not report success when the worker rejects the command.
+///
+/// This deliberately diverges from Go's current TODO path, where `PostJSON`
+/// only checks transport errors. Rust treats a worker-side 4xx/5xx as a failed
+/// forward so CLI users do not see "success" for commands that did not run.
+#[tokio::test]
+async fn cmd_worker_non_success_returns_bad_gateway() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let worker_port = listener.local_addr().unwrap().port();
+    let worker_url = format!("http://127.0.0.1:{}/", worker_port);
+
+    tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let body = "{\"msg\":\"Mirror ``missing'' not found\"}";
+            let response = format!(
+                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.shutdown().await;
+        }
+    });
+
+    let (app, _dir) = contract::spawn_manager();
+    let app = register_worker(app, &worker_url).await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/cmd")
+        .header("Content-Type", "application/json")
+        .body(Body::from(cmd_body("mirror-01", "missing")))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+
+    let got = contract::body_json(resp).await;
+    let error = got["error"].as_str().unwrap();
+    assert!(error.contains("returned 404 Not Found"), "{error}");
+    assert!(error.contains("Mirror ``missing'' not found"), "{error}");
 }
 
 /// POST /cmd `stop` pre-sets manager-side job status to `paused`

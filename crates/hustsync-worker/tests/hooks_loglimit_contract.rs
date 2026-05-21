@@ -50,7 +50,12 @@ async fn pre_exec_creates_fresh_file_and_symlink() {
     let target = std::fs::read_link(&link).unwrap();
     assert_eq!(target, ctx.log_file);
 
-    // The env was surfaced with the new log path.
+    // The env was surfaced with the new log path. HUSTSYNC_LOG_FILE is
+    // canonical; TUNASYNC_LOG_FILE remains a legacy alias with the same value.
+    assert_eq!(
+        ctx.env.get("HUSTSYNC_LOG_FILE").unwrap(),
+        &ctx.log_file.to_string_lossy().to_string()
+    );
     assert_eq!(
         ctx.env.get("TUNASYNC_LOG_FILE").unwrap(),
         &ctx.log_file.to_string_lossy().to_string()

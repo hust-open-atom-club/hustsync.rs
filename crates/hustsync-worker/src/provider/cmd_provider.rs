@@ -118,14 +118,6 @@ impl MirrorProvider for CmdProvider {
             cmd.process_group(0);
         }
 
-        // Inject both TUNASYNC_* (Go parity for existing mirror scripts) and
-        // HUSTSYNC_* (Rust-port canonical names).  Both sets must stay in sync.
-        cmd.env("TUNASYNC_MIRROR_NAME", &self.config.common.name)
-            .env("TUNASYNC_WORKING_DIR", &self.config.common.working_dir)
-            .env("TUNASYNC_UPSTREAM_URL", &self.config.common.upstream_url)
-            .env("TUNASYNC_LOG_DIR", &self.config.common.log_dir)
-            .env("TUNASYNC_LOG_FILE", &effective_log_file);
-
         inject_provider_env(&mut cmd, &self.config.common, &effective_log_file, &ctx.env);
 
         tracing::info!("Starting command provider for {}", self.config.common.name);
@@ -163,8 +155,13 @@ impl MirrorProvider for CmdProvider {
                 } else {
                     let code = status.code().unwrap_or(-1);
                     let msg = format!("Command exited with status: {}", status);
-                    log_provider_failure("Cmd", &self.config.common.name, &msg, &effective_log_file)
-                        .await;
+                    log_provider_failure(
+                        "Cmd",
+                        &self.config.common.name,
+                        &msg,
+                        &effective_log_file,
+                    )
+                    .await;
                     Err(ProviderError::Execution { code, msg })
                 }
             }
