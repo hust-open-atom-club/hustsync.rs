@@ -4,8 +4,9 @@ mod common;
 mod config;
 pub mod database;
 mod handlers;
+pub mod metrics;
 mod middleware;
-mod server;
+pub mod server;
 
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use thiserror::Error;
