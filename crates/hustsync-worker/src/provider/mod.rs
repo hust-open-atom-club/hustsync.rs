@@ -26,9 +26,11 @@ use self::two_stage_rsync_provider::{TwoStageRsyncProvider, TwoStageRsyncProvide
 pub mod cmd_provider;
 pub mod rsync_provider;
 pub mod runner;
+pub mod tool;
 pub mod two_stage_rsync_provider;
 
 pub use runner::{Docker, Job, Runner};
+pub use tool::Tool;
 
 /// Base rsync arguments shared by both the standard rsync provider (full
 /// sync) and the two-stage provider's stage-2 pass.
@@ -308,17 +310,13 @@ pub(crate) async fn store_rsync_data_size(data_size: &Mutex<Option<String>>, log
 /// provider can still implement `run()`, `terminate()`, and `data_size()`
 /// manually.
 macro_rules! impl_provider_getters {
-    ($ty:ty, $variant:expr) => {
+    (@common) => {
         fn name(&self) -> &str {
             &self.config.common.name
         }
 
         fn upstream(&self) -> &str {
             &self.config.common.upstream_url
-        }
-
-        fn provider_type(&self) -> $crate::provider::ProviderType {
-            $variant
         }
 
         fn interval(&self) -> ::std::time::Duration {
@@ -348,6 +346,20 @@ macro_rules! impl_provider_getters {
         fn is_master(&self) -> bool {
             self.config.common.is_master
         }
+    };
+    ($ty:ty, field $f:ident) => {
+        fn provider_type(&self) -> $crate::provider::ProviderType {
+            self.$f
+        }
+
+        $crate::provider::impl_provider_getters!(@common);
+    };
+    ($ty:ty, $variant:expr) => {
+        fn provider_type(&self) -> $crate::provider::ProviderType {
+            $variant
+        }
+
+        $crate::provider::impl_provider_getters!(@common);
     };
 }
 
@@ -434,6 +446,8 @@ pub enum ProviderType {
     Command,
     Rsync,
     TwoStageRsync,
+    Fpsync,
+    Lsyncd,
 }
 
 #[async_trait]
@@ -476,6 +490,11 @@ pub trait MirrorProvider: Send + Sync {
 
     /// Is this a master mirror node?
     fn is_master(&self) -> bool;
+
+    /// Whether the provider keeps running until stopped, like lsyncd.
+    fn daemon(&self) -> bool {
+        false
+    }
 }
 
 /// Construct a concrete provider from a `MirrorConfig` + the worker's
@@ -651,6 +670,30 @@ pub fn build_provider(
                 common,
             };
             Ok(Box::new(TwoStageRsyncProvider::new(cfg)?))
+        }
+        "fpsync" | "lsyncd" => {
+            let (tool, opts) = match p_type {
+                "fpsync" => (Tool::Fpsync, &m_cfg.fpsync_options),
+                _ => (Tool::Lsyncd, &m_cfg.lsyncd_options),
+            };
+            let bin = m_cfg.command.as_deref().unwrap_or(p_type);
+            let argv = tool.argv(
+                bin,
+                opts.as_deref().unwrap_or_default(),
+                &common.upstream_url,
+                &common.working_dir,
+            );
+            let mut common = common;
+            if tool.daemon() {
+                common.timeout = Duration::ZERO;
+            }
+            let cfg = CmdProviderConfig {
+                command: argv.join(" "),
+                fail_on_match: m_cfg.fail_on_match.clone(),
+                size_pattern: m_cfg.size_pattern.clone(),
+                common,
+            };
+            Ok(Box::new(CmdProvider::with_argv(cfg, tool.into(), argv)?))
         }
         _ => Err(ProviderError::Config(format!(
             "unknown provider type `{p_type}`"

@@ -26,19 +26,28 @@ pub struct CmdProvider {
     fail_on_match: Option<Regex>,
     size_pattern: Option<Regex>,
     data_size: Mutex<Option<String>>,
+    kind: ProviderType,
     // We store the running process PGID here so terminate() can kill it
     // without needing to acquire a Mutex that run() might be holding.
     running_pgid: AtomicU32,
 }
 
 impl CmdProvider {
-    pub fn new(mut config: CmdProviderConfig) -> Result<Self, ProviderError> {
+    pub fn new(config: CmdProviderConfig) -> Result<Self, ProviderError> {
+        let cmd_args = shlex::split(&config.command)
+            .ok_or_else(|| ProviderError::Config("Failed to parse command with shlex".into()))?;
+        Self::with_argv(config, ProviderType::Command, cmd_args)
+    }
+
+    /// Runs a ready-made argument list, reported as `kind`.
+    pub fn with_argv(
+        mut config: CmdProviderConfig,
+        kind: ProviderType,
+        cmd_args: Vec<String>,
+    ) -> Result<Self, ProviderError> {
         if config.common.retry == 0 {
             config.common.retry = 2;
         }
-
-        let cmd_args = shlex::split(&config.command)
-            .ok_or_else(|| ProviderError::Config("Failed to parse command with shlex".into()))?;
 
         if cmd_args.is_empty() {
             return Err(ProviderError::Config("Command is empty".into()));
@@ -60,6 +69,7 @@ impl CmdProvider {
             fail_on_match,
             size_pattern,
             data_size: Mutex::new(None),
+            kind,
             running_pgid: AtomicU32::new(0),
         })
     }
@@ -67,7 +77,11 @@ impl CmdProvider {
 
 #[async_trait]
 impl MirrorProvider for CmdProvider {
-    impl_provider_getters!(CmdProvider, ProviderType::Command);
+    impl_provider_getters!(CmdProvider, field kind);
+
+    fn daemon(&self) -> bool {
+        self.kind == ProviderType::Lsyncd
+    }
 
     async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
         if ctx.attempt > 1 {
