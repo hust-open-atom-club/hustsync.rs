@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local, Utc};
 use hustsync_internal::status::SyncStatus;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -46,9 +47,21 @@ pub struct MirrorJob {
     pub state: Arc<AtomicU32>,
     pub disabled: Arc<tokio::sync::Notify>,
     pub interval: Duration,
+    pub cron: Option<hustsync_config_parser::Cron>,
 }
 
 impl MirrorJob {
+    /// When the job runs next after `after`: the cron schedule if set, else `after + interval`.
+    pub fn next_run(&self, after: DateTime<Utc>) -> DateTime<Utc> {
+        self.cron
+            .as_ref()
+            .and_then(|c| {
+                c.find_next_occurrence(&after.with_timezone(&Local), false)
+                    .ok()
+            })
+            .map_or(after + self.interval, |t| t.to_utc())
+    }
+
     pub fn state(&self) -> u32 {
         self.state.load(Ordering::Acquire)
     }
@@ -101,6 +114,7 @@ impl JobActor {
             state: Arc::clone(&state),
             disabled: Arc::clone(&disabled),
             interval,
+            cron: None,
         };
 
         let actor = JobActor {
