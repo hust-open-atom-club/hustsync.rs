@@ -70,31 +70,31 @@ fn box_err(e: hustsync_internal::InternalError) -> anyhow::Error {
 #[command(about = "control client for hustsync manager", version)]
 struct Cli {
     /// Read configuration from FILE
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     config: Option<String>,
 
     /// The manager server address
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     manager: Option<String>,
 
     /// The manager server port
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     port: Option<u16>,
 
     /// Trust root CA cert file CERT
-    #[arg(long)]
+    #[arg(long, global = true)]
     ca_cert: Option<String>,
 
     /// Force HTTPS connection
-    #[arg(long)]
+    #[arg(long, global = true)]
     https: bool,
 
     /// Enable verbosely logging
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     verbose: bool,
 
     /// Enable trace-level logging
-    #[arg(long)]
+    #[arg(long, global = true)]
     debug: bool,
 
     #[command(subcommand)]
