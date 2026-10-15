@@ -928,6 +928,7 @@ dependencies = [
  "hustsync-worker",
  "tokio",
  "tracing",
+ "windows-services",
 ]
 
 [[package]]
@@ -1013,6 +1014,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3047,6 +3049,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
+name = "windows-link"
+version = "0.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b39de7c7fe78858b0144c50c3fc000bab3be17d5e9b85b1053871693c7f7415"
+
+[[package]]
 name = "windows-registry"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3073,6 +3081,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
 dependencies = [
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "windows-services"
+version = "0.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1578d9e5d13ea44cab26e5ab9336331d5789ecc50cb04609b03846f9b447cc75"
+dependencies = [
+ "windows-link 0.100.0",
 ]
 
 [[package]]

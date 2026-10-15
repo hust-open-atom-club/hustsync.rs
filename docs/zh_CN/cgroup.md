@@ -1,6 +1,6 @@
 # 资源隔离
 
-启用后每个镜像在自己的 cgroup 里同步：限制内存，同步结束时清理所有残留进程，超出内存上限时上报为 OOM。支持 cgroup v1 与 v2，自动识别。
+启用后每个镜像在自己的 cgroup 里同步：限制内存，同步结束时清理所有残留进程，超出内存上限时上报为 OOM。支持 cgroup v1 与 v2，自动识别。Windows 上同样的配置由 Job Object 实现，见 [windows.md](windows.md)。
 
 ## 配置
 

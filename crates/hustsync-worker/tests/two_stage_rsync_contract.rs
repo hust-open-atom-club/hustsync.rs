@@ -14,6 +14,7 @@
 //! 5. cancel mid-stage-1 via `ctx.cancel` → `ProviderError::Terminated`
 //! 6. unknown `stage1_profile` → rejected at `new()`
 
+#![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::HashMap;

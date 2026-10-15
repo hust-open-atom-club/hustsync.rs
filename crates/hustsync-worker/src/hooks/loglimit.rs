@@ -146,13 +146,17 @@ impl LogLimitHook {
                 .await
                 .map_err(|e| HookError::io(HOOK_NAME, e))?;
         }
-        #[cfg(not(unix))]
+        // Symlinks need a privilege on Windows; a hard link still lets tools read `latest`.
+        #[cfg(windows)]
         {
-            // No symlink support — write a plain file containing the
-            // target path so dashboards at least find it.
-            fs::write(link, target.to_string_lossy().as_bytes())
-                .await
-                .map_err(|e| HookError::io(HOOK_NAME, e))?;
+            let (target, link) = (target.to_path_buf(), link.to_path_buf());
+            tokio::task::spawn_blocking(move || {
+                std::os::windows::fs::symlink_file(&target, &link)
+                    .or_else(|_| std::fs::hard_link(&target, &link))
+            })
+            .await
+            .map_err(|e| HookError::io(HOOK_NAME, std::io::Error::other(e)))?
+            .map_err(|e| HookError::io(HOOK_NAME, e))?;
         }
         Ok(())
     }

@@ -132,7 +132,7 @@ impl MirrorProvider for CmdProvider {
 
         tracing::info!("Starting command provider for {}", self.config.common.name);
 
-        let mut spawned_child = cmd.spawn()?;
+        let mut spawned_child = self.config.common.spawn(&mut cmd).await?;
 
         // Record the PID so terminate() can kill it without locks
         if let Some(pid) = spawned_child.id() {

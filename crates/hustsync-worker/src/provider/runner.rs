@@ -12,7 +12,7 @@ use hustsync_config_parser::{MemBytes, MirrorConfig, WorkerDockerConfig};
 use hustsync_internal::util::expand_tilde;
 use tokio::process::Command;
 
-use crate::cgroup::{self, Cgroups};
+use crate::cgroup::Cgroups;
 
 /// How a provider's command is launched.
 #[derive(Debug, Default)]
@@ -102,19 +102,32 @@ impl Runner {
             cmd.pre_exec(|| nix::unistd::setsid().map(drop).map_err(Into::into));
         }
         if let Self::Cgroup(cg, mem) = self {
-            cgroup::attach(&mut cmd, &cg.create(job.name, *mem).await?)?;
+            cg.enter(job.name, *mem, &mut cmd).await?;
         }
         Ok(cmd)
     }
 
-    /// Stops the running job: `docker stop` for containers, then the process group.
-    #[cfg_attr(not(unix), allow(unused_variables))]
+    /// Hands a spawned child to its cgroup where it cannot join before exec.
+    pub fn adopt(&self, name: &str, child: &tokio::process::Child) -> io::Result<()> {
+        match self {
+            Self::Cgroup(cg, _) => cg.adopt(name, child),
+            _ => Ok(()),
+        }
+    }
+
+    /// Stops the running job: `docker stop` or the cgroup first, then the process group.
     pub async fn stop(&self, name: &str, pgid: &AtomicU32) {
-        if let Self::Docker(_) = self {
-            let _ = docker(["stop", "-t", "2", &container(name)]).output().await;
+        match self {
+            Self::Docker(_) => {
+                let _ = docker(["stop", "-t", "2", &container(name)]).output().await;
+            }
+            Self::Cgroup(cg, _) => cg.kill(name),
+            Self::Direct => {}
         }
         #[cfg(unix)]
         super::terminate_pgid(pgid, name).await;
+        #[cfg(windows)]
+        kill_tree(pgid).await;
     }
 
     /// Cleans up after a run; returns whether the OOM killer fired.
@@ -176,6 +189,18 @@ impl Docker {
         args.extend(self.options.iter().cloned());
         args.push(self.image.clone());
         args
+    }
+}
+
+/// Ends the process `pid` and everything it started; Windows has no process groups to signal.
+#[cfg(windows)]
+async fn kill_tree(pid: &AtomicU32) {
+    let pid = pid.load(std::sync::atomic::Ordering::Acquire);
+    if pid != 0 && pid != u32::MAX {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .output()
+            .await;
     }
 }
 

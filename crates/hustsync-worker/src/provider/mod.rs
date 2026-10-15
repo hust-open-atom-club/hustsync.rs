@@ -106,6 +106,19 @@ impl CommonProviderConfig {
         }
     }
 
+    /// Spawns `cmd` and hands the child to the runner, killing it if that fails.
+    pub(crate) async fn spawn(
+        &self,
+        cmd: &mut tokio::process::Command,
+    ) -> std::io::Result<tokio::process::Child> {
+        let mut child = cmd.spawn()?;
+        if let Err(e) = self.runner.adopt(&self.name, &child) {
+            let _ = child.kill().await;
+            return Err(e);
+        }
+        Ok(child)
+    }
+
     /// Stops the running job.
     pub(crate) async fn stop(&self, pgid: &AtomicU32) {
         self.runner.stop(&self.name, pgid).await;
@@ -259,6 +272,32 @@ pub(crate) fn rsync_env(
         .filter_map(|(k, v)| Some((k.to_owned(), v?.clone())))
         .chain(provider_env(common, log_file, ctx_env))
         .collect()
+}
+
+/// A local path as rsync takes it; on Windows `C:\x` would read as host `C`.
+pub(crate) fn rsync_path(p: &str) -> String {
+    if cfg!(windows) {
+        cygpath(p)
+    } else {
+        p.to_owned()
+    }
+}
+
+/// `C:\x` → `/proc/cygdrive/c/x`, `\\host\share` → `//host/share`, which Cygwin and MSYS2 both read.
+fn cygpath(p: &str) -> String {
+    match p.as_bytes() {
+        [d, b':', rest @ ..]
+            if d.is_ascii_alphabetic() && matches!(rest, [] | [b'/' | b'\\', ..]) =>
+        {
+            format!(
+                "/proc/cygdrive/{}{}",
+                char::from(d.to_ascii_lowercase()),
+                p[2..].replace('\\', "/")
+            )
+        }
+        [b'\\', b'\\', ..] => p.replace('\\', "/"),
+        _ => p.to_owned(),
+    }
 }
 
 /// Resolve the effective log file path for a sync run.

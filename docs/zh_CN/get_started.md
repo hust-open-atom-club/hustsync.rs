@@ -85,3 +85,4 @@ hustsynctl workers -p 14242
 - 资源隔离：[cgroup.md](cgroup.md)
 - fpsync 与 lsyncd：[tools.md](tools.md)
 - ftpsync：[ftpsync.md](ftpsync.md)
+- Windows：[windows.md](windows.md)
