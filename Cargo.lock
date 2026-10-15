@@ -910,6 +910,7 @@ version = "0.1.0"
 dependencies = [
  "croner",
  "glob",
+ "parse-size",
  "regex",
  "serde",
  "tempfile",
@@ -1504,6 +1505,12 @@ dependencies = [
  "smallvec",
  "windows-link 0.2.1",
 ]
+
+[[package]]
+name = "parse-size"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "487f2ccd1e17ce8c1bfab3a65c89525af41cfad4c8659021a1e9a2aacd73b89b"
 
 [[package]]
 name = "parse-zoneinfo"
