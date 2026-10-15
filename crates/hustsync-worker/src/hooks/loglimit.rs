@@ -12,12 +12,16 @@
 //!
 //! `log_retention` files stay on disk after each rotation: the fresh one
 //! plus `log_retention - 1` older ones. The default of 10 matches Go.
+//! With `log_gzip`, the older ones are kept as `.gz`.
 
+use std::fs::File;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
+use flate2::{Compression, write::GzEncoder};
 use tokio::fs;
 
 use super::{HookCtx, HookError, JobHook};
@@ -34,6 +38,7 @@ const LATEST_LINK: &str = "latest";
 
 pub struct LogLimitHook {
     keep: usize,
+    gzip: bool,
 }
 
 impl LogLimitHook {
@@ -43,7 +48,15 @@ impl LogLimitHook {
 
     /// Keeps `keep` log files per mirror, at least one.
     pub fn retaining(keep: usize) -> Self {
-        Self { keep: keep.max(1) }
+        Self {
+            keep: keep.max(1),
+            gzip: false,
+        }
+    }
+
+    /// Compresses the older logs kept by rotation.
+    pub const fn gzip(self, on: bool) -> Self {
+        Self { gzip: on, ..self }
     }
 
     fn latest_symlink(&self, ctx: &HookCtx) -> PathBuf {
@@ -94,8 +107,24 @@ impl LogLimitHook {
     }
 
     async fn rotate(&self, ctx: &HookCtx) -> Result<(), HookError> {
-        let files = self.mirror_logs(ctx).await?;
-        for (path, _) in files.into_iter().skip(self.keep - 1) {
+        let mut files = self.mirror_logs(ctx).await?;
+        let stale = files.split_off((self.keep - 1).min(files.len()));
+        if self.gzip {
+            for (path, _) in files {
+                if path.extension().is_some_and(|e| e == "gz") {
+                    continue;
+                }
+                let p = path.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || compress(&p))
+                    .await
+                    .map_err(io::Error::other)
+                    .flatten()
+                {
+                    tracing::warn!("{HOOK_NAME}: gzip {}: {e}", path.display());
+                }
+            }
+        }
+        for (path, _) in stale {
             if let Err(e) = fs::remove_file(&path).await {
                 // Don't fail the sync on a rotation glitch; logged and
                 // continue so the fresh log file still gets created.
@@ -133,6 +162,18 @@ impl LogLimitHook {
     pub fn format_name(mirror: &str, when: DateTime<Local>) -> String {
         format!("{}_{}.log", mirror, when.format(TIMESTAMP_FMT))
     }
+}
+
+/// Replaces `path` with `<path>.gz`, keeping its mtime so rotation order holds.
+fn compress(path: &Path) -> io::Result<()> {
+    let src = File::open(path)?;
+    let mtime = src.metadata()?.modified()?;
+    let mut gz = path.as_os_str().to_owned();
+    gz.push(".gz");
+    let mut enc = GzEncoder::new(File::create(&gz)?, Compression::default());
+    io::copy(&mut io::BufReader::new(src), &mut enc)?;
+    enc.finish()?.set_modified(mtime)?;
+    std::fs::remove_file(path)
 }
 
 impl Default for LogLimitHook {

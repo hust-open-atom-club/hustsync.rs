@@ -8,6 +8,7 @@ async-trait = "0.1.92"
 axum = "0.7"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 chrono = "0.4"
+flate2 = "1.1"
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 hustsync-internal = { version = "0.1.0", path = "../hustsync-internal" }
 nix = { version = "0.31.2", features = ["fs", "process", "signal", "user"] }

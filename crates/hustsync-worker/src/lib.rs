@@ -345,7 +345,11 @@ impl Worker {
             .log_retention
             .or_else(|| g_cfg.global.as_ref()?.log_retention)
             .unwrap_or(hooks::loglimit::RETENTION);
-        chain.push(Arc::new(hooks::LogLimitHook::retaining(keep)));
+        let gzip = m_cfg
+            .log_gzip
+            .or_else(|| g_cfg.global.as_ref()?.log_gzip)
+            .unwrap_or_default();
+        chain.push(Arc::new(hooks::LogLimitHook::retaining(keep).gzip(gzip)));
         // 3. User-configured exec_on_{success,failure}. `exec_on_status_extra`
         //    (mirror-level additions to global defaults) is appended after
         //    the base list, matching Go's "append extra to the end".
