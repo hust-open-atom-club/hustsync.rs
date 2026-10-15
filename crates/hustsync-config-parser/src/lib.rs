@@ -302,6 +302,7 @@ pub struct MirrorConfig {
     pub docker_options: Option<Vec<String>>,
     pub fpsync_options: Option<Vec<String>>,
     pub lsyncd_options: Option<Vec<String>>,
+    pub ftpsync_conf: Option<Vec<String>>,
     pub success_exit_codes: Option<Vec<i32>>,
     pub rsync_success_exit_codes: Option<Vec<i32>>,
     /// Nested child mirrors. Children inherit unset fields from this parent.
@@ -359,6 +360,7 @@ impl Default for MirrorConfig {
             docker_options: None,
             fpsync_options: None,
             lsyncd_options: None,
+            ftpsync_conf: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
@@ -455,6 +457,7 @@ struct LenientMirrorConfig {
     docker_options: Option<Vec<String>>,
     fpsync_options: Option<Vec<String>>,
     lsyncd_options: Option<Vec<String>>,
+    ftpsync_conf: Option<Vec<String>>,
     success_exit_codes: Option<Vec<i32>>,
     rsync_success_exit_codes: Option<Vec<i32>>,
     #[serde(default)]
@@ -499,6 +502,7 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             docker_options: l.docker_options,
             fpsync_options: l.fpsync_options,
             lsyncd_options: l.lsyncd_options,
+            ftpsync_conf: l.ftpsync_conf,
             success_exit_codes: l.success_exit_codes,
             rsync_success_exit_codes: l.rsync_success_exit_codes,
             mirrors: l
@@ -784,6 +788,7 @@ fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
         docker_options,
         fpsync_options,
         lsyncd_options,
+        ftpsync_conf,
         success_exit_codes,
         rsync_success_exit_codes,
     );
@@ -880,6 +885,23 @@ fn validate_mirror(mirror: &MirrorConfig, label: &str) -> Result<(), ConfigError
 
     let provider = mirror.provider.as_deref().unwrap_or("rsync");
     let is_rsync_family = matches!(provider, "rsync" | "two-stage-rsync");
+
+    if provider == "ftpsync" {
+        let upstream = mirror.upstream.as_deref().unwrap_or_default();
+        let remote = upstream
+            .strip_prefix("rsync://")
+            .map_or_else(|| upstream.split_once("::"), |r| r.split_once('/'));
+        if !remote
+            .is_some_and(|(host, path)| !host.is_empty() && !path.trim_matches('/').is_empty())
+        {
+            return Err(ConfigError::InvalidValue {
+                field: format!("mirrors.{label}.upstream"),
+                reason: format!(
+                    "ftpsync needs `rsync://host/path/` or `host::path`, got `{upstream}`"
+                ),
+            });
+        }
+    }
 
     if matches!(provider, "fpsync" | "lsyncd")
         && mirror.upstream.as_deref().is_none_or(str::is_empty)

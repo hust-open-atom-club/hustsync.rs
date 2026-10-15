@@ -24,6 +24,7 @@ use self::rsync_provider::{RsyncProvider, RsyncProviderConfig};
 use self::two_stage_rsync_provider::{TwoStageRsyncProvider, TwoStageRsyncProviderConfig};
 
 pub mod cmd_provider;
+pub mod ftpsync;
 pub mod rsync_provider;
 pub mod runner;
 pub mod tool;
@@ -448,6 +449,7 @@ pub enum ProviderType {
     TwoStageRsync,
     Fpsync,
     Lsyncd,
+    Ftpsync,
 }
 
 #[async_trait]
@@ -694,6 +696,37 @@ pub fn build_provider(
                 common,
             };
             Ok(Box::new(CmdProvider::with_argv(cfg, tool.into(), argv)?))
+        }
+        "ftpsync" => {
+            let home = Path::new(&common.log_dir).join(".ftpsync");
+            let archive = ftpsync::Archive {
+                name,
+                upstream: &common.upstream_url,
+                to: &common.working_dir,
+                log_dir: &common.log_dir,
+                user: m_cfg.username.as_deref(),
+                extra: m_cfg.ftpsync_conf.as_deref().unwrap_or_default(),
+            };
+            archive.write_config(&home)?;
+            let argv = archive.argv(m_cfg.command.as_deref().unwrap_or("ftpsync"));
+            let mut common = common;
+            common
+                .env
+                .insert("HOME".into(), home.to_string_lossy().into_owned());
+            if let Some(pw) = &m_cfg.password {
+                common.env.insert("RSYNC_PASSWORD".into(), pw.clone());
+            }
+            let cfg = CmdProviderConfig {
+                command: argv.join(" "),
+                fail_on_match: m_cfg.fail_on_match.clone(),
+                size_pattern: m_cfg.size_pattern.clone(),
+                common,
+            };
+            Ok(Box::new(CmdProvider::with_argv(
+                cfg,
+                ProviderType::Ftpsync,
+                argv,
+            )?))
         }
         _ => Err(ProviderError::Config(format!(
             "unknown provider type `{p_type}`"
