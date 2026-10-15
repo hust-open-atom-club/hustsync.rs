@@ -196,7 +196,7 @@ async fn full_cmd_sync_round_trip() {
 
     // Spawn worker in its own task — it registers, opens its own HTTP
     // server, then falls into the dispatch loop.
-    let worker = Worker::new(cfg);
+    let worker = Worker::new(cfg).expect("worker");
     let worker_task = tokio::spawn(async move {
         worker.run().await;
     });

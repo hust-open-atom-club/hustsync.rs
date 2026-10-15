@@ -211,11 +211,14 @@ impl TwoStageRsyncProvider {
             effective_log_file,
             &ctx.env,
         );
-        let mut cmd = common.runner.command(
-            &self.config.command,
-            &args,
-            common.job(effective_log_file, &env),
-        );
+        let mut cmd = common
+            .runner
+            .command(
+                &self.config.command,
+                &args,
+                common.job(effective_log_file, &env),
+            )
+            .await?;
         cmd.stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
 

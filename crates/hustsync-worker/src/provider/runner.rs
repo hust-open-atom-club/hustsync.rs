@@ -1,10 +1,18 @@
-//! Starts and stops provider commands, on the host or inside a container.
+//! Starts and stops provider commands: on the host, inside a container or in a cgroup.
 
-use std::{collections::BTreeMap, ffi::OsStr, sync::atomic::AtomicU32, time::Duration};
+use std::{
+    collections::BTreeMap,
+    ffi::OsStr,
+    io,
+    sync::{Arc, atomic::AtomicU32},
+    time::Duration,
+};
 
 use hustsync_config_parser::{MemBytes, MirrorConfig, WorkerDockerConfig};
 use hustsync_internal::util::expand_tilde;
 use tokio::process::Command;
+
+use crate::cgroup::{self, Cgroups};
 
 /// How a provider's command is launched.
 #[derive(Debug, Default)]
@@ -12,6 +20,7 @@ pub enum Runner {
     #[default]
     Direct,
     Docker(Docker),
+    Cgroup(Arc<Cgroups>, Option<MemBytes>),
 }
 
 /// Container settings merged from `[docker]` and the mirror's `docker_*` fields.
@@ -34,14 +43,18 @@ pub struct Job<'a> {
 }
 
 impl Runner {
-    /// Docker when `[docker]` is enabled and the mirror sets `docker_image`, else direct.
-    pub fn new(docker: Option<&WorkerDockerConfig>, m: &MirrorConfig) -> Self {
-        let (Some(d), Some(image)) = (docker, m.docker_image.as_deref()) else {
-            return Self::Direct;
+    /// Docker when enabled and the mirror sets `docker_image`, else a cgroup when enabled, else direct.
+    pub fn new(
+        docker: Option<&WorkerDockerConfig>,
+        cg: Option<&Arc<Cgroups>>,
+        m: &MirrorConfig,
+    ) -> Self {
+        let image = m.docker_image.as_deref().filter(|i| !i.is_empty());
+        let (Some(d), Some(image)) = (docker.filter(|d| d.enable == Some(true)), image) else {
+            return cg.map_or(Self::Direct, |cg| {
+                Self::Cgroup(Arc::clone(cg), m.memory_limit)
+            });
         };
-        if d.enable != Some(true) || image.is_empty() {
-            return Self::Direct;
-        }
         let ro = m
             .exclude_file
             .as_deref()
@@ -68,20 +81,23 @@ impl Runner {
         })
     }
 
-    /// Builds the command running `prog args` for `job`.
-    pub fn command(&self, prog: &str, args: &[String], job: Job<'_>) -> Command {
+    /// Builds the command running `prog args` for `job`, creating its cgroup if any.
+    pub async fn command(&self, prog: &str, args: &[String], job: Job<'_>) -> io::Result<Command> {
         let mut cmd = match self {
-            Self::Direct => Command::new(prog),
             Self::Docker(d) => {
                 let mut cmd = Command::new("docker");
                 cmd.args(d.args(job)).arg(prog);
                 cmd
             }
+            _ => Command::new(prog),
         };
         cmd.args(args).current_dir(job.dir).envs(job.env);
         #[cfg(unix)]
         cmd.process_group(0);
-        cmd
+        if let Self::Cgroup(cg, mem) = self {
+            cgroup::attach(&mut cmd, &cg.create(job.name, *mem).await?)?;
+        }
+        Ok(cmd)
     }
 
     /// Stops the running job: `docker stop` for containers, then the process group.
@@ -94,26 +110,36 @@ impl Runner {
         super::terminate_pgid(pgid, name).await;
     }
 
-    /// Waits for `--rm` to remove the container so the next run can reuse its name.
-    pub async fn finish(&self, name: &str) {
-        let Self::Docker(_) = self else { return };
-        let name = container(name);
-        let filter = format!("name=^{name}$");
-        for _ in 0..10 {
-            match docker(["ps", "-a", "--filter", &filter, "--format", "{{.Status}}"])
-                .output()
-                .await
-            {
-                Ok(out) if out.stdout.is_empty() => return,
-                Ok(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-                Err(e) => {
-                    tracing::error!("docker ps failed: {e}");
-                    return;
-                }
+    /// Cleans up after a run; returns whether the OOM killer fired.
+    pub async fn finish(&self, name: &str) -> bool {
+        match self {
+            Self::Direct => false,
+            Self::Docker(_) => {
+                wait_removed(&container(name)).await;
+                false
+            }
+            Self::Cgroup(cg, _) => cg.finish(name).await,
+        }
+    }
+}
+
+/// Waits for `--rm` to remove the container so the next run can reuse its name.
+async fn wait_removed(name: &str) {
+    let filter = format!("name=^{name}$");
+    for _ in 0..10 {
+        match docker(["ps", "-a", "--filter", &filter, "--format", "{{.Status}}"])
+            .output()
+            .await
+        {
+            Ok(out) if out.stdout.is_empty() => return,
+            Ok(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+            Err(e) => {
+                tracing::error!("docker ps failed: {e}");
+                return;
             }
         }
-        tracing::warn!("container {name} not removed automatically, next sync may fail");
     }
+    tracing::warn!("container {name} not removed automatically, next sync may fail");
 }
 
 impl Docker {

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, atomic::AtomicU32};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -16,6 +16,8 @@ use std::sync::atomic::Ordering;
 
 use hustsync_config_parser::{MirrorConfig, WorkerConfig};
 use hustsync_internal::util::{expand_tilde, format_path};
+
+use crate::cgroup::Cgroups;
 
 use self::cmd_provider::{CmdProvider, CmdProviderConfig};
 use self::rsync_provider::{RsyncProvider, RsyncProviderConfig};
@@ -368,8 +370,11 @@ pub(crate) async fn run_child_with_cancellation(
     };
     let err = tokio::select! {
         res = child.wait() => {
-            common.runner.finish(&common.name).await;
-            return res.map_err(ProviderError::Io);
+            let oom = common.runner.finish(&common.name).await;
+            return match res {
+                Ok(st) if oom && !st.success() => Err(ProviderError::OutOfMemory),
+                res => res.map_err(ProviderError::Io),
+            };
         }
         () = cancel.cancelled() => ProviderError::Terminated,
         () = limit => ProviderError::Timeout(timeout),
@@ -418,6 +423,8 @@ pub enum ProviderError {
     AlreadyRunning,
     #[error("terminated by operator")]
     Terminated,
+    #[error("killed by the OOM killer, memory_limit exceeded")]
+    OutOfMemory,
     #[error("config: {0}")]
     Config(String),
 }
@@ -486,6 +493,7 @@ pub fn build_provider(
     name: &str,
     m_cfg: &MirrorConfig,
     g_cfg: &WorkerConfig,
+    cg: Option<&Arc<Cgroups>>,
 ) -> Result<Box<dyn MirrorProvider>, ProviderError> {
     let global = g_cfg.global.as_ref();
 
@@ -578,7 +586,7 @@ pub fn build_provider(
         codes
     };
 
-    let runner = Runner::new(g_cfg.docker.as_ref(), m_cfg);
+    let runner = Runner::new(g_cfg.docker.as_ref(), cg, m_cfg);
 
     let common = CommonProviderConfig {
         name: name.to_string(),
