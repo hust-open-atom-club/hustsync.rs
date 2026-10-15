@@ -237,13 +237,14 @@ impl Worker {
                     };
 
                     let hooks = Self::build_hooks(m_cfg, &cfg);
-                    let (job, actor) = job::JobActor::new(
+                    let (mut job, actor) = job::JobActor::new(
                         name.clone(),
                         manager_tx.clone(),
                         Arc::clone(&semaphore),
                         provider,
                         hooks,
                     );
+                    job.cron = m_cfg.cron.clone();
                     jobs_map.insert(name.clone(), job);
                     mirror_configs.insert(name.clone(), m_cfg.clone());
                     handles.spawn(actor.run());
@@ -424,7 +425,7 @@ impl Worker {
                     }
                     _ => {
                         job.set_state(crate::job::STATE_NONE);
-                        let next = s.last_update + job.interval;
+                        let next = job.next_run(s.last_update);
                         queue.add_job(next, job.clone());
                     }
                 }
@@ -662,7 +663,7 @@ impl Worker {
                 if msg.schedule {
                     let jobs = jobs_handle.read().await;
                     if let Some(job) = jobs.get(&msg.name) {
-                        let next = Utc::now() + job.interval;
+                        let next = job.next_run(Utc::now());
                         schedule_queue.lock().await.add_job(next, job.clone());
                     }
                 }
@@ -782,13 +783,14 @@ impl Worker {
         };
 
         let hooks = Self::build_hooks(m_cfg, &self.cfg);
-        let (job, actor) = job::JobActor::new(
+        let (mut job, actor) = job::JobActor::new(
             name.to_owned(),
             self.manager_tx.clone(),
             Arc::clone(&self.semaphore),
             provider,
             hooks,
         );
+        job.cron = m_cfg.cron.clone();
 
         if initial_state == crate::job::STATE_DISABLED {
             job.set_state(crate::job::STATE_DISABLED);
@@ -1010,6 +1012,7 @@ mod tests {
             state: Arc::new(AtomicU32::new(STATE_NONE)),
             disabled: Arc::new(tokio::sync::Notify::new()),
             interval: tokio::time::Duration::from_secs(60),
+            cron: None,
         };
         (job, rx)
     }

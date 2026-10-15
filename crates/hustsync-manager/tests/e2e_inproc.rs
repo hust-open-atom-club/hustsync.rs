@@ -130,6 +130,7 @@ fn worker_config(
             rsync_override: None,
             rsync_override_only: None,
             stage1_profile: None,
+            cron: None,
             memory_limit: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
