@@ -244,6 +244,11 @@ impl JobActor {
             None
         };
 
+        let report = |status: SyncStatus, msg: String, schedule: bool| {
+            Self::report_status(&manager_tx, &name, status, msg, schedule, &provider)
+        };
+        report(SyncStatus::PreSyncing, String::new(), false).await;
+
         // 2. pre_job — runs once before the retry loop.
         let mut hook_ctx = Self::make_hook_ctx(&name, &provider, 0);
         let pre_job_count = match Self::run_pre(PrePhase::PreJob, &hooks, &mut hook_ctx).await {
@@ -258,12 +263,6 @@ impl JobActor {
             }
         };
 
-        // Closure that binds the invariant parameters so each call site only
-        // supplies the per-invocation values (status, msg, schedule).
-        let report = |status: SyncStatus, msg: String, schedule: bool| {
-            Self::report_status(&manager_tx, &name, status, msg, schedule, &provider)
-        };
-
         // 3. Retry Loop
         let retries = provider.retry();
         for i in 0..retries {
@@ -271,8 +270,6 @@ impl JobActor {
                 tracing::info!("Job {} retrying sync (attempt {}/{})", name, i + 1, retries);
             }
             hook_ctx.attempt = i + 1;
-
-            report(SyncStatus::PreSyncing, "".into(), false).await;
 
             // 3a. pre_exec — may rotate log files, mutate ctx.env / ctx.log_file.
             let pre_exec_count = match Self::run_pre(PrePhase::PreExec, &hooks, &mut hook_ctx).await
