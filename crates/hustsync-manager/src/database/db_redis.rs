@@ -11,8 +11,8 @@ pub(super) struct RedisAdapter {
 
 impl RedisAdapter {
     pub(super) fn new(url: &str) -> Result<Self, AdapterError> {
-        let client = Client::open(url)
-            .map_err(|e| AdapterError::InitError(format!("redis open: {e}")))?;
+        let client =
+            Client::open(url).map_err(|e| AdapterError::InitError(format!("redis open: {e}")))?;
         // Eagerly verify the connection is reachable before handing back the adapter.
         let mut conn = client
             .get_connection()
@@ -183,9 +183,7 @@ mod tests {
         let adapter = RedisAdapter::new(&url).expect("redis adapter init");
         // Flush the test DB to start clean.
         let mut conn = adapter.client.get_connection().expect("connection");
-        let _: () = redis::cmd("FLUSHDB")
-            .query(&mut conn)
-            .expect("FLUSHDB");
+        let _: () = redis::cmd("FLUSHDB").query(&mut conn).expect("FLUSHDB");
         Some(adapter)
     }
 

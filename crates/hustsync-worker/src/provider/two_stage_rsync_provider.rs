@@ -135,8 +135,10 @@ impl TwoStageRsyncProvider {
         let mut options: Vec<String> = match stage {
             1 => {
                 // Stage-1 base — subset without --delete/--delete-after/--delay-updates
-                let mut opts: Vec<String> =
-                    BASE_RSYNC_STAGE1_ARGS.iter().map(|s| s.to_string()).collect();
+                let mut opts: Vec<String> = BASE_RSYNC_STAGE1_ARGS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
                 // Append profile filter rules
                 let profile_opts = stage1_profile_options(self.config.stage1_profile.as_str())
                     .ok_or_else(|| {
@@ -150,8 +152,7 @@ impl TwoStageRsyncProvider {
             }
             2 => {
                 // Stage-2 base — full sync including --delete and --delay-updates
-                let mut opts: Vec<String> =
-                    BASE_RSYNC_ARGS.iter().map(|s| s.to_string()).collect();
+                let mut opts: Vec<String> = BASE_RSYNC_ARGS.iter().map(|s| s.to_string()).collect();
                 // Stage 2 appends extra_options (Go's p.extraOptions)
                 opts.extend(self.config.extra_options.iter().cloned());
                 opts
