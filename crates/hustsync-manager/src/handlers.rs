@@ -5,7 +5,7 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use hustsync_internal::msg::{
-    ClientCmd, CmdVerb, MirrorSchedules, MirrorStatus, WorkerCmd, WorkerStatus,
+    ClientCmd, CmdVerb, MirrorSchedules, MirrorStatus, WorkerCmd, WorkerStatus, ZERO_TIME,
 };
 use hustsync_internal::status::SyncStatus;
 use serde::{Deserialize, Serialize};
@@ -188,31 +188,23 @@ pub async fn update_job_of_worker(
     let cur_status = adapter.get_mirror_status(&worker_id, &mirror_id).ok();
     let now = Utc::now();
 
-    if status.status == SyncStatus::PreSyncing {
-        if let Some(ref cur) = cur_status {
-            if cur.status != SyncStatus::PreSyncing {
-                status.last_started = now;
-            } else {
-                status.last_started = cur.last_started;
-            }
-        } else {
-            status.last_started = now;
-        }
-    } else if let Some(ref cur) = cur_status {
-        status.last_started = cur.last_started;
-    }
-
-    if status.status == SyncStatus::Success {
-        status.last_update = now;
-    } else if let Some(ref cur) = cur_status {
-        status.last_update = cur.last_update;
-    }
-
-    if status.status == SyncStatus::Success || status.status == SyncStatus::Failed {
-        status.last_ended = now;
-    } else if let Some(ref cur) = cur_status {
-        status.last_ended = cur.last_ended;
-    }
+    let (prev, started, updated, ended) = cur_status
+        .as_ref()
+        .map_or((SyncStatus::None, ZERO_TIME, ZERO_TIME, ZERO_TIME), |c| {
+            (c.status, c.last_started, c.last_update, c.last_ended)
+        });
+    status.last_started = match status.status {
+        SyncStatus::PreSyncing if prev != SyncStatus::PreSyncing => now,
+        _ => started,
+    };
+    status.last_update = match status.status {
+        SyncStatus::Success => now,
+        _ => updated,
+    };
+    status.last_ended = match status.status {
+        SyncStatus::Success | SyncStatus::Failed => now,
+        _ => ended,
+    };
 
     // Retain valid previous size if the new one is "unknown" or empty
     if let Some(ref cur) = cur_status

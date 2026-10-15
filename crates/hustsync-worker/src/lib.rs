@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 use hustsync_config_parser::WorkerConfig;
-use hustsync_internal::msg::WorkerStatus;
+use hustsync_internal::msg::{WorkerStatus, ZERO_TIME};
 use hustsync_internal::status::SyncStatus;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -622,10 +622,10 @@ impl Worker {
                     upstream: msg.upstream.clone(),
                     size: msg.size.clone().unwrap_or_else(|| "unknown".to_string()),
                     error_msg: msg.msg.clone(),
-                    last_update: Utc::now(),
-                    last_started: Utc::now(),
-                    last_ended: Utc::now(),
-                    next_scheduled: Utc::now(),
+                    last_update: ZERO_TIME,
+                    last_started: ZERO_TIME,
+                    last_ended: ZERO_TIME,
+                    next_scheduled: ZERO_TIME,
                     status: msg.status,
                     is_master: msg.is_master,
                 };
