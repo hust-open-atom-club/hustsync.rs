@@ -28,7 +28,7 @@ mod contract_cmd {
     use hustsync_worker::schedule::ScheduleQueue;
     use hustsync_worker::server::{AppState, make_http_server};
     use serde_json::Value;
-    use tokio::sync::{Mutex, RwLock, mpsc};
+    use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
     use tokio::time::{Duration, timeout};
     use tower::ServiceExt as _;
 
@@ -56,6 +56,8 @@ mod contract_cmd {
         Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: None,
         })
     }
@@ -74,6 +76,8 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(jobs)),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: None,
         });
         (state, rx)
@@ -361,6 +365,8 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: Some(reload_tx),
         });
 
@@ -382,6 +388,8 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: Some(reload_tx),
         });
 

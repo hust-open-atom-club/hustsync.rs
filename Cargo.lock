@@ -944,6 +944,7 @@ dependencies = [
  "hustsync-internal",
  "hustsync-worker",
  "once_cell",
+ "prometheus",
  "rcgen",
  "redb",
  "redis",
@@ -972,6 +973,7 @@ dependencies = [
  "hustsync-config-parser",
  "hustsync-internal",
  "nix",
+ "prometheus",
  "regex",
  "reqwest",
  "serde",
@@ -1652,6 +1654,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "prometheus"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
