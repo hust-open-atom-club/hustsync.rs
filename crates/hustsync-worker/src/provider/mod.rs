@@ -512,7 +512,7 @@ pub fn build_provider(
         .as_ref()
         .and_then(|r| r.timeout)
         .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.timeout)))
-        .unwrap_or(3600);
+        .unwrap_or(0);
 
     let log_dir_base = m_cfg
         .log_dir
