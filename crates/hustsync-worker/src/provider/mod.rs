@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -11,6 +11,8 @@ use tokio_util::sync::CancellationToken;
 use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
+#[cfg(unix)]
+use std::sync::atomic::Ordering;
 
 use hustsync_config_parser::{MirrorConfig, WorkerConfig};
 use hustsync_internal::util::{expand_tilde, format_path};
@@ -134,6 +136,17 @@ pub(crate) async fn terminate_pgid(pgid: &AtomicU32, name: &str) {
             e
         );
     }
+}
+
+#[cfg(unix)]
+async fn stop_child(child: &mut tokio::process::Child, pgid: &AtomicU32, name: &str) {
+    terminate_pgid(pgid, name).await;
+    let _ = child.wait().await;
+}
+
+#[cfg(not(unix))]
+async fn stop_child(child: &mut tokio::process::Child, _pgid: &AtomicU32, _name: &str) {
+    let _ = child.kill().await;
 }
 
 const PROVIDER_ENV_SUFFIXES: &[&str] = &[
@@ -323,9 +336,8 @@ pub(crate) use impl_provider_getters;
 /// Await a spawned child process, honoring both timeout and cancellation.
 ///
 /// Returns `Ok(ExitStatus)` on normal exit, or `Err(ProviderError)` for
-/// cancellation, timeout, or I/O error. On cancel/timeout the process group
-/// is terminated via `terminate_pgid` and the child is waited to avoid
-/// zombies.
+/// cancellation, timeout, or I/O error. On cancel/timeout the child is
+/// stopped via `stop_child` and reaped.
 ///
 /// Pass `Duration::ZERO` for `timeout_dur` to disable timeout (cancellation
 /// still applies). Providers that manage timeout at an outer layer (e.g.
@@ -345,8 +357,7 @@ pub(crate) async fn run_child_with_cancellation(
             }
             _ = cancel.cancelled() => {
                 tracing::warn!("Provider {} cancelled", name);
-                terminate_pgid(pgid, name).await;
-                let _ = child.wait().await;
+                stop_child(child, pgid, name).await;
                 Err(ProviderError::Terminated)
             }
         }
@@ -362,15 +373,13 @@ pub(crate) async fn run_child_with_cancellation(
             Ok(Ok(Some(status))) => Ok(status),
             Ok(Ok(None)) => {
                 tracing::warn!("Provider {} cancelled", name);
-                terminate_pgid(pgid, name).await;
-                let _ = child.wait().await;
+                stop_child(child, pgid, name).await;
                 Err(ProviderError::Terminated)
             }
             Ok(Err(e)) => Err(ProviderError::Io(e)),
             Err(_elapsed) => {
                 tracing::warn!("Timeout occurred for {}", name);
-                terminate_pgid(pgid, name).await;
-                let _ = child.wait().await;
+                stop_child(child, pgid, name).await;
                 Err(ProviderError::Timeout(timeout_dur))
             }
         }
