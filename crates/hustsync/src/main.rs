@@ -148,7 +148,7 @@ async fn start_manager(
     log: Option<&Path>,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
-    hustsync_internal::logger::init_logger(
+    let _log = hustsync_internal::logger::init_logger(
         manager_args.verbose,
         manager_args.debug,
         manager_args.with_systemd,
@@ -163,6 +163,7 @@ async fn start_manager(
             std::process::exit(1);
         }
     };
+    hustsync_internal::logger::extend(config.log.as_ref()).context("set up [log]")?;
 
     // Override with command-line arguments
     if let Some(addr) = manager_args.addr {
@@ -236,7 +237,7 @@ async fn start_worker(
     log: Option<&Path>,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
-    hustsync_internal::logger::init_logger(
+    let _log = hustsync_internal::logger::init_logger(
         worker_args.verbose,
         worker_args.debug,
         worker_args.with_systemd,
@@ -259,6 +260,7 @@ async fn start_worker(
             std::process::exit(1);
         }
     };
+    hustsync_internal::logger::extend(config.log.as_ref()).context("set up [log]")?;
 
     info!("Initializing HustSync Worker...");
 

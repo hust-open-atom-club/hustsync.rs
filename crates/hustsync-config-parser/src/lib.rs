@@ -76,6 +76,9 @@ pub struct ManagerConfig {
     pub server: ManagerServerConfig,
     pub files: ManagerFileConfig,
     pub debug: bool,
+    /// More log sinks for serlog, beside the console or `--log-file` one.
+    #[serde(default)]
+    pub log: Option<toml::Table>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -129,6 +132,8 @@ pub struct WorkerConfig {
     pub server: Option<WorkerServerConfig>,
     pub mirrors: Option<Vec<MirrorConfig>>,
     pub include: Option<IncludeConfig>,
+    /// More log sinks for serlog, beside the console or `--log-file` one.
+    pub log: Option<toml::Table>,
 }
 
 impl Default for WorkerConfig {
@@ -141,6 +146,7 @@ impl Default for WorkerConfig {
             server: Some(WorkerServerConfig::default()),
             mirrors: Some(vec![MirrorConfig::default()]),
             include: None,
+            log: None,
         }
     }
 }
@@ -413,6 +419,7 @@ struct LenientWorkerConfig {
     server: Option<WorkerServerConfig>,
     mirrors: Option<Vec<LenientMirrorConfig>>,
     include: Option<IncludeConfig>,
+    log: Option<toml::Table>,
 }
 
 // Mirrors LenientWorkerConfig but without deny_unknown_fields so it absorbs
@@ -524,6 +531,7 @@ impl From<LenientWorkerConfig> for WorkerConfig {
                 .mirrors
                 .map(|mv| mv.into_iter().map(MirrorConfig::from).collect()),
             include: l.include,
+            log: l.log,
         }
     }
 }

@@ -79,6 +79,24 @@ manager 与 worker 各读一个 TOML 文件。字段名与 tunasync 一致，tun
 |:--:|:--:|
 | `include_mirrors` | glob，匹配到的每个文件里的 `[[mirrors]]` 追加进来 |
 
+## 日志
+
+manager 与 worker 都可加 `[log]` 表，在命令行选定的终端或 `--log-file` 之外再开输出端，由 [serlog](https://github.com/LeoHeco/ServerLog) 写出。
+
+| 字段 | 说明 |
+|:--:|:--:|
+| `filter` | 过滤指令，如 `info,hustsync_worker=debug`；设了 `RUST_LOG` 时不生效 |
+| `sinks` | 输出端列表，键见 serlog 规格，如 `file`、`loki`、`mail` |
+
+```toml
+[log]
+filter = "info"
+sinks = [
+  { kind = "loki", url = "http://alloy:3100/loki/api/v1/push", labels = { site = "hust" } },
+  { kind = "file", path = "/var/log/hustsync/worker.json", format = "json", max_size = "64MiB", keep = 7 },
+]
+```
+
 ## 镜像
 
 `[[mirrors]]` 每项一个镜像。未设置的字段取 `[global]` 的值；镜像可以嵌套 `[[mirrors.mirrors]]`，子镜像继承父镜像未设置的字段。
