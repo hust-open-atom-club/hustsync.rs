@@ -1,6 +1,6 @@
 # 告警
 
-告警有两条路：程序在故障开始与结束时写一条 target 为 `hustsync::alert` 的日志，由 serlog 的 mail 输出端发信；也可由 p8s 按指标判断。两条路互不依赖，可只用一条。
+告警有两条路：程序在故障开始与结束时写一条 target 为 `hustsync::alert` 的日志，由 serlog 的 mail 输出端发信；也可由 p8s 按指标判断，规则见 [monitoring.md](monitoring.md)。两条路互不依赖，可只用一条。
 
 ## 事件
 

@@ -8,11 +8,18 @@ retry = 1
 
 [manager]
 api_base = "http://manager:14242"
+heartbeat = 60
 
 [server]
 hostname = "worker"
 listen_addr = "0.0.0.0"
 listen_port = 6000
+
+# Program logs go to Alloy when the monitoring profile runs, and are dropped quietly when it does not.
+[log]
+sinks = [
+  { kind = "loki", url = "http://alloy:3100/loki/api/v1/push", labels = { service = "worker" }, on_fail = "ignore" },
+]
 
 [[mirrors]]
 name = "demo-ok"

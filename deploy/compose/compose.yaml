@@ -1,4 +1,5 @@
 # Manager, worker and the hust-mirrors site; /status.json is served from the manager's /jobs.
+# `--profile monitoring` adds Prometheus, Grafana, Loki, Alloy, Telegraf and InfluxDB.
 name: hustsync
 
 services:
@@ -36,7 +37,74 @@ services:
     depends_on: [manager, web]
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ../prometheus:/etc/prometheus:ro
+      - p8s:/prometheus
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.8
+    profiles: [monitoring]
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki:/loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.20.1
+    profiles: [monitoring]
+    command: run /etc/alloy/config.alloy --storage.path=/var/lib/alloy
+    volumes:
+      - ../alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - log:/var/log/hustsync:ro
+      - alloy:/var/lib/alloy
+    depends_on: [loki, prometheus]
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:3-core
+    profiles: [monitoring]
+    # Reachable only inside the compose network.
+    command: influxdb3 serve --node-id hustsync --object-store file --data-dir /var/lib/influxdb3 --without-auth
+    volumes:
+      - influx:/var/lib/influxdb3
+    restart: unless-stopped
+
+  telegraf:
+    image: telegraf:1.40
+    profiles: [monitoring]
+    volumes:
+      - ../telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on: [influxdb]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    profiles: [monitoring]
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_PLUGINS_PREINSTALL_SYNC: marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel,yesoreyeram-infinity-datasource
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on: [prometheus, loki, influxdb]
+    restart: unless-stopped
+
 volumes:
   db:
   data:
   log:
+  p8s:
+  loki:
+  alloy:
+  influx:
+  grafana:

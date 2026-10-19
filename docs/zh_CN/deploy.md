@@ -57,7 +57,7 @@ location = /status.json {
 
 ## 监控
 
-manager 与 worker 都提供 `/metrics` 与按组拆分的 `/metrics/<组>`，也可推给 Telegraf、InfluxDB 或 Alloy，指标、配置与收端见 [metrics.md](metrics.md)。
+manager 与 worker 都提供 `/metrics` 与按组拆分的 `/metrics/<组>`，也可推给 Telegraf、InfluxDB 或 Alloy，指标、配置与收端见 [metrics.md](metrics.md)。整套 Prometheus、Grafana、Loki、Alloy、Telegraf 与看板见 [monitoring.md](monitoring.md)。
 
 ```yaml
 scrape_configs:
