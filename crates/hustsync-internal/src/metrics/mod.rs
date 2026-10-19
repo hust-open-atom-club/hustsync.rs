@@ -146,7 +146,31 @@ pub fn process() -> Res<Vec<MetricFamily>> {
     {
         use prometheus::process_collector::ProcessCollector;
         static PROC: std::sync::OnceLock<ProcessCollector> = std::sync::OnceLock::new();
-        out.extend(PROC.get_or_init(ProcessCollector::for_self).collect());
+        let mut fams = PROC.get_or_init(ProcessCollector::for_self).collect();
+        // The collector rounds CPU time down to whole seconds, which keeps an idle service at zero for hours.
+        if let Some(secs) = cpu_seconds()
+            && let Some(f) = fams
+                .iter_mut()
+                .find(|f| f.name() == "process_cpu_seconds_total")
+        {
+            for m in f.mut_metric() {
+                let mut c = prometheus::proto::Counter::default();
+                c.set_value(secs);
+                m.set_counter(c);
+            }
+        }
+        out.extend(fams);
     }
     Ok(out)
+}
+
+/// User and system CPU time of this process, to the microsecond.
+#[cfg(target_os = "linux")]
+fn cpu_seconds() -> Option<f64> {
+    use nix::sys::{
+        resource::{UsageWho, getrusage},
+        time::TimeValLike,
+    };
+    let u = getrusage(UsageWho::RUSAGE_SELF).ok()?;
+    Some((u.user_time() + u.system_time()).num_microseconds() as f64 / 1e6)
 }

@@ -1102,6 +1102,7 @@ dependencies = [
  "chrono",
  "hustsync-config-parser",
  "influxdb-line-protocol",
+ "nix",
  "opentelemetry-proto",
  "prometheus",
  "prost",
