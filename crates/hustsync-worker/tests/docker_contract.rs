@@ -53,12 +53,11 @@ fn provider(dir: &TempDir, name: &str, command: &str) -> Res<CmdProvider> {
     })?)
 }
 
-fn container_exists(name: &str) -> Res<bool> {
-    let filter = format!("name=^{}$", container(name));
-    let out = Command::new("docker")
-        .args(["ps", "-aq", "--filter", &filter])
-        .output()?;
-    Ok(!out.stdout.is_empty())
+fn container_exists(name: &str) -> bool {
+    Command::new("docker")
+        .args(["container", "inspect", &container(name)])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 #[tokio::test]
@@ -79,7 +78,7 @@ async fn runs_in_container_with_env_and_mounts() -> Res {
     assert!(log.contains("dk-env s3cret"), "{log}");
     assert!(log.contains("3.23"), "{log}");
     assert!(log.contains(&*data.to_string_lossy()), "{log}");
-    assert!(!container_exists("dk-env")?);
+    assert!(!container_exists("dk-env"));
     Ok(())
 }
 
@@ -97,12 +96,28 @@ async fn cancel_stops_and_removes_container() -> Res {
     };
 
     let run = tokio::spawn(async move { p.run(ctx).await });
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert!(container_exists("dk-stop")?);
+    for _ in 0..150 {
+        if container_exists("dk-stop") || run.is_finished() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    if run.is_finished() {
+        let log = std::fs::read_to_string(dir.path().join("log/latest.log")).unwrap_or_default();
+        return Err(format!(
+            "run ended before the container started: {:?}\n{log}",
+            run.await?
+        )
+        .into());
+    }
+    assert!(
+        container_exists("dk-stop"),
+        "container did not start within 30 s"
+    );
     cancel.cancel();
 
     let res = tokio::time::timeout(Duration::from_secs(20), run).await??;
     assert!(matches!(res, Err(ProviderError::Terminated)), "{res:?}");
-    assert!(!container_exists("dk-stop")?);
+    assert!(!container_exists("dk-stop"));
     Ok(())
 }

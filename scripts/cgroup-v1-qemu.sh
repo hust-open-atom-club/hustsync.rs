@@ -40,7 +40,8 @@ INIT
 chmod +x "$root/init"
 (cd "$root" && find . | cpio -o -H newc --quiet | gzip -1) >"$cache/initrd.gz"
 
-out=$(timeout 300 qemu-system-x86_64 -accel kvm -accel tcg -m 1024 -smp 2 -nographic -no-reboot \
+# Hosted runners install amd64v3 packages, so busybox needs AVX in the guest.
+out=$(timeout 300 qemu-system-x86_64 -accel kvm -accel tcg -cpu max -m 1024 -smp 2 -nographic -no-reboot \
   -kernel "$cache/vmlinuz" -initrd "$cache/initrd.gz" -append "console=ttyS0 panic=-1 quiet" |
   tr -d '\r' | tee /dev/stderr)
 grep -qx 'TEST_RC=0' <<<"$out"
