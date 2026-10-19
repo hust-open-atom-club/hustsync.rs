@@ -9,9 +9,11 @@ use std::{
 use thiserror::Error;
 use tracing::warn;
 
+mod alert;
 mod mem;
 mod metrics;
 
+pub use alert::AlertConfig;
 pub use croner::Cron;
 pub use mem::MemBytes;
 pub use metrics::{MetricsConfig, PushConfig, PushFormat};
@@ -83,6 +85,8 @@ pub struct ManagerConfig {
     pub log: Option<toml::Table>,
     #[serde(default)]
     pub metrics: Option<MetricsConfig>,
+    #[serde(default)]
+    pub alert: Option<AlertConfig>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -211,6 +215,8 @@ pub struct WorkerManagerConfig {
     pub api_base_list: Option<Vec<String>>,
     pub token: Option<String>,
     pub ca_cert: Option<String>,
+    /// Seconds between re-registrations, so the manager and the worker's alerts notice a lost link; 0 or unset sends none.
+    pub heartbeat: Option<u64>,
 }
 
 impl Default for WorkerManagerConfig {
@@ -220,6 +226,7 @@ impl Default for WorkerManagerConfig {
             api_base_list: None,
             token: Some("".into()),
             ca_cert: Some("".into()),
+            heartbeat: None,
         }
     }
 }

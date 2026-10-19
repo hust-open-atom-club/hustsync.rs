@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+mod alert;
 mod common;
 mod config;
 pub mod database;
@@ -14,6 +15,7 @@ use thiserror::Error;
 
 use crate::database::AdapterError;
 
+pub use alert::Streaks;
 pub use common::init_tracing;
 pub use config::load_config;
 #[cfg(feature = "metrics")]

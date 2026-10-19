@@ -54,6 +54,7 @@ pub fn manager_with(metrics: Option<MetricsConfig>) -> (Arc<Manager>, TempDir) {
 pub fn config(db: &Path, metrics: Option<MetricsConfig>) -> Arc<ManagerConfig> {
     Arc::new(ManagerConfig {
         debug: false,
+        alert: None,
         log: None,
         metrics,
         server: ManagerServerConfig {
@@ -122,6 +123,7 @@ pub async fn spawn_manager_tls() -> (SocketAddr, JoinHandle<()>, Vec<u8>) {
 
     let config = Arc::new(ManagerConfig {
         debug: false,
+        alert: None,
         log: None,
         metrics: None,
         server: ManagerServerConfig {

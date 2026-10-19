@@ -50,6 +50,7 @@ scrape_configs:
 | | `hustsync_mirror_sync_duration_seconds{mirror,worker}` | 上次同步用时 |
 | | `hustsync_mirror_last_success_timestamp_seconds{mirror,worker}` | 上次成功的时间 |
 | | `hustsync_mirror_next_sync_timestamp_seconds{mirror,worker}` | 下次同步的时间 |
+| | `hustsync_mirror_failures{mirror,worker}` | manager 启动以来连续失败的轮数 |
 | `workers` | `hustsync_workers` | 已注册的 worker 数 |
 | | `hustsync_workers_online` `hustsync_worker_up{worker}` | 抓取时探测，2 秒内有响应即在线 |
 | | `hustsync_worker_last_online_timestamp_seconds{worker}` | worker 上次联系 manager 的时间 |
@@ -67,6 +68,9 @@ scrape_configs:
 | | `hustsync_worker_jobs_running` | 正在同步的镜像数 |
 | | `hustsync_worker_jobs_queued` | 等待下次同步的镜像数 |
 | | `hustsync_worker_concurrency` | 并发上限 |
+| `manager` | `hustsync_worker_manager_up{manager}` | 最近一次请求该 manager 是否成功 |
+| | `hustsync_worker_manager_failures{manager}` | 连续失败的请求数 |
+| | `hustsync_worker_manager_last_success_timestamp_seconds{manager}` | 最近一次成功的时间 |
 | `process` | 同 manager | |
 
 ## 配置

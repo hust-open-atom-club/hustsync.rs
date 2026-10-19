@@ -43,6 +43,7 @@ manager 与 worker 各读一个 TOML 文件。字段名与 tunasync 一致，tun
 | `api_base_list` | 无 | 多个 manager；状态同时上报给每一个，启动时从第一个读取历史状态 |
 | `token` | 空 | 注册时携带 |
 | `ca_cert` | 空 | 访问 HTTPS manager 时信任的 CA |
+| `heartbeat` | 无 | 每隔多少秒重新注册一次，见 [alert.md](alert.md) |
 
 ### server
 
@@ -96,6 +97,10 @@ sinks = [
   { kind = "file", path = "/var/log/hustsync/worker.json", format = "json", max_size = "64MiB", keep = 7 },
 ]
 ```
+
+## 告警
+
+manager 的 `[alert]` 设连续失败多少轮发告警，worker 的 `[manager] heartbeat` 设心跳间隔，详见 [alert.md](alert.md)。
 
 ## 指标
 

@@ -7,6 +7,9 @@ use serlog::{
 };
 use tracing_subscriber::prelude::*;
 
+/// Alert events stay on whatever level the flags or `[log]` pick.
+const ALERT: &str = "hustsync::alert=info";
+
 /// Logs to stdout, or appends to `file` when given, e.g. for a service with no console.
 /// `RUST_LOG` overrides the level the flags choose.
 pub fn init_logger(
@@ -21,7 +24,7 @@ pub fn init_logger(
         _ => "warn",
     };
     let filter = format!(
-        "hustsync={level},hustsynctl={level},tracing_subscriber={level},rustls={level},{level}"
+        "hustsync={level},hustsynctl={level},tracing_subscriber={level},rustls={level},{level},{ALERT}"
     );
     let layout = Layout::pattern(if debug {
         "{time:rfc3339} {level:>5} {spans}{file}:{line}: {msg}{fields}"
@@ -48,7 +51,8 @@ pub fn init_logger(
     Ok(guard)
 }
 
-/// Adds the sinks of a config's `[log]` table, such as Loki or mail, and applies its `filter` unless `RUST_LOG` is set.
+/// Adds the sinks of a config's `[log]` table, such as Loki or mail, and applies its `filter` unless `RUST_LOG` is set;
+/// `hustsync::alert` stays at `info` unless the filter names it.
 pub fn extend(log: Option<&toml::Table>) -> serlog::Result<()> {
     let Some(table) = log else {
         return Ok(());
@@ -66,8 +70,13 @@ pub fn extend(log: Option<&toml::Table>) -> serlog::Result<()> {
         let spec = spec
             .as_str()
             .ok_or_else(|| bad("[log]: `filter` takes a string".into()))?;
+        let full = if spec.contains("hustsync::alert") {
+            spec.to_owned()
+        } else {
+            format!("{spec},{ALERT}")
+        };
         serlog::set_filter(
-            spec.parse()
+            full.parse()
                 .map_err(|e| bad(format!("[log]: filter `{spec}`: {e}")))?,
         );
     }

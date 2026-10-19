@@ -231,6 +231,16 @@ fn mirrors(mgr: &Manager) -> Res<Vec<MetricFamily>> {
         "hustsync_mirror_next_sync_timestamp_seconds",
         "Unix time of the next scheduled sync.",
     )?;
+    let failures = gauge(
+        &reg,
+        "hustsync_mirror_failures",
+        "Failed runs in a row since the manager started.",
+    )?;
+    for ((mirror, worker), n) in mgr.streaks.all() {
+        failures
+            .with_label_values(&[mirror.as_str(), &worker])
+            .set(n.into());
+    }
 
     for m in &mirrors {
         let labels = [m.name.as_str(), &m.worker];

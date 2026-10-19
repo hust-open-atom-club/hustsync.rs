@@ -17,6 +17,7 @@ pub mod hooks;
 pub mod job;
 pub mod metrics;
 pub mod provider;
+pub mod reach;
 pub mod schedule;
 pub mod server;
 
@@ -64,22 +65,23 @@ fn resolve_api_bases(cfg: &hustsync_config_parser::WorkerManagerConfig) -> Vec<S
 }
 
 /// Attempt to POST `msg` to `url` up to 10 times (1 s between attempts).
-/// Returns `true` on the first successful response.
-async fn try_register(client: &Client, url: &str, msg: &WorkerStatus) -> bool {
-    let mut retries = 10u32;
-    while retries > 0 {
-        if let Ok(resp) = client.post(url).json(msg).send().await
-            && resp.status().is_success()
-        {
-            tracing::info!("Successfully registered to manager: {}", url);
-            return true;
+/// Fails with the last attempt's error.
+async fn try_register(client: &Client, url: &str, msg: &WorkerStatus) -> Result<(), String> {
+    let mut last = String::new();
+    for left in (0..10).rev() {
+        match client.post(url).json(msg).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!("Successfully registered to manager: {}", url);
+                return Ok(());
+            }
+            Ok(resp) => last = format!("HTTP {}", resp.status()),
+            Err(e) => last = e.to_string(),
         }
-        retries -= 1;
-        if retries > 0 {
+        if left > 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
-    false
+    Err(last)
 }
 
 fn format_manager_url(base: &str, path: &str) -> String {
@@ -190,6 +192,7 @@ pub struct Worker {
     concurrent: usize,
     cgroups: Option<Arc<cgroup::Cgroups>>,
     metrics: Arc<metrics::Metrics>,
+    pub reach: Arc<reach::Reach>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
 
@@ -229,7 +232,9 @@ impl Worker {
             .map(Arc::new);
 
         let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
-        let metrics = metrics::Metrics::new(cfg.metrics.as_ref()).map_err(std::io::Error::other)?;
+        let reach = Arc::new(reach::Reach::default());
+        let metrics = metrics::Metrics::new(cfg.metrics.as_ref(), Arc::clone(&reach))
+            .map_err(std::io::Error::other)?;
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
 
@@ -279,6 +284,7 @@ impl Worker {
             concurrent,
             cgroups,
             metrics: Arc::new(metrics),
+            reach,
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
             http_client: None,
@@ -315,8 +321,12 @@ impl Worker {
         )
         .await
         {
-            Ok(statuses) => statuses,
+            Ok(statuses) => {
+                self.reach.ok(root);
+                statuses
+            }
             Err(e) => {
+                self.reach.fail(root, &e);
                 tracing::error!("Failed to fetch job status from manager: {}", e);
                 vec![]
             }
@@ -421,8 +431,14 @@ impl Worker {
 
         for root in resolve_api_bases(manager_cfg) {
             let url = format_manager_url(&root, "workers");
-            if !try_register(client, &url, &msg).await {
-                tracing::warn!("Failed to register to manager after retries: {}", url);
+            match try_register(client, &url, &msg).await {
+                Ok(()) => {
+                    self.reach.ok(&root);
+                }
+                Err(e) => {
+                    self.reach.fail(&root, &e);
+                    tracing::warn!("Failed to register to manager after retries: {}", url);
+                }
             }
         }
     }
@@ -637,6 +653,7 @@ impl Worker {
         let worker_name = self.name();
         let schedule_queue = Arc::clone(&self.schedule_queue);
         let jobs_handle = Arc::clone(&self.jobs);
+        let reach = Arc::clone(&self.reach);
 
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
@@ -683,12 +700,15 @@ impl Worker {
                     );
                     match client.post(&url).json(&smsg).send().await {
                         Ok(resp) if resp.status().is_success() => {
+                            reach.ok(root);
                             status_sent = true;
                         }
                         Ok(resp) => {
+                            reach.fail(root, &format!("HTTP {}", resp.status()));
                             tracing::warn!("Status push to {} returned {}", url, resp.status());
                         }
                         Err(e) => {
+                            reach.fail(root, &e);
                             tracing::warn!("Status push to {} failed: {}", url, e);
                         }
                     }
@@ -724,12 +744,15 @@ impl Worker {
                         format_manager_url(root, &format!("workers/{}/schedules", worker_name));
                     match client.post(&url).json(&sched_msg).send().await {
                         Ok(resp) if resp.status().is_success() => {
+                            reach.ok(root);
                             sched_sent = true;
                         }
                         Ok(resp) => {
+                            reach.fail(root, &format!("HTTP {}", resp.status()));
                             tracing::warn!("Schedule push to {} returned {}", url, resp.status());
                         }
                         Err(e) => {
+                            reach.fail(root, &e);
                             tracing::warn!("Schedule push to {} failed: {}", url, e);
                         }
                     }
@@ -930,7 +953,10 @@ impl Worker {
 
     pub async fn run_with_reload_trigger(&self, reload_tx: Option<mpsc::Sender<()>>) {
         tracing::info!("Worker started.");
-        self.register_worker().await;
+        tokio::select! {
+            () = self.exit_token.cancelled() => return self.shutdown().await,
+            () = self.register_worker() => {}
+        }
 
         let initial_statuses = self.fetch_job_status().await;
         self.bootstrap_queue(initial_statuses).await;
@@ -945,8 +971,25 @@ impl Worker {
         self.start_message_relay().await;
         self.start_dispatch_loop();
 
-        self.exit_token.cancelled().await;
+        tokio::select! {
+            () = self.exit_token.cancelled() => {}
+            () = self.heartbeat() => {}
+        }
         self.shutdown().await;
+    }
+
+    /// Re-registers every `[manager] heartbeat` seconds; never returns, and waits forever when it is unset.
+    async fn heartbeat(&self) {
+        let every = self.cfg.manager.as_ref().and_then(|m| m.heartbeat);
+        let Some(secs) = every.filter(|s| *s > 0) else {
+            return std::future::pending().await;
+        };
+        let mut tick = tokio::time::interval(Duration::from_secs(secs));
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            self.register_worker().await;
+        }
     }
 
     pub async fn run(&self) {
@@ -1031,6 +1074,7 @@ mod tests {
                 api_base_list: Some(manager_urls),
                 token: Some("token".to_string()),
                 ca_cert: Some("".to_string()),
+                heartbeat: None,
             }),
             server: Some(WorkerServerConfig {
                 hostname: Some("localhost".to_string()),
@@ -1080,6 +1124,7 @@ mod tests {
             api_base_list: api_base_list.map(|v| v.into_iter().map(String::from).collect()),
             token: None,
             ca_cert: None,
+            heartbeat: None,
         }
     }
 
