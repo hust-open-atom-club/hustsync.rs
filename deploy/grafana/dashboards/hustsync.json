@@ -1114,13 +1114,641 @@
     {
       "type": "row",
       "id": 17,
-      "title": "镜像",
+      "title": "访问",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 47
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "请求",
+      "description": "所选时段内的请求数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_access_requests_total[$__range]))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 18,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 48
+      }
+    },
+    {
+      "type": "stat",
+      "title": "流量",
+      "description": "所选时段内发出的字节数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_access_sent_bytes_total[$__range]))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B877D9"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 19,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 48
+      }
+    },
+    {
+      "type": "stat",
+      "title": "国家或地区",
+      "description": "有访问的国家或地区数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(sum by (country) (increase(hustsync_access_requests_total[$__range])) > 0) or vector(0)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#8AB8FF"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 20,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 48
+      }
+    },
+    {
+      "type": "stat",
+      "title": "国内省份",
+      "description": "有访问的省份数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(sum by (region) (increase(hustsync_access_requests_total{country=\"CN\"}[$__range])) > 0) or vector(0)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#38BDB0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 21,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 48
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "访问来源",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "description": "国内按省、国外按国家或地区；圆越大访问越多；滚轮缩放可看全球",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (country, place) (increase(hustsync_access_requests_total{country!=\"CN\"}[$__range]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "sum by (region, place, lat, lon) (increase(hustsync_access_requests_total{country=\"CN\"}[$__range]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "fields": {},
+            "conversions": [
+              {
+                "targetField": "lat",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "lon",
+                "destinationType": "number"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 35,
+          "lon": 105,
+          "zoom": 3.9
+        },
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showScale": false
+        },
+        "basemap": {
+          "type": "default",
+          "name": "底图",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "国家或地区",
+            "tooltip": true,
+            "filterData": {
+              "id": "byRefId",
+              "options": "A"
+            },
+            "location": {
+              "mode": "lookup",
+              "lookup": "country",
+              "gazetteer": "public/gazetteer/countries.json"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "field": "Value #A",
+                  "min": 5,
+                  "max": 30,
+                  "fixed": 6
+                },
+                "color": {
+                  "fixed": "#B877D9"
+                },
+                "opacity": 0.55,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                },
+                "symbolAlign": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "place",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 11,
+                  "offsetX": 0,
+                  "offsetY": -16,
+                  "textAlign": "center",
+                  "textBaseline": "middle"
+                }
+              }
+            }
+          },
+          {
+            "type": "markers",
+            "name": "省份",
+            "tooltip": true,
+            "filterData": {
+              "id": "byRefId",
+              "options": "B"
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "field": "Value #B",
+                  "min": 5,
+                  "max": 30,
+                  "fixed": 6
+                },
+                "color": {
+                  "fixed": "#5794F2"
+                },
+                "opacity": 0.55,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                },
+                "symbolAlign": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "place",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 11,
+                  "offsetX": 0,
+                  "offsetY": -16,
+                  "textAlign": "center",
+                  "textBaseline": "middle"
+                }
+              }
+            }
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "id": 22,
+      "gridPos": {
+        "h": 18,
+        "w": 16,
+        "x": 0,
+        "y": 52
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "来源排行",
+      "description": "所选时段内请求最多的地方",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "topk(12, sum by (place) (increase(hustsync_access_requests_total[$__range])))",
+          "legendFormat": "{{place}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 18,
+        "maxVizHeight": 18,
+        "minVizWidth": 8,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "id": 23,
+      "gridPos": {
+        "h": 18,
+        "w": 8,
+        "x": 16,
+        "y": 52
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "请求速率",
+      "description": "请求最多的六个地方",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (place) (rate(hustsync_access_requests_total[$__rate_interval])) and on (place) topk(6, sum by (place) (increase(hustsync_access_requests_total[$__range] @ end())))",
+          "legendFormat": "{{place}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 24,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 70
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "发送速率",
+      "description": "同上六个地方的发送字节速率",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (place) (rate(hustsync_access_sent_bytes_total[$__rate_interval])) and on (place) topk(6, sum by (place) (increase(hustsync_access_requests_total[$__range] @ end())))",
+          "legendFormat": "{{place}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 25,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 70
+      }
+    },
+    {
+      "type": "row",
+      "id": 26,
+      "title": "镜像",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 79
       },
       "panels": []
     },
@@ -1465,12 +2093,12 @@
           "fields": ""
         }
       },
-      "id": 18,
+      "id": 27,
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 80
       }
     },
     {
@@ -1998,12 +2626,12 @@
           "fields": ""
         }
       },
-      "id": 19,
+      "id": 28,
       "gridPos": {
         "h": 20,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 88
       }
     },
     {
@@ -2076,12 +2704,12 @@
           "showLegend": false
         }
       },
-      "id": 20,
+      "id": 29,
       "gridPos": {
         "h": 12,
         "w": 12,
         "x": 0,
-        "y": 76
+        "y": 108
       }
     },
     {
@@ -2150,24 +2778,24 @@
           "showLegend": false
         }
       },
-      "id": 21,
+      "id": 30,
       "gridPos": {
         "h": 12,
         "w": 12,
         "x": 12,
-        "y": 76
+        "y": 108
       }
     },
     {
       "type": "row",
-      "id": 22,
+      "id": 31,
       "title": "状态",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 88
+        "y": 120
       },
       "panels": []
     },
@@ -2257,24 +2885,24 @@
           "mode": "single"
         }
       },
-      "id": 23,
+      "id": 32,
       "gridPos": {
         "h": 26,
         "w": 24,
         "x": 0,
-        "y": 89
+        "y": 121
       }
     },
     {
       "type": "row",
-      "id": 24,
+      "id": 33,
       "title": "耗时",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 115
+        "y": 147
       },
       "panels": []
     },
@@ -2345,12 +2973,12 @@
           "le": 1e-09
         }
       },
-      "id": 25,
+      "id": 34,
       "gridPos": {
         "h": 11,
         "w": 12,
         "x": 0,
-        "y": 116
+        "y": 148
       }
     },
     {
@@ -2421,12 +3049,12 @@
           "showLegend": false
         }
       },
-      "id": 26,
+      "id": 35,
       "gridPos": {
         "h": 11,
         "w": 12,
         "x": 12,
-        "y": 116
+        "y": 148
       }
     },
     {
@@ -2486,12 +3114,12 @@
           "sort": "desc"
         }
       },
-      "id": 27,
+      "id": 36,
       "gridPos": {
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 127
+        "y": 159
       }
     },
     {
@@ -2596,24 +3224,24 @@
       },
       "interval": "1h",
       "timeFrom": "24h",
-      "id": 28,
+      "id": 37,
       "gridPos": {
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 127
+        "y": 159
       }
     },
     {
       "type": "row",
-      "id": 29,
+      "id": 38,
       "title": "拓扑",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 137
+        "y": 169
       },
       "panels": []
     },
@@ -2666,24 +3294,24 @@
           "config": "{}"
         }
       },
-      "id": 30,
+      "id": 39,
       "gridPos": {
         "h": 19,
         "w": 24,
         "x": 0,
-        "y": 138
+        "y": 170
       }
     },
     {
       "type": "row",
-      "id": 31,
+      "id": 40,
       "title": "worker",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 157
+        "y": 189
       },
       "panels": []
     },
@@ -2759,12 +3387,12 @@
           "mode": "single"
         }
       },
-      "id": 32,
+      "id": 41,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 158
+        "y": 190
       }
     },
     {
@@ -2873,12 +3501,12 @@
           "sort": "desc"
         }
       },
-      "id": 33,
+      "id": 42,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 158
+        "y": 190
       }
     },
     {
@@ -2939,24 +3567,24 @@
           "sort": "desc"
         }
       },
-      "id": 34,
+      "id": 43,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 158
+        "y": 190
       }
     },
     {
       "type": "row",
-      "id": 35,
+      "id": 44,
       "title": "进程",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 166
+        "y": 198
       },
       "panels": []
     },
@@ -3018,12 +3646,12 @@
           "sort": "desc"
         }
       },
-      "id": 36,
+      "id": 45,
       "gridPos": {
         "h": 7,
         "w": 6,
         "x": 0,
-        "y": 167
+        "y": 199
       }
     },
     {
@@ -3083,12 +3711,12 @@
           "sort": "desc"
         }
       },
-      "id": 37,
+      "id": 46,
       "gridPos": {
         "h": 7,
         "w": 6,
         "x": 6,
-        "y": 167
+        "y": 199
       }
     },
     {
@@ -3149,12 +3777,12 @@
           "sort": "desc"
         }
       },
-      "id": 38,
+      "id": 47,
       "gridPos": {
         "h": 7,
         "w": 6,
         "x": 12,
-        "y": 167
+        "y": 199
       }
     },
     {
@@ -3215,24 +3843,24 @@
           "sort": "desc"
         }
       },
-      "id": 39,
+      "id": 48,
       "gridPos": {
         "h": 7,
         "w": 6,
         "x": 18,
-        "y": 167
+        "y": 199
       }
     },
     {
       "type": "row",
-      "id": 40,
+      "id": 49,
       "title": "告警",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 174
+        "y": 206
       },
       "panels": []
     },
@@ -3398,12 +4026,12 @@
           "fields": ""
         }
       },
-      "id": 41,
+      "id": 50,
       "gridPos": {
         "h": 9,
         "w": 14,
         "x": 0,
-        "y": 175
+        "y": 207
       }
     },
     {
@@ -3467,24 +4095,24 @@
           "mode": "single"
         }
       },
-      "id": 42,
+      "id": 51,
       "gridPos": {
         "h": 9,
         "w": 10,
         "x": 14,
-        "y": 175
+        "y": 207
       }
     },
     {
       "type": "row",
-      "id": 43,
+      "id": 52,
       "title": "日志",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 184
+        "y": 216
       },
       "panels": []
     },
@@ -3607,12 +4235,12 @@
           "sort": "desc"
         }
       },
-      "id": 44,
+      "id": 53,
       "gridPos": {
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 185
+        "y": 217
       }
     },
     {
@@ -3644,12 +4272,12 @@
         "showLabels": false,
         "showCommonLabels": false
       },
-      "id": 45,
+      "id": 54,
       "gridPos": {
         "h": 16,
         "w": 16,
         "x": 0,
-        "y": 191
+        "y": 223
       }
     },
     {
@@ -3681,12 +4309,12 @@
         "showLabels": true,
         "showCommonLabels": false
       },
-      "id": 46,
+      "id": 55,
       "gridPos": {
         "h": 16,
         "w": 8,
         "x": 16,
-        "y": 191
+        "y": 223
       }
     },
     {
@@ -3718,12 +4346,12 @@
         "showLabels": true,
         "showCommonLabels": false
       },
-      "id": 47,
+      "id": 56,
       "gridPos": {
         "h": 16,
         "w": 24,
         "x": 0,
-        "y": 207
+        "y": 239
       }
     }
   ]

@@ -37,7 +37,8 @@ flowchart LR
 | 告警规则 | `deploy/prometheus/rules.yml` | 见下表 |
 | Telegraf 1.40 | `deploy/telegraf/telegraf.conf` | 拉取各组，也在 8186 端口收推送，写进 InfluxDB |
 | InfluxDB 3 Core | compose | 只在 compose 网络内可达 |
-| Alloy 1.20 | `deploy/alloy/config.alloy` | 3100 端口收 serlog 推来的程序日志；读各镜像 `log_dir` 下的同步日志，从文件名取镜像名；4318 端口收 OTLP 指标转给 Prometheus |
+| Alloy 1.20 | `deploy/alloy/config.alloy` | 3100 端口收 serlog 推来的程序日志；读各镜像 `log_dir` 下的同步日志，从文件名取镜像名；4318 端口收 OTLP 指标转给 Prometheus；读 nginx 访问日志，按访客所在地计数 |
+| GeoIP 库 | compose 的 `geoip` 服务 | 每月从 db-ip.com 下载免费城市库，CC BY 4.0 |
 | Loki 3.7 | 镜像自带配置 | 存日志 |
 | Grafana 13.2 | `deploy/grafana/` | 数据源与看板随容器加载 |
 
@@ -89,6 +90,10 @@ promtool test rules deploy/prometheus/rules.test.yml
 
 | 节 | 面板 | 形式 |
 |:--:|:--:|:--:|
+| 访问 | 请求、流量、国家或地区、国内省份 | 数字 |
+| | 访问来源 | 地图：国内按省、国外按国家或地区，圆越大访问越多 |
+| | 来源排行 | 条形，前 12 个地方 |
+| | 请求速率、发送速率 | 曲线，请求最多的六个地方 |
 | 同步活动 | 同步次数 | 每 10 分钟一根柱，成功绿失败红 |
 | | 体积 | TreeMap，按 worker 分组，面积即体积 |
 | | 每日同步、每日失败 | 近 90 天的日历热力图 |
@@ -105,6 +110,8 @@ promtool test rules deploy/prometheus/rules.test.yml
 | 日志 | 程序日志量、程序日志、告警事件、同步日志 | 柱状、日志 |
 
 程序日志由 hustsync 经 `[log]` 里的 loki 输出端直接推送；同步日志是 hustsync 写在 `log_dir` 下的文件，由 Alloy 读取。
+
+访问数据来自镜像站 nginx 的访问日志，格式为 `combined`。Alloy 逐行取出访客 IP 与发送字节，查 GeoIP 库得到国家与省份，记为 `hustsync_access_requests_total`、`hustsync_access_sent_bytes_total` 两个计数器，标签为 `country`、`region`（只记国内省份）、`place`（中文地名），国内省份另带省会坐标 `lat`、`lon` 供地图定位。日志行本身不进 Loki，访问量大的站点一天上百万行。
 
 ### InfluxDB
 
@@ -128,5 +135,5 @@ compose 已通过 `GF_PLUGINS_PREINSTALL_SYNC` 装好；其余全是内置面板
 |:--:|:--:|
 | Prometheus | 照 `prometheus.yml` 改 `targets` |
 | Grafana | 导入 `deploy/grafana/dashboards/` 下的 JSON，装树图插件 |
-| Alloy | 把 `config.alloy` 里的 `/var/log/hustsync` 换成 worker 的 `log_dir` |
+| Alloy | 把 `config.alloy` 里的 `/var/log/hustsync` 换成 worker 的 `log_dir`，`/var/log/nginx/access.log` 换成镜像站的访问日志；GeoIP 库放到 `/etc/alloy/geoip/`，Prometheus 抓 Alloy 的 12345 端口 |
 | Telegraf | 改 `urls` 与输出 |

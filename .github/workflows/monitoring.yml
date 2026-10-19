@@ -70,6 +70,13 @@ jobs:
       - name: OTLP through Alloy into Prometheus
         run: scripts/otlp-alloy.sh target/debug/hustsync
 
+  access:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Visitors counted by country and province
+        run: scripts/access-geoip.sh
+
   compose:
     runs-on: ubuntu-26.04
     steps:
