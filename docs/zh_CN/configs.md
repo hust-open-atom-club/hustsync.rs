@@ -74,6 +74,22 @@ manager 与 worker 各读一个 TOML 文件。字段名与 tunasync 一致，tun
 
 详见 [cgroup.md](cgroup.md)。
 
+### zfs
+
+| 字段 | 默认值 | 说明 |
+|:--:|:--:|:--:|
+| `enable` | false | 每个镜像的工作目录必须是独立的 ZFS 数据集 |
+| `zpool` | 无 | 镜像数据集所在的池或父数据集；开启时必填 |
+
+### btrfs_snapshot
+
+| 字段 | 默认值 | 说明 |
+|:--:|:--:|:--:|
+| `enable` | false | 工作目录是 Btrfs 子卷，每次同步成功后更新快照 |
+| `snapshot_path` | 无 | 快照目录，每个镜像一份，以镜像名命名 |
+
+两项都只在 Linux 上可用，详见 [snapshot.md](snapshot.md)。
+
 ### include
 
 | 字段 | 说明 |
@@ -129,6 +145,7 @@ manager 与 worker 都可加 `[metrics]`：`cache` 设各组的缓存秒数，`[
 | `exec_on_success_extra` `exec_on_failure_extra` | 无 | 追加在 global 的设置之后 |
 | `success_exit_codes` | 无 | 额外视为成功的退出码 |
 | `memory_limit` | 无 | 内存上限，如 `256M`；只在 docker 或 cgroup 下生效 |
+| `snapshot_path` | `[btrfs_snapshot]` 的目录加镜像名 | 本镜像的快照路径；子镜像不继承 |
 
 同步进程可读到 `HUSTSYNC_MIRROR_NAME`、`HUSTSYNC_WORKING_DIR`、`HUSTSYNC_UPSTREAM_URL`、`HUSTSYNC_LOG_DIR`、`HUSTSYNC_LOG_FILE`，以及同值的 `TUNASYNC_*`。
 
@@ -178,3 +195,5 @@ manager 与 worker 都可加 `[metrics]`：`cache` 设各组的缓存秒数，`[
 | 排期 | 只有 `interval` | 另可用 `cron` |
 | 日志份数 | 固定 10 | `log_retention` 可调 |
 | 旧日志压缩 | 无 | `log_gzip` |
+| ZFS 检查 | 只查是否挂载点 | 还查挂的是不是 ZFS |
+| Btrfs 快照更新 | 先删旧快照再建新快照，中间发布路径为空 | 新快照建好后一次 `rename` 换上 |

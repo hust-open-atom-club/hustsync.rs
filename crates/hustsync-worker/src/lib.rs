@@ -200,7 +200,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// Builds the worker; fails when `[cgroup]` is enabled but unusable.
+    /// Builds the worker; fails when `[cgroup]`, `[zfs]` or `[btrfs_snapshot]` is enabled but unusable.
     pub fn new(mut cfg: WorkerConfig) -> std::io::Result<Self> {
         // Ignore SIGPIPE process-wide: a broken pipe from an rsync (or other)
         // child must not terminate the worker. Providers already observe
@@ -219,6 +219,19 @@ impl Worker {
             && retry.retry.unwrap_or(0) == 0
         {
             retry.retry = Some(2); // defaultMaxRetry
+        }
+
+        if !cfg!(target_os = "linux")
+            && (cfg.zpool().is_some()
+                || cfg
+                    .btrfs_snapshot
+                    .as_ref()
+                    .is_some_and(|b| b.enable == Some(true)))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "[zfs] and [btrfs_snapshot] work on Linux only",
+            ));
         }
 
         let cfg = Arc::new(cfg);
@@ -349,6 +362,16 @@ impl Worker {
         g_cfg: &WorkerConfig,
     ) -> Vec<Arc<dyn hooks::JobHook>> {
         let mut chain: Vec<Arc<dyn hooks::JobHook>> = Vec::new();
+        // Before working_dir: a missing directory must become a subvolume, not a plain directory.
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(pool) = g_cfg.zpool() {
+                chain.push(Arc::new(hooks::ZfsHook::new(pool)));
+            }
+            if let Some(snap) = g_cfg.snapshot_path(m_cfg) {
+                chain.push(Arc::new(hooks::BtrfsSnapshotHook::new(snap)));
+            }
+        }
         // 1. Built-in: ensure working_dir exists before anything else.
         chain.push(Arc::new(hooks::WorkingDirHook::new()));
         // 2. Built-in: rotate and stamp the log file before the provider

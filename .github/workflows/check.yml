@@ -76,3 +76,29 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 busybox-static cpio musl-tools
           scripts/cgroup-v1-qemu.sh
+
+  snapshot:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: A Btrfs loop mount and a ZFS pool on a file
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq btrfs-progs zfsutils-linux
+          truncate -s 512M "$RUNNER_TEMP/btrfs.img"
+          mkfs.btrfs -q "$RUNNER_TEMP/btrfs.img"
+          sudo mkdir -p /mnt/btrfs
+          sudo mount -o loop "$RUNNER_TEMP/btrfs.img" /mnt/btrfs
+          truncate -s 256M "$RUNNER_TEMP/zfs.img"
+          sudo zpool create hstest "$RUNNER_TEMP/zfs.img"
+          sudo zfs create -o mountpoint=/mnt/zfs hstest/debian
+      - name: Snapshot hooks, as root
+        env:
+          HUSTSYNC_BTRFS: /mnt/btrfs
+          HUSTSYNC_ZFS: /mnt/zfs
+        run: |
+          bin=$(cargo test -p hustsync-worker --test snapshot_root --no-run --message-format=json |
+            jq -r 'select(.executable != null and .target.name == "snapshot_root") | .executable')
+          sudo -E "$bin" --ignored --test-threads=1

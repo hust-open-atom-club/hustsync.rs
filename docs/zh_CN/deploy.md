@@ -91,7 +91,7 @@ compose 镜像里已经带了这个链接。
 | 项 | 做法 |
 |:--:|:--:|
 | manager | 换成 hustsync manager，`db_type` 改为 `redb`；bolt 数据不迁移，worker 下次上报后状态自动补齐 |
-| worker 配置 | 原样使用；`zfs`、`btrfs_snapshot` 等不支持的字段会报错，删掉即可 |
+| worker 配置 | 原样使用，含 `zfs`、`btrfs_snapshot`，见 [snapshot.md](snapshot.md) |
 | 同步脚本 | `TUNASYNC_*` 环境变量照常提供 |
 | 容器 | 名字前缀由 `tunasync-job-` 变为 `hustsync-job-`，按名字清理容器的脚本要改 |
 | 端口 | worker 的 `listen_port` 现在同时提供 `/metrics` |

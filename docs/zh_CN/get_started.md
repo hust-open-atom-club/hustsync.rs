@@ -86,6 +86,7 @@ hustsynctl workers -p 14242
 - 监控栈与看板：[monitoring.md](monitoring.md)
 - 容器内同步：[docker.md](docker.md)
 - 资源隔离：[cgroup.md](cgroup.md)
+- ZFS 与 Btrfs 快照：[snapshot.md](snapshot.md)
 - fpsync 与 lsyncd：[tools.md](tools.md)
 - ftpsync：[ftpsync.md](ftpsync.md)
 - Windows：[windows.md](windows.md)
