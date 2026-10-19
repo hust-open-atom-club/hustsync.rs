@@ -347,6 +347,10 @@ impl JobActor {
                         .await;
 
                     let current_state = state.load(Ordering::Acquire);
+                    if current_state == STATE_HALTING {
+                        report(SyncStatus::Failed, "worker stopped".into(), false).await;
+                        return Err(ProviderError::Terminated);
+                    }
                     if cancel.is_cancelled()
                         || current_state == STATE_PAUSED
                         || current_state == STATE_DISABLED

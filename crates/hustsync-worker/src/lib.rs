@@ -195,6 +195,9 @@ pub struct Worker {
     pub reach: Arc<reach::Reach>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
+    /// Tells the status relay to send what is queued and stop.
+    drain: CancellationToken,
+    relay: Mutex<Option<tokio::task::JoinHandle<()>>>,
 
     pub http_client: Option<Client>,
 }
@@ -300,6 +303,8 @@ impl Worker {
             reach,
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
+            drain: CancellationToken::new(),
+            relay: Mutex::new(None),
             http_client: None,
         };
 
@@ -677,9 +682,16 @@ impl Worker {
         let schedule_queue = Arc::clone(&self.schedule_queue);
         let jobs_handle = Arc::clone(&self.jobs);
         let reach = Arc::clone(&self.reach);
+        let drain = self.drain.clone();
 
-        tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
+        let relay = tokio::spawn(async move {
+            loop {
+                let msg = tokio::select! {
+                    biased;
+                    m = rx.recv() => m,
+                    () = drain.cancelled() => rx.try_recv().ok(),
+                };
+                let Some(msg) = msg else { break };
                 let (Some(client), Some(manager_cfg)) = (&http_client, &cfg.manager) else {
                     continue;
                 };
@@ -785,6 +797,7 @@ impl Worker {
                 }
             }
         });
+        *self.relay.lock().await = Some(relay);
     }
 
     /// Spawn the dispatch ticker that fires ready jobs every 5 seconds.
@@ -833,6 +846,14 @@ impl Worker {
             if let Err(e) = res {
                 tracing::error!("Job actor panicked or cancelled: {}", e);
             }
+        }
+        self.drain.cancel();
+        if let Some(relay) = self.relay.lock().await.take()
+            && tokio::time::timeout(Duration::from_secs(10), relay)
+                .await
+                .is_err()
+        {
+            tracing::warn!("Gave up telling the manager the last job states");
         }
         tracing::info!("Worker fully stopped.");
     }

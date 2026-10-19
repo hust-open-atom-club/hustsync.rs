@@ -156,12 +156,10 @@ pub(crate) async fn log_provider_failure(kind: &str, name: &str, msg: &str, log_
     }
 }
 
-/// Send SIGTERM then SIGKILL (after 2 s) to the process group identified by
-/// `pgid`.
+/// Sends SIGTERM to the process group `pgid`, and SIGKILL if it is not gone within 2 s.
 ///
 /// Skips the kill entirely when `raw == 0` (not running) or `raw == u32::MAX`
-/// (spawning sentinel). SIGKILL on an already-exited group yields ESRCH,
-/// which is logged at DEBUG and otherwise ignored.
+/// (spawning sentinel). The leader must be reaped meanwhile, or its zombie keeps the group alive.
 #[cfg(unix)]
 pub(crate) async fn terminate_pgid(pgid: &AtomicU32, name: &str) {
     let raw = pgid.load(Ordering::Acquire);
@@ -171,7 +169,13 @@ pub(crate) async fn terminate_pgid(pgid: &AtomicU32, name: &str) {
     let pid = Pid::from_raw(-(i32::try_from(raw).unwrap_or(i32::MAX)));
     let _ = signal::kill(pid, Signal::SIGTERM);
     tracing::debug!("{}: sent SIGTERM to pgid {}", name, raw);
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while tokio::time::Instant::now() < deadline {
+        if signal::kill(pid, None) == Err(nix::errno::Errno::ESRCH) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     if let Err(e) = signal::kill(pid, Signal::SIGKILL) {
         tracing::debug!(
             "{}: SIGKILL pgid {}: {} (likely already exited)",
@@ -432,9 +436,14 @@ pub(crate) async fn run_child_with_cancellation(
         () = limit => ProviderError::Timeout(timeout),
     };
     tracing::warn!("{}: {err}", common.name);
-    common.stop(pgid).await;
-    let _ = child.start_kill();
-    let _ = child.wait().await;
+    let (_, waited) = tokio::join!(
+        common.stop(pgid),
+        tokio::time::timeout(Duration::from_secs(3), child.wait())
+    );
+    if waited.is_err() {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
     common.runner.finish(&common.name).await;
     Err(err)
 }
