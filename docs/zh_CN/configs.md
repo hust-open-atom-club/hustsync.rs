@@ -97,6 +97,10 @@ sinks = [
 ]
 ```
 
+## 指标
+
+manager 与 worker 都可加 `[metrics]`：`cache` 设各组的缓存秒数，`[[metrics.push]]` 每项一个推送目标，详见 [metrics.md](metrics.md)。
+
 ## 镜像
 
 `[[mirrors]]` 每项一个镜像。未设置的字段取 `[global]` 的值；镜像可以嵌套 `[[mirrors.mirrors]]`，子镜像继承父镜像未设置的字段。

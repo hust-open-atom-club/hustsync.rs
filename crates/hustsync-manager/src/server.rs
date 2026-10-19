@@ -11,9 +11,11 @@ use std::time::Duration;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
+use crate::ManagerError;
+#[cfg(feature = "metrics")]
+use crate::Metrics;
 use crate::database::{DbAdapterTrait, make_db_adapter};
 use crate::handlers;
-use crate::{ManagerError, Metrics};
 
 pub(crate) const ERROR_KEY: &str = "error";
 pub(crate) const INFO_KEY: &str = "message";
@@ -22,17 +24,25 @@ pub struct Manager {
     pub config: Arc<ManagerConfig>,
     pub adapter: Option<Arc<dyn DbAdapterTrait>>,
     pub http_client: Option<Client>,
+    #[cfg(feature = "metrics")]
     pub metrics: Metrics,
 }
 
 impl Manager {
     #[allow(clippy::cognitive_complexity)]
     pub fn new(config: Arc<ManagerConfig>) -> Result<Self, ManagerError> {
+        #[cfg(not(feature = "metrics"))]
+        if config.metrics.is_some() {
+            return Err(ManagerError::Metrics(
+                "[metrics]: built without the `p8s`, `influx` and `otlp` features".into(),
+            ));
+        }
         let mut manager = Manager {
             config: Arc::clone(&config),
             adapter: None,
             http_client: None,
-            metrics: Metrics::new()?,
+            #[cfg(feature = "metrics")]
+            metrics: Metrics::new(config.metrics.as_ref()).map_err(ManagerError::Metrics)?,
         };
 
         if !config.files.ca_cert.is_empty() {
@@ -77,7 +87,6 @@ impl Manager {
 
         let mut router = Router::new()
             .route("/ping", get(handlers::ping_handler))
-            .route("/metrics", get(crate::metrics::serve))
             .route("/jobs", get(handlers::list_all_jobs))
             .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
             .route("/workers", get(handlers::list_all_workers))
@@ -99,6 +108,14 @@ impl Manager {
             ));
 
         router = router.nest("/workers", worker_validate_group);
+
+        #[cfg(feature = "p8s")]
+        {
+            use crate::metrics::serve;
+            router = router
+                .route("/metrics", get(serve::all))
+                .route("/metrics/{group}", get(serve::one));
+        }
 
         router = router
             .layer(middleware::from_fn(crate::middleware::context_error_logger))
@@ -129,6 +146,8 @@ impl Manager {
 
         let is_tls =
             !self.config.server.ssl_cert.is_empty() && !self.config.server.ssl_key.is_empty();
+        #[cfg(feature = "push")]
+        let pushes = crate::metrics::push(&self);
 
         if !is_tls {
             let listener = tokio::net::TcpListener::bind(&socket_addr)
@@ -162,6 +181,8 @@ impl Manager {
                 .await
                 .map_err(|e| ManagerError::Bind(e.to_string()))?;
         }
+        #[cfg(feature = "push")]
+        pushes.iter().for_each(tokio::task::JoinHandle::abort);
         Ok(())
     }
 }

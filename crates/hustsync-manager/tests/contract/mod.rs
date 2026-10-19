@@ -17,7 +17,9 @@
 
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
-use hustsync_config_parser::{ManagerConfig, ManagerFileConfig, ManagerServerConfig};
+use hustsync_config_parser::{
+    ManagerConfig, ManagerFileConfig, ManagerServerConfig, MetricsConfig,
+};
 use hustsync_manager::Manager;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -36,12 +38,24 @@ use tokio::task::JoinHandle;
 /// The `TempDir` must be kept alive for the duration of the test; drop it
 /// at the end of the test body.
 pub fn spawn_manager() -> (Router, TempDir) {
-    let dir = TempDir::new().expect("create tempdir");
-    let db_path = dir.path().join("test.db");
+    let (manager, dir) = manager_with(None);
+    (manager.make_router(), dir)
+}
 
-    let config = Arc::new(ManagerConfig {
+/// A manager on a fresh redb with the given `[metrics]`, listening on an ephemeral port when run.
+pub fn manager_with(metrics: Option<MetricsConfig>) -> (Arc<Manager>, TempDir) {
+    let dir = TempDir::new().expect("create tempdir");
+    let manager = Manager::new(config(&dir.path().join("test.db"), metrics))
+        .expect("manager_with: Manager::new failed");
+    (Arc::new(manager), dir)
+}
+
+/// A plain-HTTP config on an ephemeral port with its redb at `db`.
+pub fn config(db: &Path, metrics: Option<MetricsConfig>) -> Arc<ManagerConfig> {
+    Arc::new(ManagerConfig {
         debug: false,
         log: None,
+        metrics,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,
@@ -51,15 +65,10 @@ pub fn spawn_manager() -> (Router, TempDir) {
         files: ManagerFileConfig {
             status_file: String::new(),
             db_type: "redb".to_string(),
-            db_file: db_path.to_string_lossy().into_owned(),
+            db_file: db.to_string_lossy().into_owned(),
             ca_cert: String::new(),
         },
-    });
-
-    let manager = Manager::new(config).expect("spawn_manager: Manager::new failed");
-    let router = Arc::new(manager).make_router();
-
-    (router, dir)
+    })
 }
 
 /// Start a real TLS listener backed by a self-signed certificate generated
@@ -114,6 +123,7 @@ pub async fn spawn_manager_tls() -> (SocketAddr, JoinHandle<()>, Vec<u8>) {
     let config = Arc::new(ManagerConfig {
         debug: false,
         log: None,
+        metrics: None,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,

@@ -23,6 +23,7 @@ fn worker_with_single_mirror(mirror: MirrorConfig) -> WorkerConfig {
         mirrors: Some(vec![mirror]),
         include: None,
         log: None,
+        metrics: None,
     }
 }
 

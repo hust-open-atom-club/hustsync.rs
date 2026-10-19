@@ -3,6 +3,14 @@ name = "hustsync-worker"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["p8s", "influx"]
+metrics = ["hustsync-internal/metrics"]
+push = ["metrics", "hustsync-internal/push"]
+p8s = ["metrics", "hustsync-internal/p8s"]
+influx = ["push", "hustsync-internal/influx"]
+otlp = ["push", "hustsync-internal/otlp"]
+
 [dependencies]
 async-trait = "0.1.92"
 axum = "0.7"
@@ -12,7 +20,6 @@ flate2 = "1.1"
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 hustsync-internal = { version = "0.1.0", path = "../hustsync-internal" }
 nix = { version = "0.31.2", features = ["fs", "process", "signal", "user"] }
-prometheus = { version = "0.14", default-features = false }
 regex = "1.12.3"
 reqwest = { version = "0.13.2", features = ["json"] }
 serde = "1"

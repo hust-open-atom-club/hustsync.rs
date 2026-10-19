@@ -57,7 +57,7 @@ location = /status.json {
 
 ## 监控
 
-manager 与 worker 都提供 `/metrics`，Prometheus 文本格式。
+manager 与 worker 都提供 `/metrics` 与按组拆分的 `/metrics/<组>`，也可推给 Telegraf、InfluxDB 或 Alloy，指标、配置与收端见 [metrics.md](metrics.md)。
 
 ```yaml
 scrape_configs:
@@ -65,19 +65,6 @@ scrape_configs:
     static_configs:
       - targets: ["manager:14242", "worker:6000"]
 ```
-
-| 指标 | 来源 | 含义 |
-|:--:|:--:|:--:|
-| `hustsync_mirrors{status}` | manager | 各状态的镜像数，求和即镜像总数 |
-| `hustsync_syncs_total{mirror,worker,result}` | manager | 成功、失败的同步次数 |
-| `hustsync_mirror_sync_duration_seconds{mirror,worker}` | manager | 最近一次同步用时 |
-| `hustsync_mirror_last_success_timestamp_seconds{mirror,worker}` | manager | 最近一次成功的时间 |
-| `hustsync_workers` | manager | 已注册的 worker 数 |
-| `hustsync_workers_online` `hustsync_worker_up{worker}` | manager | 抓取时探测，2 秒内有响应即在线 |
-| `hustsync_worker_jobs` | worker | 镜像数 |
-| `hustsync_worker_jobs_running` | worker | 正在同步的镜像数 |
-| `hustsync_worker_jobs_queued` | worker | 等待下次同步的镜像数 |
-| `hustsync_worker_concurrency` | worker | 并发上限 |
 
 告警示例：
 

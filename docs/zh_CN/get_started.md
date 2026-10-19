@@ -81,6 +81,7 @@ hustsynctl workers -p 14242
 
 - 字段说明：[configs.md](configs.md)
 - 生产部署：[deploy.md](deploy.md)
+- 指标：[metrics.md](metrics.md)
 - 容器内同步：[docker.md](docker.md)
 - 资源隔离：[cgroup.md](cgroup.md)
 - fpsync 与 lsyncd：[tools.md](tools.md)

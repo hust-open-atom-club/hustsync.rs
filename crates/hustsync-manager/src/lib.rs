@@ -4,6 +4,7 @@ mod common;
 mod config;
 pub mod database;
 mod handlers;
+#[cfg(feature = "metrics")]
 mod metrics;
 mod middleware;
 mod server;
@@ -15,7 +16,8 @@ use crate::database::AdapterError;
 
 pub use common::init_tracing;
 pub use config::load_config;
-pub use metrics::Metrics;
+#[cfg(feature = "metrics")]
+pub use metrics::{Group, Metrics};
 pub use server::Manager;
 
 /// Unified error type for the manager service.
@@ -41,7 +43,7 @@ pub enum ManagerError {
     Tls(String),
 
     #[error("metrics error: {0}")]
-    Metrics(#[from] prometheus::Error),
+    Metrics(String),
 }
 
 impl IntoResponse for ManagerError {
