@@ -12,9 +12,11 @@ HustSync manages and runs mirror synchronization tasks through three main compon
 
 ## Project Status
 
-The Rust implementation currently covers the core manager, worker, and control CLI flows. Worker providers currently include `rsync`, `two-stage-rsync`, and `command`.
+The Rust implementation covers the manager, worker, and control CLI flows. Worker providers include `rsync`, `two-stage-rsync`, `command`, `fpsync`, `lsyncd`, and `ftpsync`, scheduled by interval or cron expression. Jobs can run inside Docker containers or per-job cgroups (v1 and v2) with memory limits, and both the manager and the worker expose Prometheus metrics at `/metrics`.
 
-Some Go-only worker features are not implemented yet, including Docker wrapping, cgroup enforcement, ZFS hooks, and btrfs snapshot hooks. Treat `tunasync` as the compatibility reference when porting or validating behavior.
+ZFS and btrfs snapshot hooks are not implemented yet. Treat `tunasync` as the compatibility reference when porting or validating behavior.
+
+Deployment guides in Chinese live in [`docs/zh_CN`](docs/zh_CN/get_started.md); a ready-to-run Docker Compose setup lives in [`deploy/compose`](deploy/compose).
 
 ## Architecture & Project Structure
 
