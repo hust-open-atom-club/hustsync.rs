@@ -115,6 +115,33 @@ async fn pre_exec_rotates_retaining_go_fencepost() {
 }
 
 #[tokio::test]
+async fn retention_is_configurable() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let mut ctx = make_ctx(&tmp, "arch");
+    std::fs::create_dir_all(&ctx.log_dir)?;
+    for secs in [10, 20, 30, 40, 50] {
+        touch_with_mtime(&ctx.log_dir.join(format!("arch_old_{secs}.log")), secs);
+    }
+
+    LogLimitHook::retaining(3).pre_exec(&mut ctx).await?;
+
+    let mut left: Vec<_> = std::fs::read_dir(&ctx.log_dir)?
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.starts_with("arch_"))
+        .collect();
+    let fresh = ctx.log_file.file_name().ok_or("no log file")?;
+    let mut want = vec![
+        "arch_old_10.log".to_owned(),
+        "arch_old_20.log".to_owned(),
+        fresh.to_string_lossy().into_owned(),
+    ];
+    left.sort();
+    want.sort();
+    assert_eq!(left, want);
+    Ok(())
+}
+
+#[tokio::test]
 async fn post_fail_renames_to_fail_and_updates_symlink() {
     let tmp = TempDir::new().unwrap();
     let mut ctx = make_ctx(&tmp, "m1");
