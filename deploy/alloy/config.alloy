@@ -1,0 +1,58 @@
+// Program logs arrive from serlog's loki sink; sync logs are tailed from each mirror's log_dir.
+
+loki.source.api "program" {
+	http {
+		listen_address = "0.0.0.0"
+		listen_port    = 3100
+	}
+	labels     = {source = "program"}
+	forward_to = [loki.write.loki.receiver]
+}
+
+local.file_match "sync" {
+	path_targets = [{"__path__" = "/var/log/hustsync/*/*_*.log", source = "sync"}]
+}
+
+loki.source.file "sync" {
+	targets    = local.file_match.sync.targets
+	forward_to = [loki.process.sync.receiver]
+}
+
+// The file name is <mirror>_<YYYY-MM-DD_HH_MM>.log; a failed run is renamed to .log.fail after it ends.
+loki.process "sync" {
+	stage.regex {
+		source     = "filename"
+		expression = `(?P<mirror>[^/]+)_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.log$`
+	}
+
+	stage.labels {
+		values = {mirror = ""}
+	}
+	forward_to = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
+
+otelcol.receiver.otlp "metrics" {
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		metrics = [otelcol.exporter.prometheus.p8s.input]
+	}
+}
+
+otelcol.exporter.prometheus "p8s" {
+	forward_to = [prometheus.remote_write.p8s.receiver]
+}
+
+prometheus.remote_write "p8s" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
+	}
+}

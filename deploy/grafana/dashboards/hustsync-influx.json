@@ -1,0 +1,1329 @@
+{
+  "title": "hustsync · InfluxDB",
+  "uid": "hustsync-influx",
+  "description": "Telegraf 采集、InfluxDB 存储时的 hustsync 看板",
+  "tags": [
+    "hustsync",
+    "tunasync",
+    "mirror",
+    "influxdb",
+    "telegraf"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "schemaVersion": 41,
+  "version": 1,
+  "links": [
+    {
+      "title": "总览",
+      "type": "link",
+      "url": "/d/hustsync",
+      "icon": "dashboard",
+      "keepTime": true
+    },
+    {
+      "title": "镜像",
+      "type": "link",
+      "url": "/d/hustsync-mirrors",
+      "icon": "dashboard",
+      "keepTime": true
+    },
+    {
+      "title": "运维",
+      "type": "link",
+      "url": "/d/hustsync-ops",
+      "icon": "dashboard",
+      "keepTime": true
+    },
+    {
+      "title": "hustsync",
+      "type": "link",
+      "url": "https://github.com/hust-open-atom-club/hustsync.rs",
+      "targetBlank": true,
+      "icon": "external link"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "influx",
+        "label": "数据源",
+        "type": "datasource",
+        "query": "influxdb",
+        "current": {
+          "text": "InfluxDB",
+          "value": "hustsync-influx"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "options": []
+      },
+      {
+        "name": "mirror",
+        "label": "镜像",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "${influx}"
+        },
+        "query": "SHOW TAG VALUES FROM \"prometheus\" WITH KEY = \"mirror\"",
+        "definition": "SHOW TAG VALUES FROM \"prometheus\" WITH KEY = \"mirror\"",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "id": 1,
+      "title": "总览",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "镜像",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT sum(\"v\") FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE $timeFilter GROUP BY time($__interval), \"status\" fill(previous)) GROUP BY time($__interval)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "成功",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT last(\"hustsync_mirrors\") FROM \"prometheus\" WHERE \"status\" =~ /^(success)$/ AND $timeFilter GROUP BY time($__interval), \"status\" fill(previous)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#73BF69"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "失败",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT last(\"hustsync_mirrors\") FROM \"prometheus\" WHERE \"status\" =~ /^(failed)$/ AND $timeFilter GROUP BY time($__interval), \"status\" fill(previous)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#F2495C",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "id": 5,
+      "title": "同步中",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT sum(\"v\") FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" =~ /^(syncing|pre-syncing)$/ AND $timeFilter GROUP BY time($__interval), \"status\" fill(previous)) GROUP BY time($__interval)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#8AB8FF"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "id": 6,
+      "title": "worker 在线",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT last(\"hustsync_workers_online\") FROM \"prometheus\" WHERE $timeFilter GROUP BY time($__interval) fill(previous)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#73BF69"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "id": 7,
+      "title": "总体积",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT sum(\"v\") FROM (SELECT last(\"hustsync_mirror_size_bytes\") AS \"v\" FROM \"prometheus\" WHERE $timeFilter  GROUP BY time($__interval), \"mirror\", \"worker\" fill(previous)) GROUP BY time($__interval)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B877D9"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      }
+    },
+    {
+      "type": "row",
+      "id": 10,
+      "title": "镜像",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 11,
+      "title": "镜像一览",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT last(\"hustsync_mirror_state\") AS \"状态\" FROM \"prometheus\" WHERE \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY \"mirror\"",
+          "rawQuery": true,
+          "resultFormat": "table",
+          "alias": ""
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "B",
+          "query": "SELECT last(\"hustsync_mirror_size_bytes\") AS \"体积\" FROM \"prometheus\" WHERE \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY \"mirror\"",
+          "rawQuery": true,
+          "resultFormat": "table",
+          "alias": ""
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "C",
+          "query": "SELECT last(\"hustsync_mirror_sync_duration_seconds\") AS \"上次耗时\" FROM \"prometheus\" WHERE \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY \"mirror\"",
+          "rawQuery": true,
+          "resultFormat": "table",
+          "alias": ""
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "D",
+          "query": "SELECT last(\"hustsync_mirror_last_success_timestamp_seconds\") * 1000 AS \"上次成功\" FROM \"prometheus\" WHERE \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY \"mirror\"",
+          "rawQuery": true,
+          "resultFormat": "table",
+          "alias": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "mirror",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true
+            },
+            "renameByName": {
+              "mirror": "镜像"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "状态"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "无",
+                        "color": "#8E8E8E",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "失败",
+                        "color": "#F2495C",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "成功",
+                        "color": "#73BF69",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "同步中",
+                        "color": "#56A64B",
+                        "index": 3
+                      },
+                      "4": {
+                        "text": "准备同步",
+                        "color": "#96D98D",
+                        "index": 4
+                      },
+                      "5": {
+                        "text": "暂停",
+                        "color": "#FADE2A",
+                        "index": 5
+                      },
+                      "6": {
+                        "text": "禁用",
+                        "color": "#3D3D3D",
+                        "index": 6
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 96
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "体积"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "decbytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#B877D9"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上次耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上次成功"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "displayName": "上次成功",
+            "desc": false
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      }
+    },
+    {
+      "type": "row",
+      "id": 12,
+      "title": "状态",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "panels": []
+    },
+    {
+      "type": "state-timeline",
+      "id": 9,
+      "title": "状态",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT last(\"hustsync_mirror_state\") FROM \"prometheus\" WHERE \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY time($__interval), \"mirror\" fill(previous)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "$tag_mirror"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "无",
+                  "color": "#3D3D3D",
+                  "index": 0
+                },
+                "1": {
+                  "text": "失败",
+                  "color": "#F2495C",
+                  "index": 1
+                },
+                "2": {
+                  "text": "空闲",
+                  "color": "#8E8E8E",
+                  "index": 2
+                },
+                "3": {
+                  "text": "同步中",
+                  "color": "#73BF69",
+                  "index": 3
+                },
+                "4": {
+                  "text": "准备同步",
+                  "color": "#96D98D",
+                  "index": 4
+                },
+                "5": {
+                  "text": "暂停",
+                  "color": "#FADE2A",
+                  "index": 5
+                },
+                "6": {
+                  "text": "禁用",
+                  "color": "#3D3D3D",
+                  "index": 6
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "rowHeight": 0.88,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "gridPos": {
+        "h": 22,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      }
+    },
+    {
+      "type": "row",
+      "id": 13,
+      "title": "同步",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "panels": []
+    },
+    {
+      "type": "piechart",
+      "id": 8,
+      "title": "状态分布",
+      "description": "当前各状态的镜像数",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'none' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "无"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "B",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'failed' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "失败"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "C",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'success' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "成功"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "D",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'syncing' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "同步中"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "E",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'pre-syncing' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "准备同步"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "F",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'paused' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "暂停"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "G",
+          "query": "SELECT \"v\" FROM (SELECT last(\"hustsync_mirrors\") AS \"v\" FROM \"prometheus\" WHERE \"status\" = 'disabled' AND $timeFilter) WHERE \"v\" > 0",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "禁用"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "无"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8E8E8E"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F2495C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#73BF69"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "同步中"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#56A64B"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "准备同步"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#96D98D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "暂停"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FADE2A"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "禁用"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3D3D3D"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [],
+        "sort": "desc",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ],
+          "showLegend": true
+        },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 44
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 14,
+      "title": "同步次数",
+      "description": "每根柱是一个时段内结束的同步，含重试",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "interval": "10m",
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT sum(\"d\") FROM (SELECT non_negative_difference(last(\"hustsync_syncs_total\")) AS \"d\" FROM \"prometheus\" WHERE \"result\" = 'success' AND \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY time($__interval), \"mirror\", \"worker\") GROUP BY time($__interval)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "成功"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "B",
+          "query": "SELECT sum(\"d\") FROM (SELECT non_negative_difference(last(\"hustsync_syncs_total\")) AS \"d\" FROM \"prometheus\" WHERE \"result\" = 'failed' AND \"mirror\" =~ /^${mirror:regex}$/ AND $timeFilter GROUP BY time($__interval), \"mirror\", \"worker\") GROUP BY time($__interval)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "失败"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "gradientMode": "opacity",
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisSoftMin": 0,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#73BF69"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F2495C"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 8,
+        "y": 44
+      }
+    },
+    {
+      "type": "row",
+      "id": 16,
+      "title": "体积与 worker",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "panels": []
+    },
+    {
+      "type": "bargauge",
+      "id": 15,
+      "title": "最大的 10 个镜像",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT top(\"v\", \"mirror\", 10) FROM (SELECT last(\"hustsync_mirror_size_bytes\") AS \"v\" FROM \"prometheus\" WHERE $timeFilter GROUP BY \"mirror\")",
+          "rawQuery": true,
+          "resultFormat": "table",
+          "alias": ""
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "mirror",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "top",
+                "handlerKey": "field.value"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B877D9"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 16,
+        "maxVizHeight": 16,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 17,
+      "title": "并发",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "${influx}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "A",
+          "query": "SELECT last(\"hustsync_worker_jobs_running\") FROM \"prometheus\" WHERE $timeFilter GROUP BY time($__interval), \"url\" fill(previous)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "$tag_url 运行中"
+        },
+        {
+          "datasource": {
+            "type": "influxdb",
+            "uid": "${influx}"
+          },
+          "refId": "B",
+          "query": "SELECT last(\"hustsync_worker_jobs_queued\") FROM \"prometheus\" WHERE $timeFilter GROUP BY time($__interval), \"url\" fill(previous)",
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "alias": "$tag_url 排队"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisSoftMin": 0,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "https?://([^:/]+)\\S* (.*)",
+            "renamePattern": "$1 $2"
+          }
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 55
+      }
+    }
+  ]
+}

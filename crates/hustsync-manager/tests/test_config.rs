@@ -3,7 +3,6 @@
 
 use hustsync_config_parser::ManagerConfig;
 use hustsync_manager::load_config;
-use std::fs;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -52,7 +51,8 @@ fn toml_loading_should_work() {
     tmp.flush().expect("flush tempfile");
 
     #[cfg(unix)]
-    fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o644)).expect("set perms");
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o644))
+        .expect("set perms");
 
     // let tempfile_path = tmp.path().to_path_buf();
 }
