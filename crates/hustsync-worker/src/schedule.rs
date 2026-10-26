@@ -61,6 +61,15 @@ impl ScheduleQueue {
         }
     }
 
+    /// Number of scheduled jobs.
+    pub fn len(&self) -> usize {
+        self.jobs_time.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.jobs_time.is_empty()
+    }
+
     pub fn get_jobs(&self) -> Vec<JobScheduleInfo> {
         let mut jobs = Vec::new();
         // Heap iteration doesn't guarantee order, but we just need the info
