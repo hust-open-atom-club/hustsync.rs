@@ -1,0 +1,104 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - name: Clippy, default features
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy, no metrics
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+      - name: Clippy, every feature
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, ubuntu-26.04-arm, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tools the provider tests drive
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rsync lsyncd fpart ftpsync
+          docker pull -q alpine:3.23
+      - name: MSYS2 rsync
+        if: runner.os == 'Windows'
+        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed rsync
+      - run: cargo test --workspace --all-features
+      - run: cargo test --workspace --no-default-features
+
+  cgroup:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: cgroup v2, as root
+        run: |
+          bin=$(cargo test -p hustsync-worker --test cgroup_root --no-run --message-format=json |
+            jq -r 'select(.executable != null and (.target.name == "cgroup_root")) | .executable')
+          sudo "$bin" --ignored --test-threads=1
+      - name: KVM for the v1 guest
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: cgroup v1, in a qemu guest
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 busybox-static cpio musl-tools
+          scripts/cgroup-v1-qemu.sh
+
+  snapshot:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: A Btrfs loop mount and a ZFS pool on a file
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq btrfs-progs zfsutils-linux
+          truncate -s 512M "$RUNNER_TEMP/btrfs.img"
+          mkfs.btrfs -q "$RUNNER_TEMP/btrfs.img"
+          sudo mkdir -p /mnt/btrfs
+          sudo mount -o loop "$RUNNER_TEMP/btrfs.img" /mnt/btrfs
+          truncate -s 256M "$RUNNER_TEMP/zfs.img"
+          sudo zpool create hstest "$RUNNER_TEMP/zfs.img"
+          sudo zfs create -o mountpoint=/mnt/zfs hstest/debian
+      - name: Snapshot hooks, as root
+        env:
+          HUSTSYNC_BTRFS: /mnt/btrfs
+          HUSTSYNC_ZFS: /mnt/zfs
+        run: |
+          bin=$(cargo test -p hustsync-worker --test snapshot_root --no-run --message-format=json |
+            jq -r 'select(.executable != null and .target.name == "snapshot_root") | .executable')
+          sudo -E "$bin" --ignored --test-threads=1

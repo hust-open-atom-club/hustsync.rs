@@ -28,7 +28,7 @@ mod contract_cmd {
     use hustsync_worker::schedule::ScheduleQueue;
     use hustsync_worker::server::{AppState, make_http_server};
     use serde_json::Value;
-    use tokio::sync::{Mutex, RwLock, mpsc};
+    use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
     use tokio::time::{Duration, timeout};
     use tower::ServiceExt as _;
 
@@ -46,6 +46,7 @@ mod contract_cmd {
             state: Arc::new(AtomicU32::new(hustsync_worker::job::STATE_NONE)),
             disabled: Arc::new(tokio::sync::Notify::new()),
             interval: tokio::time::Duration::from_secs(3600),
+            cron: None,
         };
         (job, rx)
     }
@@ -55,7 +56,10 @@ mod contract_cmd {
         Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: None,
+            metrics: Default::default(),
         })
     }
 
@@ -73,7 +77,10 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(jobs)),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: None,
+            metrics: Default::default(),
         });
         (state, rx)
     }
@@ -360,7 +367,10 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: Some(reload_tx),
+            metrics: Default::default(),
         });
 
         let (status, body) = post_cmd(state, worker_cmd("", CmdVerb::Reload)).await;
@@ -381,7 +391,10 @@ mod contract_cmd {
         let state = Arc::new(AppState {
             jobs: Arc::new(RwLock::new(HashMap::new())),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
+            semaphore: Arc::new(Semaphore::new(1)),
+            concurrent: 1,
             reload_tx: Some(reload_tx),
+            metrics: Default::default(),
         });
 
         let (status1, body1) = post_cmd(Arc::clone(&state), worker_cmd("", CmdVerb::Reload)).await;

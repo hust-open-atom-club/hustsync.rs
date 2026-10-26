@@ -1,0 +1,88 @@
+rule_files: [rules.yml]
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="hustsync-mirrors", instance="manager:14242"}'
+        values: "1 1 0x10"
+    alert_rule_test:
+      - { eval_time: 4m, alertname: HustsyncManagerDown, exp_alerts: [] }
+      - eval_time: 8m
+        alertname: HustsyncManagerDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: hustsync-mirrors, instance: "manager:14242" }
+            exp_annotations: { summary: "manager manager:14242 抓取失败" }
+
+  - interval: 1m
+    input_series:
+      - series: 'hustsync_worker_up{worker="w1"}'
+        values: "1 0x15"
+      - series: 'hustsync_worker_up{worker="w2"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HustsyncWorkerDown
+        exp_alerts:
+          - exp_labels: { severity: critical, worker: w1 }
+            exp_annotations: { summary: "worker w1 不响应" }
+
+  - interval: 1m
+    input_series:
+      - series: 'hustsync_mirror_failures{mirror="debian", worker="w1"}'
+        values: "0 1 2 3 0"
+    alert_rule_test:
+      - { eval_time: 2m, alertname: HustsyncMirrorFailing, exp_alerts: [] }
+      - eval_time: 3m
+        alertname: HustsyncMirrorFailing
+        exp_alerts:
+          - exp_labels: { severity: warning, mirror: debian, worker: w1 }
+            exp_annotations: { summary: "debian 连续失败 3 次" }
+      - { eval_time: 4m, alertname: HustsyncMirrorFailing, exp_alerts: [] }
+
+  - interval: 1m
+    input_series:
+      - series: 'hustsync_mirror_last_success_timestamp_seconds{mirror="old", worker="w1"}'
+        values: "-200000x40"
+      - series: 'hustsync_mirror_state{mirror="old", worker="w1"}'
+        values: "2x40"
+      - series: 'hustsync_mirror_last_success_timestamp_seconds{mirror="held", worker="w1"}'
+        values: "-200000x40"
+      - series: 'hustsync_mirror_state{mirror="held", worker="w1"}'
+        values: "5x40"
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: HustsyncMirrorStale
+        exp_alerts:
+          - exp_labels: { severity: warning, mirror: old, worker: w1 }
+            exp_annotations: { summary: "old 已 2d 8h 4m 20s 未同步成功" }
+
+  - interval: 1m
+    input_series:
+      - series: 'hustsync_mirror_next_sync_timestamp_seconds{mirror="late", worker="w1"}'
+        values: "0x100"
+      - series: 'hustsync_mirror_state{mirror="late", worker="w1"}'
+        values: "2x100"
+      - series: 'hustsync_mirror_next_sync_timestamp_seconds{mirror="busy", worker="w1"}'
+        values: "0x100"
+      - series: 'hustsync_mirror_state{mirror="busy", worker="w1"}'
+        values: "3x100"
+    alert_rule_test:
+      - { eval_time: 70m, alertname: HustsyncMirrorOverdue, exp_alerts: [] }
+      - eval_time: 77m
+        alertname: HustsyncMirrorOverdue
+        exp_alerts:
+          - exp_labels: { severity: warning, mirror: late, worker: w1 }
+            exp_annotations: { summary: "late 过了排期 1h 17m 0s 仍未开始" }
+
+  - interval: 1m
+    input_series:
+      - series: 'hustsync_mirror_state{mirror="slow", worker="w1"}'
+        values: "3x1500"
+    alert_rule_test:
+      - { eval_time: 23h, alertname: HustsyncMirrorStuck, exp_alerts: [] }
+      - eval_time: 24h10m
+        alertname: HustsyncMirrorStuck
+        exp_alerts:
+          - exp_labels: { severity: warning, mirror: slow, worker: w1 }
+            exp_annotations: { summary: "slow 同步已超过一天" }
