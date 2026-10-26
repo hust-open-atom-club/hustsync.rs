@@ -11,9 +11,11 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
+pub mod cgroup;
 pub mod error;
 pub mod hooks;
 pub mod job;
+pub mod metrics;
 pub mod provider;
 pub mod schedule;
 pub mod server;
@@ -185,6 +187,8 @@ pub struct Worker {
     pub manager_tx: mpsc::Sender<JobMessage>,
     pub manager_rx: Mutex<Option<mpsc::Receiver<JobMessage>>>,
     pub semaphore: Arc<Semaphore>,
+    concurrent: usize,
+    cgroups: Option<Arc<cgroup::Cgroups>>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
 
@@ -192,7 +196,8 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(mut cfg: WorkerConfig) -> Self {
+    /// Builds the worker; fails when `[cgroup]` is enabled but unusable.
+    pub fn new(mut cfg: WorkerConfig) -> std::io::Result<Self> {
         // Ignore SIGPIPE process-wide: a broken pipe from an rsync (or other)
         // child must not terminate the worker. Providers already observe
         // child exit status and surface errors through ProviderError.
@@ -214,6 +219,14 @@ impl Worker {
 
         let cfg = Arc::new(cfg);
 
+        let cgroups = cfg
+            .cgroup
+            .as_ref()
+            .filter(|c| c.enable == Some(true))
+            .map(cgroup::Cgroups::init)
+            .transpose()?
+            .map(Arc::new);
+
         let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
@@ -228,7 +241,8 @@ impl Worker {
         if let Some(mirrors) = &cfg.mirrors {
             for m_cfg in mirrors {
                 if let Some(name) = &m_cfg.name {
-                    let provider = match Self::create_provider(name, m_cfg, &cfg) {
+                    let provider = match Self::create_provider(name, m_cfg, &cfg, cgroups.as_ref())
+                    {
                         Ok(p) => p,
                         Err(e) => {
                             tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -237,13 +251,14 @@ impl Worker {
                     };
 
                     let hooks = Self::build_hooks(m_cfg, &cfg);
-                    let (job, actor) = job::JobActor::new(
+                    let (mut job, actor) = job::JobActor::new(
                         name.clone(),
                         manager_tx.clone(),
                         Arc::clone(&semaphore),
                         provider,
                         hooks,
                     );
+                    job.cron = m_cfg.cron.clone();
                     jobs_map.insert(name.clone(), job);
                     mirror_configs.insert(name.clone(), m_cfg.clone());
                     handles.spawn(actor.run());
@@ -259,6 +274,8 @@ impl Worker {
             manager_tx,
             manager_rx: Mutex::new(Some(manager_rx)),
             semaphore,
+            concurrent,
+            cgroups,
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
             http_client: None,
@@ -274,7 +291,7 @@ impl Worker {
             Err(e) => tracing::error!("Error initializing HTTP client: {}", e),
         }
 
-        worker
+        Ok(worker)
     }
 
     async fn fetch_job_status(&self) -> Vec<hustsync_internal::msg::MirrorStatus> {
@@ -307,8 +324,9 @@ impl Worker {
         name: &str,
         m_cfg: &hustsync_config_parser::MirrorConfig,
         g_cfg: &WorkerConfig,
+        cg: Option<&Arc<cgroup::Cgroups>>,
     ) -> Result<Box<dyn MirrorProvider>, provider::ProviderError> {
-        provider::build_provider(name, m_cfg, g_cfg)
+        provider::build_provider(name, m_cfg, g_cfg, cg)
     }
 
     /// Assemble the hook chain for one mirror. Order matters — `pre_*`
@@ -323,7 +341,15 @@ impl Worker {
         // 2. Built-in: rotate and stamp the log file before the provider
         //    runs, so the new path is what the exec hook env and the
         //    provider itself see.
-        chain.push(Arc::new(hooks::LogLimitHook::new()));
+        let keep = m_cfg
+            .log_retention
+            .or_else(|| g_cfg.global.as_ref()?.log_retention)
+            .unwrap_or(hooks::loglimit::RETENTION);
+        let gzip = m_cfg
+            .log_gzip
+            .or_else(|| g_cfg.global.as_ref()?.log_gzip)
+            .unwrap_or_default();
+        chain.push(Arc::new(hooks::LogLimitHook::retaining(keep).gzip(gzip)));
         // 3. User-configured exec_on_{success,failure}. `exec_on_status_extra`
         //    (mirror-level additions to global defaults) is appended after
         //    the base list, matching Go's "append extra to the end".
@@ -420,7 +446,7 @@ impl Worker {
                     }
                     _ => {
                         job.set_state(crate::job::STATE_NONE);
-                        let next = s.last_update + job.interval;
+                        let next = job.next_run(s.last_update);
                         queue.add_job(next, job.clone());
                     }
                 }
@@ -531,6 +557,8 @@ impl Worker {
         let app_state = Arc::new(server::AppState {
             jobs: Arc::clone(&self.jobs),
             schedule_queue: Arc::clone(&self.schedule_queue),
+            semaphore: Arc::clone(&self.semaphore),
+            concurrent: self.concurrent,
             reload_tx,
         });
         let app = server::make_http_server(app_state);
@@ -597,23 +625,18 @@ impl Worker {
                     continue;
                 };
 
-                // Skip Failed reports for paused/disabled jobs (mirrors Go behaviour).
-                {
-                    let jobs = jobs_handle.read().await;
-                    if let Some(job) = jobs.get(&msg.name) {
-                        let state = job.state();
-                        if msg.status == hustsync_internal::status::SyncStatus::Failed
-                            && (state == crate::job::STATE_PAUSED
-                                || state == crate::job::STATE_DISABLED)
-                        {
-                            tracing::info!(
-                                "Job {} state is {}, skip reporting Failed status",
-                                msg.name,
-                                state
-                            );
-                            continue;
-                        }
-                    }
+                let state = jobs_handle
+                    .read()
+                    .await
+                    .get(&msg.name)
+                    .map(MirrorJob::state);
+                if matches!(state, Some(job::STATE_PAUSED | job::STATE_DISABLED)) {
+                    tracing::info!(
+                        "Job {} is stopped, skip reporting {:?}",
+                        msg.name,
+                        msg.status
+                    );
+                    continue;
                 }
 
                 let smsg = hustsync_internal::msg::MirrorStatus {
@@ -658,7 +681,7 @@ impl Worker {
                 if msg.schedule {
                     let jobs = jobs_handle.read().await;
                     if let Some(job) = jobs.get(&msg.name) {
-                        let next = Utc::now() + job.interval;
+                        let next = job.next_run(Utc::now());
                         schedule_queue.lock().await.add_job(next, job.clone());
                     }
                 }
@@ -769,7 +792,7 @@ impl Worker {
         m_cfg: &hustsync_config_parser::MirrorConfig,
         initial_state: u32,
     ) -> bool {
-        let provider = match Self::create_provider(name, m_cfg, &self.cfg) {
+        let provider = match Self::create_provider(name, m_cfg, &self.cfg, self.cgroups.as_ref()) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -778,13 +801,14 @@ impl Worker {
         };
 
         let hooks = Self::build_hooks(m_cfg, &self.cfg);
-        let (job, actor) = job::JobActor::new(
+        let (mut job, actor) = job::JobActor::new(
             name.to_owned(),
             self.manager_tx.clone(),
             Arc::clone(&self.semaphore),
             provider,
             hooks,
         );
+        job.cron = m_cfg.cron.clone();
 
         if initial_state == crate::job::STATE_DISABLED {
             job.set_state(crate::job::STATE_DISABLED);
@@ -1006,6 +1030,7 @@ mod tests {
             state: Arc::new(AtomicU32::new(STATE_NONE)),
             disabled: Arc::new(tokio::sync::Notify::new()),
             interval: tokio::time::Duration::from_secs(60),
+            cron: None,
         };
         (job, rx)
     }
@@ -1114,7 +1139,7 @@ mod tests {
     #[tokio::test]
     async fn reload_unchanged_mirror_keeps_existing_job() {
         let mirror = command_mirror("archlinux", "true");
-        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()]));
+        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()])).unwrap();
         let before_state = {
             let jobs = worker.jobs.read().await;
             Arc::clone(&jobs.get("archlinux").unwrap().state)
@@ -1134,7 +1159,7 @@ mod tests {
     #[tokio::test]
     async fn reload_changed_mirror_rebuilds_existing_job() {
         let mirror = command_mirror("archlinux", "true");
-        let worker = Worker::new(worker_with_mirrors(vec![mirror]));
+        let worker = Worker::new(worker_with_mirrors(vec![mirror])).unwrap();
         let before_state = {
             let jobs = worker.jobs.read().await;
             Arc::clone(&jobs.get("archlinux").unwrap().state)
@@ -1157,7 +1182,7 @@ mod tests {
     async fn register_worker_broadcasts_to_all_manager_bases() {
         let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
         let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
-        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b])).unwrap();
 
         worker.register_worker().await;
 
@@ -1172,7 +1197,7 @@ mod tests {
     async fn relay_broadcasts_status_and_schedule_to_all_manager_bases() {
         let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
         let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
-        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b])).unwrap();
 
         let (job, _rx) = make_mirror_job("archlinux");
         worker
