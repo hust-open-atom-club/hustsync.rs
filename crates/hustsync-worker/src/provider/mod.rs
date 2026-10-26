@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, atomic::AtomicU32};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -11,9 +11,13 @@ use tokio_util::sync::CancellationToken;
 use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
+#[cfg(unix)]
+use std::sync::atomic::Ordering;
 
 use hustsync_config_parser::{MirrorConfig, WorkerConfig};
 use hustsync_internal::util::{expand_tilde, format_path};
+
+use crate::cgroup::Cgroups;
 
 use self::cmd_provider::{CmdProvider, CmdProviderConfig};
 use self::rsync_provider::{RsyncProvider, RsyncProviderConfig};
@@ -21,7 +25,10 @@ use self::two_stage_rsync_provider::{TwoStageRsyncProvider, TwoStageRsyncProvide
 
 pub mod cmd_provider;
 pub mod rsync_provider;
+pub mod runner;
 pub mod two_stage_rsync_provider;
+
+pub use runner::{Docker, Job, Runner};
 
 /// Base rsync arguments shared by both the standard rsync provider (full
 /// sync) and the two-stage provider's stage-2 pass.
@@ -77,6 +84,29 @@ pub struct CommonProviderConfig {
     /// Rsync-specific codes are only included for rsync/two-stage-rsync
     /// providers.
     pub success_exit_codes: Vec<i32>,
+    pub runner: Runner,
+}
+
+impl CommonProviderConfig {
+    /// Describes one run writing to `log_file` with `env`.
+    pub(crate) fn job<'a>(
+        &'a self,
+        log_file: &'a str,
+        env: &'a BTreeMap<String, String>,
+    ) -> Job<'a> {
+        Job {
+            name: &self.name,
+            dir: &self.working_dir,
+            log_dir: &self.log_dir,
+            log_file,
+            env,
+        }
+    }
+
+    /// Stops the running job.
+    pub(crate) async fn stop(&self, pgid: &AtomicU32) {
+        self.runner.stop(&self.name, pgid).await;
+    }
 }
 
 /// Read the last `max_lines` non-empty lines from a log file.
@@ -148,7 +178,7 @@ fn sync_env_keys(suffix: &str) -> (String, String) {
     (format!("HUSTSYNC_{suffix}"), format!("TUNASYNC_{suffix}"))
 }
 
-fn set_sync_env_pair(env: &mut HashMap<String, String>, suffix: &str, value: String) {
+fn set_sync_env_pair(env: &mut BTreeMap<String, String>, suffix: &str, value: String) {
     let (canonical, legacy) = sync_env_keys(suffix);
     env.insert(canonical, value.clone());
     env.insert(legacy, value);
@@ -165,7 +195,7 @@ fn known_sync_suffix<'a>(key: &str, suffixes: &'a [&str]) -> Option<&'a str> {
 }
 
 fn apply_env_layer(
-    env: &mut HashMap<String, String>,
+    env: &mut BTreeMap<String, String>,
     layer: &HashMap<String, String>,
     suffixes: &[&str],
 ) {
@@ -192,37 +222,40 @@ fn apply_env_layer(
     }
 }
 
-/// Inject the standard HUSTSYNC_* environment variables into `cmd`, plus
-/// TUNASYNC_* legacy aliases with the same values.
-///
-/// Called after any provider-specific credentials (USER, RSYNC_PASSWORD) have
-/// already been set, so those are not overwritten here. Hook-injected variables
-/// from `ctx_env` are layered on top so they win over the config defaults.
-/// Within a HUSTSYNC_/TUNASYNC_ pair, HUSTSYNC_* is canonical and wins when
-/// both prefixes are present with different values.
-pub(crate) fn inject_provider_env(
-    cmd: &mut tokio::process::Command,
+/// Environment of a sync process: `HUSTSYNC_*` with `TUNASYNC_*` aliases, then config and hook layers.
+pub(crate) fn provider_env(
     common: &CommonProviderConfig,
-    effective_log_file: &str,
+    log_file: &str,
     ctx_env: &HashMap<String, String>,
-) {
-    let mut env = HashMap::new();
+) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
     for (suffix, value) in [
-        ("MIRROR_NAME", common.name.clone()),
-        ("WORKING_DIR", common.working_dir.clone()),
-        ("UPSTREAM_URL", common.upstream_url.clone()),
-        ("LOG_DIR", common.log_dir.clone()),
-        ("LOG_FILE", effective_log_file.to_string()),
+        ("MIRROR_NAME", common.name.as_str()),
+        ("WORKING_DIR", &common.working_dir),
+        ("UPSTREAM_URL", &common.upstream_url),
+        ("LOG_DIR", &common.log_dir),
+        ("LOG_FILE", log_file),
     ] {
-        set_sync_env_pair(&mut env, suffix, value);
+        set_sync_env_pair(&mut env, suffix, value.to_owned());
     }
-
     apply_env_layer(&mut env, &common.env, PROVIDER_ENV_SUFFIXES);
     apply_env_layer(&mut env, ctx_env, PROVIDER_ENV_SUFFIXES);
+    env
+}
 
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
+/// Provider environment on top of rsync's `USER` and `RSYNC_PASSWORD`.
+pub(crate) fn rsync_env(
+    common: &CommonProviderConfig,
+    user: Option<&String>,
+    password: Option<&String>,
+    log_file: &str,
+    ctx_env: &HashMap<String, String>,
+) -> BTreeMap<String, String> {
+    [("USER", user), ("RSYNC_PASSWORD", password)]
+        .into_iter()
+        .filter_map(|(k, v)| Some((k.to_owned(), v?.clone())))
+        .chain(provider_env(common, log_file, ctx_env))
+        .collect()
 }
 
 /// Resolve the effective log file path for a sync run.
@@ -320,61 +353,38 @@ macro_rules! impl_provider_getters {
 
 pub(crate) use impl_provider_getters;
 
-/// Await a spawned child process, honoring both timeout and cancellation.
-///
-/// Returns `Ok(ExitStatus)` on normal exit, or `Err(ProviderError)` for
-/// cancellation, timeout, or I/O error. On cancel/timeout the process group
-/// is terminated via `terminate_pgid` and the child is waited to avoid
-/// zombies.
-///
-/// Pass `Duration::ZERO` for `timeout_dur` to disable timeout (cancellation
-/// still applies). Providers that manage timeout at an outer layer (e.g.
-/// two-stage wrapping both stages in one budget) should pass `ZERO` here.
-#[allow(clippy::cognitive_complexity)]
+/// Waits for `child`, stopping it on cancel or timeout; `Duration::ZERO` disables the timeout.
 pub(crate) async fn run_child_with_cancellation(
     child: &mut tokio::process::Child,
-    timeout_dur: Duration,
+    timeout: Duration,
     cancel: &CancellationToken,
     pgid: &AtomicU32,
-    name: &str,
+    common: &CommonProviderConfig,
 ) -> Result<std::process::ExitStatus, ProviderError> {
-    if timeout_dur == Duration::ZERO {
-        tokio::select! {
-            wait_res = child.wait() => {
-                wait_res.map_err(ProviderError::Io)
-            }
-            _ = cancel.cancelled() => {
-                tracing::warn!("Provider {} cancelled", name);
-                terminate_pgid(pgid, name).await;
-                let _ = child.wait().await;
-                Err(ProviderError::Terminated)
-            }
+    let limit = async {
+        if timeout.is_zero() {
+            std::future::pending().await
+        } else {
+            tokio::time::sleep(timeout).await;
         }
-    } else {
-        match tokio::time::timeout(timeout_dur, async {
-            tokio::select! {
-                wait_res = child.wait() => wait_res.map(Some),
-                _ = cancel.cancelled() => Ok(None),
-            }
-        })
-        .await
-        {
-            Ok(Ok(Some(status))) => Ok(status),
-            Ok(Ok(None)) => {
-                tracing::warn!("Provider {} cancelled", name);
-                terminate_pgid(pgid, name).await;
-                let _ = child.wait().await;
-                Err(ProviderError::Terminated)
-            }
-            Ok(Err(e)) => Err(ProviderError::Io(e)),
-            Err(_elapsed) => {
-                tracing::warn!("Timeout occurred for {}", name);
-                terminate_pgid(pgid, name).await;
-                let _ = child.wait().await;
-                Err(ProviderError::Timeout(timeout_dur))
-            }
+    };
+    let err = tokio::select! {
+        res = child.wait() => {
+            let oom = common.runner.finish(&common.name).await;
+            return match res {
+                Ok(st) if oom && !st.success() => Err(ProviderError::OutOfMemory),
+                res => res.map_err(ProviderError::Io),
+            };
         }
-    }
+        () = cancel.cancelled() => ProviderError::Terminated,
+        () = limit => ProviderError::Timeout(timeout),
+    };
+    tracing::warn!("{}: {err}", common.name);
+    common.stop(pgid).await;
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    common.runner.finish(&common.name).await;
+    Err(err)
 }
 
 /// Execution context passed into every `run()` call.
@@ -413,6 +423,8 @@ pub enum ProviderError {
     AlreadyRunning,
     #[error("terminated by operator")]
     Terminated,
+    #[error("killed by the OOM killer, memory_limit exceeded")]
+    OutOfMemory,
     #[error("config: {0}")]
     Config(String),
 }
@@ -481,6 +493,7 @@ pub fn build_provider(
     name: &str,
     m_cfg: &MirrorConfig,
     g_cfg: &WorkerConfig,
+    cg: Option<&Arc<Cgroups>>,
 ) -> Result<Box<dyn MirrorProvider>, ProviderError> {
     let global = g_cfg.global.as_ref();
 
@@ -503,7 +516,7 @@ pub fn build_provider(
         .as_ref()
         .and_then(|r| r.timeout)
         .or_else(|| global.and_then(|g| g.retry.as_ref().and_then(|r| r.timeout)))
-        .unwrap_or(3600);
+        .unwrap_or(0);
 
     let log_dir_base = m_cfg
         .log_dir
@@ -573,6 +586,8 @@ pub fn build_provider(
         codes
     };
 
+    let runner = Runner::new(g_cfg.docker.as_ref(), cg, m_cfg);
+
     let common = CommonProviderConfig {
         name: name.to_string(),
         upstream_url: m_cfg.upstream.clone().unwrap_or_default(),
@@ -585,6 +600,7 @@ pub fn build_provider(
         env: m_cfg.env.clone().unwrap_or_default(),
         is_master,
         success_exit_codes,
+        runner,
     };
 
     match p_type {
