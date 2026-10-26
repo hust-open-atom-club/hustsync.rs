@@ -9,9 +9,9 @@ use tokio::sync::Mutex;
 use hustsync_internal::util::translate_rsync_exit_status;
 
 use super::{
-    BASE_RSYNC_ARGS, CommonProviderConfig, MirrorProvider, ProviderError, ProviderType,
-    RunContext, impl_provider_getters, inject_provider_env, log_provider_failure,
-    resolve_log_file, run_child_with_cancellation, store_rsync_data_size,
+    BASE_RSYNC_ARGS, CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
+    impl_provider_getters, inject_provider_env, log_provider_failure, resolve_log_file,
+    run_child_with_cancellation, store_rsync_data_size,
 };
 
 pub struct RsyncProviderConfig {
@@ -236,10 +236,7 @@ impl MirrorProvider for RsyncProvider {
         #[cfg(unix)]
         {
             if self.running_pgid.load(Ordering::Acquire) != 0 {
-                tracing::warn!(
-                    "Terminating rsync provider for {}",
-                    self.config.common.name
-                );
+                tracing::warn!("Terminating rsync provider for {}", self.config.common.name);
             }
             super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
         }
