@@ -14,6 +14,7 @@ use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use crate::ManagerError;
 use crate::database::{DbAdapterTrait, make_db_adapter};
 use crate::handlers;
+use crate::metrics;
 
 pub(crate) const ERROR_KEY: &str = "error";
 pub(crate) const INFO_KEY: &str = "message";
@@ -75,6 +76,7 @@ impl Manager {
 
         let mut router = Router::new()
             .route("/ping", get(handlers::ping_handler))
+            .route("/metrics", get(metrics::metrics_handler))
             .route("/jobs", get(handlers::list_all_jobs))
             .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
             .route("/workers", get(handlers::list_all_workers))
