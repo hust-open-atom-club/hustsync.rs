@@ -1,0 +1,33 @@
+[global]
+name = "worker"
+log_dir = "/var/log/hustsync/{{.Name}}"
+mirror_dir = "/srv/mirror"
+concurrent = 4
+interval = 1
+retry = 1
+
+[manager]
+api_base = "http://manager:14242"
+
+[server]
+hostname = "worker"
+listen_addr = "0.0.0.0"
+listen_port = 6000
+
+[[mirrors]]
+name = "demo-ok"
+provider = "command"
+upstream = "https://example.org/ok/"
+command = "true"
+
+[[mirrors]]
+name = "demo-failed"
+provider = "command"
+upstream = "https://example.org/failed/"
+command = "false"
+
+[[mirrors]]
+name = "demo-slow"
+provider = "command"
+upstream = "https://example.org/slow/"
+command = "sleep 600"
