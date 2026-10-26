@@ -107,7 +107,7 @@ use_ipv4 = true
         assert_eq!(mirror.use_ipv4, Some(true));
     }
 
-    /// track-B hooks (cgroup/docker/zfs/btrfs) must
+    /// track-B hooks (zfs/btrfs) must
     /// error at parse time, never silently accepted. `deny_unknown_fields`
     /// on `MirrorConfig` is what enforces this; the test pins the
     /// rejection so a future struct change that relaxes the guard
@@ -122,7 +122,7 @@ use_ipv4 = true
 name = "m1"
 provider = "rsync"
 upstream = "rsync://example.test/m1/"
-docker_image = "ghcr.io/example/rsync:latest"
+not_a_field = "/srv/snapshots"
 "#
         )
         .unwrap();
@@ -204,7 +204,7 @@ dangerous_global_rsync_success_exit_codes = [0, 1, 23]
             r#"
 [[mirrors]]
 name = "archlinux"
-docker_image = "ghcr.io/example/rsync:latest"
+not_a_field = "/srv/snapshots"
 "#
         )
         .unwrap();
@@ -231,7 +231,7 @@ docker_image = "ghcr.io/example/rsync:latest"
             r#"
 [[mirrors]]
 name = "archlinux"
-docker_image = "ghcr.io/example/rsync:latest"
+not_a_field = "/srv/snapshots"
 "#
         )
         .unwrap();

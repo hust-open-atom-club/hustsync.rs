@@ -14,6 +14,7 @@
 //! 5. cancel mid-stage-1 via `ctx.cancel` → `ProviderError::Terminated`
 //! 6. unknown `stage1_profile` → rejected at `new()`
 
+#![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::HashMap;
@@ -56,6 +57,7 @@ fn make_config(
             env,
             is_master: true,
             success_exit_codes: vec![],
+            runner: Default::default(),
         },
         command: fake_rsync_path(),
         stage1_profile: "debian".to_string(),
