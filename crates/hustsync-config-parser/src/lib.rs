@@ -9,6 +9,8 @@ use std::{
 use thiserror::Error;
 use tracing::warn;
 
+pub use croner::Cron;
+
 /// Typed error returned by every public entry-point in this crate.
 ///
 /// Variants carry enough context for callers to produce actionable
@@ -273,6 +275,7 @@ pub struct MirrorConfig {
     pub rsync_override: Option<Vec<String>>,
     pub rsync_override_only: Option<bool>,
     pub stage1_profile: Option<String>,
+    pub cron: Option<Cron>,
     pub memory_limit: Option<String>,
     pub success_exit_codes: Option<Vec<i32>>,
     pub rsync_success_exit_codes: Option<Vec<i32>>,
@@ -322,6 +325,7 @@ impl Default for MirrorConfig {
             rsync_override: None,
             rsync_override_only: None,
             stage1_profile: None,
+            cron: None,
             memory_limit: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
@@ -409,6 +413,7 @@ struct LenientMirrorConfig {
     rsync_override: Option<Vec<String>>,
     rsync_override_only: Option<bool>,
     stage1_profile: Option<String>,
+    cron: Option<Cron>,
     memory_limit: Option<String>,
     success_exit_codes: Option<Vec<i32>>,
     rsync_success_exit_codes: Option<Vec<i32>>,
@@ -445,6 +450,7 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             rsync_override: l.rsync_override,
             rsync_override_only: l.rsync_override_only,
             stage1_profile: l.stage1_profile,
+            cron: l.cron,
             memory_limit: l.memory_limit,
             success_exit_codes: l.success_exit_codes,
             rsync_success_exit_codes: l.rsync_success_exit_codes,
@@ -721,6 +727,7 @@ fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
         rsync_override,
         rsync_override_only,
         stage1_profile,
+        cron,
         memory_limit,
         success_exit_codes,
         rsync_success_exit_codes,

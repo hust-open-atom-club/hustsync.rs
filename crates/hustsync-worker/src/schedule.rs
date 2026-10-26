@@ -153,6 +153,7 @@ mod tests {
             state: Arc::new(AtomicU32::new(0)),
             disabled: Arc::new(tokio::sync::Notify::new()),
             interval: Duration::from_secs(60),
+            cron: None,
         }
     }
 
