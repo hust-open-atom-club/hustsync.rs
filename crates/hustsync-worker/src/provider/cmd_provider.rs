@@ -3,14 +3,13 @@ use std::process::Stdio;
 use async_trait::async_trait;
 use regex::Regex;
 use tokio::fs::{File, create_dir_all};
-use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{
     CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
-    impl_provider_getters, inject_provider_env, log_provider_failure, resolve_log_file,
+    impl_provider_getters, log_provider_failure, provider_env, resolve_log_file,
     run_child_with_cancellation,
 };
 
@@ -27,19 +26,28 @@ pub struct CmdProvider {
     fail_on_match: Option<Regex>,
     size_pattern: Option<Regex>,
     data_size: Mutex<Option<String>>,
+    kind: ProviderType,
     // We store the running process PGID here so terminate() can kill it
     // without needing to acquire a Mutex that run() might be holding.
     running_pgid: AtomicU32,
 }
 
 impl CmdProvider {
-    pub fn new(mut config: CmdProviderConfig) -> Result<Self, ProviderError> {
+    pub fn new(config: CmdProviderConfig) -> Result<Self, ProviderError> {
+        let cmd_args = shlex::split(&config.command)
+            .ok_or_else(|| ProviderError::Config("Failed to parse command with shlex".into()))?;
+        Self::with_argv(config, ProviderType::Command, cmd_args)
+    }
+
+    /// Runs a ready-made argument list, reported as `kind`.
+    pub fn with_argv(
+        mut config: CmdProviderConfig,
+        kind: ProviderType,
+        cmd_args: Vec<String>,
+    ) -> Result<Self, ProviderError> {
         if config.common.retry == 0 {
             config.common.retry = 2;
         }
-
-        let cmd_args = shlex::split(&config.command)
-            .ok_or_else(|| ProviderError::Config("Failed to parse command with shlex".into()))?;
 
         if cmd_args.is_empty() {
             return Err(ProviderError::Config("Command is empty".into()));
@@ -61,6 +69,7 @@ impl CmdProvider {
             fail_on_match,
             size_pattern,
             data_size: Mutex::new(None),
+            kind,
             running_pgid: AtomicU32::new(0),
         })
     }
@@ -68,7 +77,11 @@ impl CmdProvider {
 
 #[async_trait]
 impl MirrorProvider for CmdProvider {
-    impl_provider_getters!(CmdProvider, ProviderType::Command);
+    impl_provider_getters!(CmdProvider, field kind);
+
+    fn daemon(&self) -> bool {
+        self.kind == ProviderType::Lsyncd
+    }
 
     async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
         if ctx.attempt > 1 {
@@ -104,25 +117,22 @@ impl MirrorProvider for CmdProvider {
         let std_out_log = log_file.into_std().await;
         let std_err_log = std_out_log.try_clone()?;
 
-        let mut cmd = Command::new(&self.cmd_args[0]);
-        if self.cmd_args.len() > 1 {
-            cmd.args(&self.cmd_args[1..]);
-        }
-
-        cmd.current_dir(&self.config.common.working_dir)
-            .stdout(Stdio::from(std_out_log))
+        let common = &self.config.common;
+        let env = provider_env(common, &effective_log_file, &ctx.env);
+        let (prog, args) = self
+            .cmd_args
+            .split_first()
+            .ok_or_else(|| ProviderError::Config("Command is empty".into()))?;
+        let mut cmd = common
+            .runner
+            .command(prog, args, common.job(&effective_log_file, &env))
+            .await?;
+        cmd.stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
-
-        #[cfg(unix)]
-        {
-            cmd.process_group(0);
-        }
-
-        inject_provider_env(&mut cmd, &self.config.common, &effective_log_file, &ctx.env);
 
         tracing::info!("Starting command provider for {}", self.config.common.name);
 
-        let mut spawned_child = cmd.spawn()?;
+        let mut spawned_child = self.config.common.spawn(&mut cmd).await?;
 
         // Record the PID so terminate() can kill it without locks
         if let Some(pid) = spawned_child.id() {
@@ -136,7 +146,7 @@ impl MirrorProvider for CmdProvider {
             self.config.common.timeout,
             &ctx.cancel,
             &self.running_pgid,
-            &self.config.common.name,
+            &self.config.common,
         )
         .await
         {
@@ -205,16 +215,13 @@ impl MirrorProvider for CmdProvider {
     }
 
     async fn terminate(&self) -> Result<(), ProviderError> {
-        #[cfg(unix)]
-        {
-            if self.running_pgid.load(Ordering::Acquire) != 0 {
-                tracing::warn!(
-                    "Terminating command provider for {}",
-                    self.config.common.name
-                );
-            }
-            super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
+        if self.running_pgid.load(Ordering::Acquire) != 0 {
+            tracing::warn!(
+                "Terminating command provider for {}",
+                self.config.common.name
+            );
         }
+        self.config.common.stop(&self.running_pgid).await;
         Ok(())
     }
 
@@ -251,6 +258,7 @@ mod tests {
                 env: HashMap::new(),
                 is_master: true,
                 success_exit_codes: vec![],
+                runner: Default::default(),
             },
             command: command.to_string(),
             fail_on_match: None,

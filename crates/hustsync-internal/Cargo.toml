@@ -3,6 +3,13 @@ name = "hustsync-internal"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+metrics = ["dep:prometheus", "dep:hustsync-config-parser"]
+push = ["metrics", "dep:tokio"]
+p8s = ["metrics"]
+influx = ["push", "dep:influxdb-line-protocol"]
+otlp = ["push", "dep:opentelemetry-proto", "dep:prost"]
+
 [dependencies]
 chrono = { version = "0.4.42", features = ["serde"] }
 regex = "1.12.2"
@@ -11,13 +18,21 @@ serde = "1.0.228"
 serde_json = "1.0.145"
 thiserror = "2.0.17"
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = [
-    "chrono",
-    "env-filter",
-    "local-time",
-    "time",
-] }
+serlog = { version = "0.1.1", features = ["file", "loki", "mail", "aws-lc-rs", "config", "tracing"] }
+toml = "0.9"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["registry", "std"] }
+hustsync-config-parser = { path = "../hustsync-config-parser", optional = true }
+prometheus = { version = "0.14", default-features = false, features = ["process"], optional = true }
+tokio = { version = "1", features = ["rt", "time"], optional = true }
+influxdb-line-protocol = { version = "2.0", optional = true }
+opentelemetry-proto = { version = "0.33", default-features = false, features = ["gen-tonic-messages", "metrics"], optional = true }
+prost = { version = "0.14", optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.31.2", features = ["resource"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }
 
 [lints]
 workspace = true
