@@ -1,0 +1,153 @@
+// Program logs arrive from serlog's loki sink; sync logs are tailed from each mirror's log_dir.
+
+loki.source.api "program" {
+	http {
+		listen_address = "0.0.0.0"
+		listen_port    = 3100
+	}
+	labels     = {source = "program"}
+	forward_to = [loki.write.loki.receiver]
+}
+
+local.file_match "sync" {
+	path_targets = [{"__path__" = "/var/log/hustsync/*/*_*.log", source = "sync"}]
+}
+
+loki.source.file "sync" {
+	targets    = local.file_match.sync.targets
+	forward_to = [loki.process.sync.receiver]
+}
+
+// The file name is <mirror>_<YYYY-MM-DD_HH_MM>.log; a failed run is renamed to .log.fail after it ends.
+loki.process "sync" {
+	stage.regex {
+		source     = "filename"
+		expression = `(?P<mirror>[^/]+)_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.log$`
+	}
+
+	stage.labels {
+		values = {mirror = ""}
+	}
+	forward_to = [loki.write.loki.receiver]
+}
+
+// Web server access logs become counters by where visitors are: country, and province within China.
+// The lines themselves are not kept; a busy mirror writes millions a day.
+local.file_match "access" {
+	path_targets = [{"__path__" = "/var/log/nginx/access.log", source = "access"}]
+}
+
+loki.source.file "access" {
+	targets    = local.file_match.access.targets
+	forward_to = [loki.process.access.receiver]
+}
+
+loki.process "access" {
+	stage.regex {
+		expression = `^(?P<ip>\S+) \S+ \S+ \[[^\]]+\] "[^"]*" (?P<status>\d{3}) (?P<bytes>\d+)`
+	}
+
+	stage.geoip {
+		source  = "ip"
+		db      = "/etc/alloy/geoip/dbip-city-lite.mmdb"
+		db_type = "city"
+
+		custom_lookups = {country_zh = `country.names."zh-CN"`}
+	}
+
+	stage.template {
+		source   = "china"
+		template = `{{ if eq (print .geoip_country_code) "CN" }}1{{ end }}`
+	}
+
+	stage.template {
+		source   = "region"
+		template = `{{ if .china }}{{ .geoip_subdivision_name }}{{ end }}`
+	}
+
+	// DB-IP's free database names provinces in English only; the Chinese name and a point for the map come from here.
+	stage.template {
+		source   = "province"
+		template = `{{- if .region -}}
+		{{- get (dict
+			"Anhui" "安徽 31.82 117.23" "Beijing" "北京 39.90 116.40" "Chongqing" "重庆 29.56 106.55"
+			"Fujian" "福建 26.07 119.30" "Gansu" "甘肃 36.06 103.83" "Guangdong" "广东 23.13 113.26"
+			"Guangxi" "广西 22.82 108.32" "Guizhou" "贵州 26.65 106.63" "Hainan" "海南 20.04 110.20"
+			"Hebei" "河北 38.04 114.51" "Heilongjiang" "黑龙江 45.80 126.53" "Henan" "河南 34.75 113.62"
+			"Hubei" "湖北 30.59 114.31" "Hunan" "湖南 28.23 112.94" "Inner Mongolia" "内蒙古 40.84 111.75"
+			"Jiangsu" "江苏 32.06 118.80" "Jiangxi" "江西 28.68 115.86" "Jilin" "吉林 43.82 125.32"
+			"Liaoning" "辽宁 41.81 123.43" "Ningxia" "宁夏 38.49 106.23" "Qinghai" "青海 36.62 101.78"
+			"Shaanxi" "陕西 34.34 108.94" "Shandong" "山东 36.65 117.12" "Shanghai" "上海 31.23 121.47"
+			"Shanxi" "山西 37.87 112.55" "Sichuan" "四川 30.57 104.07" "Tianjin" "天津 39.34 117.36"
+			"Tibet" "西藏 29.65 91.13" "Xinjiang" "新疆 43.83 87.62" "Yunnan" "云南 25.04 102.71"
+			"Zhejiang" "浙江 30.27 120.16"
+		) .region -}}
+		{{- end -}}`
+	}
+
+	stage.template {
+		source   = "place"
+		template = `{{ if .province }}{{ index (splitList " " .province) 0 }}{{ else }}{{ .country_zh }}{{ end }}`
+	}
+
+	stage.template {
+		source   = "lat"
+		template = `{{ if .province }}{{ index (splitList " " .province) 1 }}{{ end }}`
+	}
+
+	stage.template {
+		source   = "lon"
+		template = `{{ if .province }}{{ index (splitList " " .province) 2 }}{{ end }}`
+	}
+
+	stage.labels {
+		values = {country = "geoip_country_code", region = "", place = "", lat = "", lon = ""}
+	}
+
+	stage.metrics {
+		metric.counter {
+			name              = "requests_total"
+			description       = "Requests to the mirror site by where the visitor is."
+			prefix            = "hustsync_access_"
+			match_all         = true
+			action            = "inc"
+			max_idle_duration = "24h"
+		}
+
+		metric.counter {
+			name              = "sent_bytes_total"
+			description       = "Bytes the mirror site sent by where the visitor is."
+			prefix            = "hustsync_access_"
+			source            = "bytes"
+			action            = "add"
+			max_idle_duration = "24h"
+		}
+	}
+	forward_to = []
+}
+
+loki.write "loki" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
+
+otelcol.receiver.otlp "metrics" {
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		metrics = [otelcol.exporter.prometheus.p8s.input]
+	}
+}
+
+otelcol.exporter.prometheus "p8s" {
+	forward_to = [prometheus.remote_write.p8s.receiver]
+}
+
+prometheus.remote_write "p8s" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
+	}
+}

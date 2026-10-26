@@ -1,0 +1,132 @@
+# Manager, worker and the hust-mirrors site; /status.json is served from the manager's /jobs.
+# `--profile monitoring` adds Prometheus, Grafana, Loki, Alloy, Telegraf and InfluxDB.
+name: hustsync
+
+services:
+  manager:
+    image: hustsync
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile
+    command: hustsync manager --config /etc/hustsync/manager.toml
+    volumes:
+      - ./manager.toml:/etc/hustsync/manager.toml:ro
+      - db:/var/lib/hustsync
+    restart: unless-stopped
+
+  worker:
+    image: hustsync
+    command: hustsync worker --config /etc/hustsync/worker.toml
+    volumes:
+      - ./worker.toml:/etc/hustsync/worker.toml:ro
+      - data:/srv/mirror
+      - log:/var/log/hustsync
+    depends_on: [manager]
+    restart: unless-stopped
+
+  web:
+    image: hust-mirrors
+    build: https://github.com/hust-open-atom-club/hust-mirrors.git#master
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:stable-alpine
+    ports: ["${HTTP_PORT:-8080}:80"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - access:/var/log/nginx
+    depends_on: [manager, web]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ../prometheus:/etc/prometheus:ro
+      - p8s:/prometheus
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.8
+    profiles: [monitoring]
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki:/loki
+    restart: unless-stopped
+
+  # DB-IP's free city database, CC BY 4.0, fetched once a month.
+  geoip:
+    image: alpine:3.23
+    profiles: [monitoring]
+    command:
+      - sh
+      - -c
+      - >-
+        f=/geoip/dbip-city-lite.mmdb;
+        [ -s $$f ] && [ -z "$$(find $$f -mtime +31)" ] ||
+        { wget -qO- https://download.db-ip.com/free/dbip-city-lite-$$(date +%Y-%m).mmdb.gz | gunzip > $$f.new && mv $$f.new $$f; }
+    volumes:
+      - geoip:/geoip
+
+  alloy:
+    image: grafana/alloy:v1.20.1
+    profiles: [monitoring]
+    command: run /etc/alloy/config.alloy --storage.path=/var/lib/alloy --server.http.listen-addr=0.0.0.0:12345
+    volumes:
+      - ../alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - log:/var/log/hustsync:ro
+      - access:/var/log/nginx:ro
+      - geoip:/etc/alloy/geoip:ro
+      - alloy:/var/lib/alloy
+    depends_on:
+      loki: {condition: service_started}
+      prometheus: {condition: service_started}
+      geoip: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:3-core
+    profiles: [monitoring]
+    # Reachable only inside the compose network.
+    command: influxdb3 serve --node-id hustsync --object-store file --data-dir /var/lib/influxdb3 --without-auth
+    volumes:
+      - influx:/var/lib/influxdb3
+    restart: unless-stopped
+
+  telegraf:
+    image: telegraf:1.40
+    profiles: [monitoring]
+    volumes:
+      - ../telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on: [influxdb]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    profiles: [monitoring]
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_PLUGINS_PREINSTALL_SYNC: marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel,yesoreyeram-infinity-datasource
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    depends_on: [prometheus, loki, influxdb]
+    restart: unless-stopped
+
+volumes:
+  db:
+  data:
+  log:
+  p8s:
+  loki:
+  alloy:
+  access:
+  geoip:
+  influx:
+  grafana:

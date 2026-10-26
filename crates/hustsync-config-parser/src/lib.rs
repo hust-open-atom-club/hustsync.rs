@@ -9,6 +9,17 @@ use std::{
 use thiserror::Error;
 use tracing::warn;
 
+mod alert;
+mod mem;
+mod metrics;
+mod snapshot;
+
+pub use alert::AlertConfig;
+pub use croner::Cron;
+pub use mem::MemBytes;
+pub use metrics::{MetricsConfig, PushConfig, PushFormat};
+pub use snapshot::{WorkerBtrfsSnapshotConfig, WorkerZfsConfig};
+
 /// Typed error returned by every public entry-point in this crate.
 ///
 /// Variants carry enough context for callers to produce actionable
@@ -71,6 +82,13 @@ pub struct ManagerConfig {
     pub server: ManagerServerConfig,
     pub files: ManagerFileConfig,
     pub debug: bool,
+    /// More log sinks for serlog, beside the console or `--log-file` one.
+    #[serde(default)]
+    pub log: Option<toml::Table>,
+    #[serde(default)]
+    pub metrics: Option<MetricsConfig>,
+    #[serde(default)]
+    pub alert: Option<AlertConfig>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -120,9 +138,15 @@ pub struct WorkerConfig {
     pub global: Option<WorkerGlobalConfig>,
     pub manager: Option<WorkerManagerConfig>,
     pub cgroup: Option<WorkerCgroupConfig>,
+    pub docker: Option<WorkerDockerConfig>,
+    pub zfs: Option<WorkerZfsConfig>,
+    pub btrfs_snapshot: Option<WorkerBtrfsSnapshotConfig>,
     pub server: Option<WorkerServerConfig>,
     pub mirrors: Option<Vec<MirrorConfig>>,
     pub include: Option<IncludeConfig>,
+    /// More log sinks for serlog, beside the console or `--log-file` one.
+    pub log: Option<toml::Table>,
+    pub metrics: Option<MetricsConfig>,
 }
 
 impl Default for WorkerConfig {
@@ -131,9 +155,14 @@ impl Default for WorkerConfig {
             global: Some(WorkerGlobalConfig::default()),
             manager: Some(WorkerManagerConfig::default()),
             cgroup: Some(WorkerCgroupConfig::default()),
+            docker: None,
+            zfs: None,
+            btrfs_snapshot: None,
             server: Some(WorkerServerConfig::default()),
             mirrors: Some(vec![MirrorConfig::default()]),
             include: None,
+            log: None,
+            metrics: None,
         }
     }
 }
@@ -149,6 +178,8 @@ pub struct WorkerGlobalConfig {
     pub log_dir: Option<String>,
     pub mirror_dir: Option<String>,
     pub concurrent: Option<u32>,
+    pub log_retention: Option<usize>,
+    pub log_gzip: Option<bool>,
     pub rsync_options: Option<Vec<String>>,
     pub dangerous_global_success_exit_codes: Option<Vec<i32>>,
     pub dangerous_global_rsync_success_exit_codes: Option<Vec<i32>>,
@@ -170,6 +201,8 @@ impl Default for WorkerGlobalConfig {
             log_dir: Some("/var/log/hustsync/{{.Name}}".into()),
             mirror_dir: Some("/srv/mirror".into()),
             concurrent: Some(10),
+            log_retention: None,
+            log_gzip: None,
             rsync_options: None,
             dangerous_global_success_exit_codes: None,
             dangerous_global_rsync_success_exit_codes: None,
@@ -188,6 +221,8 @@ pub struct WorkerManagerConfig {
     pub api_base_list: Option<Vec<String>>,
     pub token: Option<String>,
     pub ca_cert: Option<String>,
+    /// Seconds between re-registrations, so the manager and the worker's alerts notice a lost link; 0 or unset sends none.
+    pub heartbeat: Option<u64>,
 }
 
 impl Default for WorkerManagerConfig {
@@ -197,6 +232,7 @@ impl Default for WorkerManagerConfig {
             api_base_list: None,
             token: Some("".into()),
             ca_cert: Some("".into()),
+            heartbeat: None,
         }
     }
 }
@@ -214,9 +250,18 @@ impl Default for WorkerCgroupConfig {
         WorkerCgroupConfig {
             enable: Some(false),
             base_path: Some("/sys/fs/cgroup".into()),
-            group: Some("hustsync".into()),
+            group: None,
         }
     }
+}
+
+/// `[docker]`: runs mirrors that set `docker_image` inside containers.
+#[derive(Debug, Deserialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerDockerConfig {
+    pub enable: Option<bool>,
+    pub volumes: Option<Vec<String>>,
+    pub options: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -259,6 +304,8 @@ pub struct MirrorConfig {
     pub mirror_subdir: Option<String>,
     pub mirror_type: Option<String>,
     pub log_dir: Option<String>,
+    pub log_retention: Option<usize>,
+    pub log_gzip: Option<bool>,
     pub env: Option<HashMap<String, String>>,
     pub role: Option<String>,
     pub command: Option<String>,
@@ -273,7 +320,16 @@ pub struct MirrorConfig {
     pub rsync_override: Option<Vec<String>>,
     pub rsync_override_only: Option<bool>,
     pub stage1_profile: Option<String>,
-    pub memory_limit: Option<String>,
+    pub cron: Option<Cron>,
+    pub memory_limit: Option<MemBytes>,
+    pub docker_image: Option<String>,
+    pub docker_volumes: Option<Vec<String>>,
+    pub docker_options: Option<Vec<String>>,
+    /// Where `[btrfs_snapshot]` puts this mirror's snapshot; not inherited, as children sharing it would overwrite each other.
+    pub snapshot_path: Option<String>,
+    pub fpsync_options: Option<Vec<String>>,
+    pub lsyncd_options: Option<Vec<String>>,
+    pub ftpsync_conf: Option<Vec<String>>,
     pub success_exit_codes: Option<Vec<i32>>,
     pub rsync_success_exit_codes: Option<Vec<i32>>,
     /// Nested child mirrors. Children inherit unset fields from this parent.
@@ -308,6 +364,8 @@ impl Default for MirrorConfig {
             mirror_subdir: None,
             mirror_type: None,
             log_dir: None,
+            log_retention: None,
+            log_gzip: None,
             env: None,
             role: None,
             command: None,
@@ -322,7 +380,15 @@ impl Default for MirrorConfig {
             rsync_override: None,
             rsync_override_only: None,
             stage1_profile: None,
+            cron: None,
             memory_limit: None,
+            docker_image: None,
+            docker_volumes: None,
+            docker_options: None,
+            snapshot_path: None,
+            fpsync_options: None,
+            lsyncd_options: None,
+            ftpsync_conf: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
@@ -371,9 +437,14 @@ struct LenientWorkerConfig {
     global: Option<WorkerGlobalConfig>,
     manager: Option<WorkerManagerConfig>,
     cgroup: Option<WorkerCgroupConfig>,
+    docker: Option<WorkerDockerConfig>,
+    zfs: Option<WorkerZfsConfig>,
+    btrfs_snapshot: Option<WorkerBtrfsSnapshotConfig>,
     server: Option<WorkerServerConfig>,
     mirrors: Option<Vec<LenientMirrorConfig>>,
     include: Option<IncludeConfig>,
+    log: Option<toml::Table>,
+    metrics: Option<MetricsConfig>,
 }
 
 // Mirrors LenientWorkerConfig but without deny_unknown_fields so it absorbs
@@ -395,6 +466,8 @@ struct LenientMirrorConfig {
     mirror_subdir: Option<String>,
     mirror_type: Option<String>,
     log_dir: Option<String>,
+    log_retention: Option<usize>,
+    log_gzip: Option<bool>,
     env: Option<HashMap<String, String>>,
     role: Option<String>,
     command: Option<String>,
@@ -409,7 +482,15 @@ struct LenientMirrorConfig {
     rsync_override: Option<Vec<String>>,
     rsync_override_only: Option<bool>,
     stage1_profile: Option<String>,
-    memory_limit: Option<String>,
+    cron: Option<Cron>,
+    memory_limit: Option<MemBytes>,
+    docker_image: Option<String>,
+    docker_volumes: Option<Vec<String>>,
+    docker_options: Option<Vec<String>>,
+    snapshot_path: Option<String>,
+    fpsync_options: Option<Vec<String>>,
+    lsyncd_options: Option<Vec<String>>,
+    ftpsync_conf: Option<Vec<String>>,
     success_exit_codes: Option<Vec<i32>>,
     rsync_success_exit_codes: Option<Vec<i32>>,
     #[serde(default)]
@@ -431,6 +512,8 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             mirror_subdir: l.mirror_subdir,
             mirror_type: l.mirror_type,
             log_dir: l.log_dir,
+            log_retention: l.log_retention,
+            log_gzip: l.log_gzip,
             env: l.env,
             role: l.role,
             command: l.command,
@@ -445,7 +528,15 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             rsync_override: l.rsync_override,
             rsync_override_only: l.rsync_override_only,
             stage1_profile: l.stage1_profile,
+            cron: l.cron,
             memory_limit: l.memory_limit,
+            docker_image: l.docker_image,
+            docker_volumes: l.docker_volumes,
+            docker_options: l.docker_options,
+            snapshot_path: l.snapshot_path,
+            fpsync_options: l.fpsync_options,
+            lsyncd_options: l.lsyncd_options,
+            ftpsync_conf: l.ftpsync_conf,
             success_exit_codes: l.success_exit_codes,
             rsync_success_exit_codes: l.rsync_success_exit_codes,
             mirrors: l
@@ -461,11 +552,16 @@ impl From<LenientWorkerConfig> for WorkerConfig {
             global: l.global,
             manager: l.manager,
             cgroup: l.cgroup,
+            docker: l.docker,
+            zfs: l.zfs,
+            btrfs_snapshot: l.btrfs_snapshot,
             server: l.server,
             mirrors: l
                 .mirrors
                 .map(|mv| mv.into_iter().map(MirrorConfig::from).collect()),
             include: l.include,
+            log: l.log,
+            metrics: l.metrics,
         }
     }
 }
@@ -707,6 +803,8 @@ fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
         mirror_subdir,
         mirror_type,
         log_dir,
+        log_retention,
+        log_gzip,
         env,
         role,
         command,
@@ -721,7 +819,14 @@ fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
         rsync_override,
         rsync_override_only,
         stage1_profile,
+        cron,
         memory_limit,
+        docker_image,
+        docker_volumes,
+        docker_options,
+        fpsync_options,
+        lsyncd_options,
+        ftpsync_conf,
         success_exit_codes,
         rsync_success_exit_codes,
     );
@@ -788,17 +893,14 @@ fn contains_unbracketed_ipv6(upstream: &str) -> bool {
 /// 4. `size_pattern`, when set, must compile and have exactly one capture group.
 /// 5. `stage1_profile`, when set, must be one of the known profiles.
 pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
-    if cfg
-        .cgroup
-        .as_ref()
-        .and_then(|cgroup| cgroup.enable)
-        .unwrap_or(false)
-    {
-        return Err(ConfigError::UnsupportedField {
-            field: "cgroup.enable".into(),
-            tracked_in: "parity-checklist: Cgroup enforcement parity",
+    if cfg.global.as_ref().and_then(|g| g.log_retention) == Some(0) {
+        return Err(ConfigError::InvalidValue {
+            field: "global.log_retention".into(),
+            reason: "keep at least one log file".into(),
         });
     }
+
+    snapshot::validate(cfg)?;
 
     let Some(mirrors) = cfg.mirrors.as_deref() else {
         return Ok(());
@@ -814,8 +916,43 @@ pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
 }
 
 fn validate_mirror(mirror: &MirrorConfig, label: &str) -> Result<(), ConfigError> {
+    if mirror.log_retention == Some(0) {
+        return Err(ConfigError::InvalidValue {
+            field: format!("mirrors.{label}.log_retention"),
+            reason: "keep at least one log file".into(),
+        });
+    }
+
     let provider = mirror.provider.as_deref().unwrap_or("rsync");
     let is_rsync_family = matches!(provider, "rsync" | "two-stage-rsync");
+
+    if provider == "ftpsync" {
+        let upstream = mirror.upstream.as_deref().unwrap_or_default();
+        let remote = upstream
+            .strip_prefix("rsync://")
+            .map_or_else(|| upstream.split_once("::"), |r| r.split_once('/'));
+        if !remote
+            .is_some_and(|(host, path)| !host.is_empty() && !path.trim_matches('/').is_empty())
+        {
+            return Err(ConfigError::InvalidValue {
+                field: format!("mirrors.{label}.upstream"),
+                reason: format!(
+                    "ftpsync needs `rsync://host/path/` or `host::path`, got `{upstream}`"
+                ),
+            });
+        }
+    }
+
+    if matches!(provider, "fpsync" | "lsyncd")
+        && mirror.upstream.as_deref().is_none_or(str::is_empty)
+    {
+        return Err(ConfigError::InvalidValue {
+            field: format!("mirrors.{label}.upstream"),
+            reason: format!(
+                "{provider} needs an upstream: a local path to pull from, or a target to push to"
+            ),
+        });
+    }
 
     if is_rsync_family {
         if let Some(upstream) = mirror.upstream.as_deref() {

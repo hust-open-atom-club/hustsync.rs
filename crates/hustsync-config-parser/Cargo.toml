@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+croner = { version = "4.0", features = ["serde"] }
 glob = "0.3"
+parse-size = "1.1"
 regex = "1.12.3"
 serde = { "version" = "1", features = ["derive"] }
 thiserror = "2.0"

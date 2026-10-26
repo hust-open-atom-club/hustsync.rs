@@ -1,0 +1,18 @@
+debug = false
+
+[server]
+addr = "0.0.0.0"
+port = 14242
+ssl_cert = ""
+ssl_key = ""
+
+[files]
+db_type = "redb"
+db_file = "/var/lib/hustsync/manager.db"
+ca_cert = ""
+
+# Program logs go to Alloy when the monitoring profile runs, and are dropped quietly when it does not.
+[log]
+sinks = [
+  { kind = "loki", url = "http://alloy:3100/loki/api/v1/push", labels = { service = "manager" }, on_fail = "ignore" },
+]

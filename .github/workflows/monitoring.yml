@@ -1,0 +1,84 @@
+name: monitoring
+
+on:
+  push:
+    paths: ["deploy/**", "scripts/**", "crates/**", ".github/workflows/monitoring.yml"]
+  pull_request:
+    paths: ["deploy/**", "scripts/**", "crates/**", ".github/workflows/monitoring.yml"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rules:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prometheus config
+        run: docker run --rm -v "$PWD/deploy/prometheus:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.0 check config prometheus.yml
+      - name: Alert rule tests
+        run: docker run --rm -v "$PWD/deploy/prometheus:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.0 test rules rules.test.yml
+
+  alloy:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate
+        run: docker run --rm -v "$PWD/deploy/alloy:/w" grafana/alloy:v1.20.1 validate /w/config.alloy
+      - name: Formatted
+        run: docker run --rm -v "$PWD/deploy/alloy:/w" grafana/alloy:v1.20.1 fmt /w/config.alloy | diff - deploy/alloy/config.alloy
+
+  grafana:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Provision Grafana
+        run: |
+          docker run -d --name grafana --restart on-failure:3 -p 3000:3000 -e GF_PLUGINS_PREINSTALL_SYNC=marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel,yesoreyeram-infinity-datasource \
+            -v "$PWD/deploy/grafana/provisioning:/etc/grafana/provisioning:ro" \
+            -v "$PWD/deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro" grafana/grafana:13.2.4
+          for _ in $(seq 120); do curl -fs http://localhost:3000/api/health >/dev/null && break; sleep 1; done
+      - name: Dashboards loaded
+        run: |
+          for f in deploy/grafana/dashboards/*.json; do
+            uid=$(jq -r .uid "$f")
+            want=$(jq '.panels | length' "$f")
+            got=$(curl -fsS -u admin:admin "http://localhost:3000/api/dashboards/uid/$uid" | jq '.dashboard.panels | length')
+            echo "$uid: $got of $want panels"
+            [[ $got == "$want" ]]
+          done
+      - name: Panel plugins installed
+        run: |
+          for id in $(jq -r '[.. | objects | select(has("type") and has("gridPos") and .type != "row") | .type] | unique[]' deploy/grafana/dashboards/*.json); do
+            curl -fsS -u admin:admin "http://localhost:3000/api/plugins/$id/settings" >/dev/null || { echo "missing panel $id"; exit 1; }
+          done
+      - name: No provisioning errors
+        run: "! docker logs grafana 2>&1 | grep -E 'level=error.*(provisioning|dashboard)'"
+
+  push:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p hustsync --features otlp
+      - name: Telegraf pull and push agree
+        run: scripts/telegraf-pull-push.sh target/debug/hustsync
+      - name: OTLP through Alloy into Prometheus
+        run: scripts/otlp-alloy.sh target/debug/hustsync
+
+  access:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Visitors counted by country and province
+        run: scripts/access-geoip.sh
+
+  compose:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose -f deploy/compose/compose.yaml --profile monitoring config -q

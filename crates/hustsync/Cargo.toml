@@ -3,16 +3,25 @@ name = "hustsync"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["p8s", "influx"]
+p8s = ["hustsync-manager/p8s", "hustsync-worker/p8s"]
+influx = ["hustsync-manager/influx", "hustsync-worker/influx"]
+otlp = ["hustsync-manager/otlp", "hustsync-worker/otlp"]
+
 [dependencies]
 # log = "0.4.28"
 clap = { version = "4.5.53", features = ["derive"] }
 tracing = "0.1.41"
 hustsync-internal = { path = "../hustsync-internal" }
-hustsync-manager = { path = "../hustsync-manager" }
-hustsync-worker = { version = "0.1.0", path = "../hustsync-worker" }
+hustsync-manager = { path = "../hustsync-manager", default-features = false }
+hustsync-worker = { version = "0.1.0", path = "../hustsync-worker", default-features = false }
 tokio = { version = "1.50.0", features = ["full"] }
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 anyhow = "1.0.102"
+
+[target.'cfg(windows)'.dependencies]
+windows-services = "0.100"
 
 [lints]
 workspace = true
