@@ -1,0 +1,30 @@
+# Groups change at different rates, so each is scraped on its own interval.
+global:
+  scrape_interval: 1m
+  evaluation_interval: 1m
+
+rule_files: [rules.yml]
+
+scrape_configs:
+  - job_name: hustsync-mirrors
+    scrape_interval: 15s
+    metrics_path: /metrics/mirrors
+    static_configs: [{ targets: ["manager:14242"] }]
+  - job_name: hustsync-syncs
+    scrape_interval: 30s
+    metrics_path: /metrics/syncs
+    static_configs: [{ targets: ["manager:14242"] }]
+  - job_name: hustsync-workers
+    metrics_path: /metrics/workers
+    static_configs: [{ targets: ["manager:14242"] }]
+  - job_name: hustsync-jobs
+    scrape_interval: 15s
+    metrics_path: /metrics/jobs
+    static_configs: [{ targets: ["worker:6000"] }]
+  - job_name: hustsync-links
+    scrape_interval: 30s
+    metrics_path: /metrics/manager
+    static_configs: [{ targets: ["worker:6000"] }]
+  - job_name: hustsync-process
+    metrics_path: /metrics/process
+    static_configs: [{ targets: ["manager:14242", "worker:6000"] }]
