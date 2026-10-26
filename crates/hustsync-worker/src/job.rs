@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local, Utc};
 use hustsync_internal::status::SyncStatus;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -46,9 +47,21 @@ pub struct MirrorJob {
     pub state: Arc<AtomicU32>,
     pub disabled: Arc<tokio::sync::Notify>,
     pub interval: Duration,
+    pub cron: Option<hustsync_config_parser::Cron>,
 }
 
 impl MirrorJob {
+    /// When the job runs next after `after`: the cron schedule if set, else `after + interval`.
+    pub fn next_run(&self, after: DateTime<Utc>) -> DateTime<Utc> {
+        self.cron
+            .as_ref()
+            .and_then(|c| {
+                c.find_next_occurrence(&after.with_timezone(&Local), false)
+                    .ok()
+            })
+            .map_or(after + self.interval, |t| t.to_utc())
+    }
+
     pub fn state(&self) -> u32 {
         self.state.load(Ordering::Acquire)
     }
@@ -101,6 +114,7 @@ impl JobActor {
             state: Arc::clone(&state),
             disabled: Arc::clone(&disabled),
             interval,
+            cron: None,
         };
 
         let actor = JobActor {
@@ -256,10 +270,9 @@ impl JobActor {
             Err((n, e)) => {
                 tracing::warn!("Job {} pre_job hook aborted: {}", name, e);
                 Self::run_post(PostPhase::PostFail, &hooks, n, &mut hook_ctx).await;
-                return Err(ProviderError::Execution {
-                    code: -1,
-                    msg: format!("pre_job hook failed: {e}"),
-                });
+                let msg = format!("error exec hook pre_job: {e}");
+                report(SyncStatus::Failed, msg.clone(), true).await;
+                return Err(ProviderError::Execution { code: -1, msg });
             }
         };
 
@@ -279,10 +292,9 @@ impl JobActor {
                     tracing::warn!("Job {} pre_exec hook aborted: {}", name, e);
                     Self::run_post(PostPhase::PostFail, &hooks, n, &mut hook_ctx).await;
                     Self::run_post(PostPhase::PostFail, &hooks, pre_job_count, &mut hook_ctx).await;
-                    return Err(ProviderError::Execution {
-                        code: -1,
-                        msg: format!("pre_exec hook failed: {e}"),
-                    });
+                    let msg = format!("error exec hook pre_exec: {e}");
+                    report(SyncStatus::Failed, msg.clone(), true).await;
+                    return Err(ProviderError::Execution { code: -1, msg });
                 }
             };
 
