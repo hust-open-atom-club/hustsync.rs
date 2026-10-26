@@ -75,6 +75,8 @@ fn worker_config(
             log_dir: Some(log_dir),
             mirror_dir: Some(mirror_dir),
             concurrent: Some(2),
+            log_retention: None,
+            log_gzip: None,
             rsync_options: None,
             dangerous_global_success_exit_codes: None,
             dangerous_global_rsync_success_exit_codes: None,
@@ -88,6 +90,7 @@ fn worker_config(
             ca_cert: None,
         }),
         cgroup: None,
+        docker: None,
         server: Some(WorkerServerConfig {
             hostname: Some("127.0.0.1".into()),
             // Bind worker on a fixed port — no ephemeral here because
@@ -104,7 +107,14 @@ fn worker_config(
         mirrors: Some(vec![MirrorConfig {
             name: Some(mirror_name.into()),
             provider: Some("command".into()),
-            command: Some("/bin/echo".into()),
+            command: Some(
+                if cfg!(windows) {
+                    "cmd /C echo"
+                } else {
+                    "/bin/echo"
+                }
+                .into(),
+            ),
             upstream: Some("unused://for-cmd-provider/".into()),
             retry: None,
             exec_on_status: None,
@@ -115,6 +125,8 @@ fn worker_config(
             mirror_subdir: None,
             mirror_type: None,
             log_dir: None,
+            log_retention: None,
+            log_gzip: None,
             env: None,
             role: None,
             fail_on_match: None,
@@ -128,7 +140,14 @@ fn worker_config(
             rsync_override: None,
             rsync_override_only: None,
             stage1_profile: None,
+            cron: None,
             memory_limit: None,
+            docker_image: None,
+            docker_volumes: None,
+            docker_options: None,
+            fpsync_options: None,
+            lsyncd_options: None,
+            ftpsync_conf: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
@@ -189,7 +208,7 @@ async fn full_cmd_sync_round_trip() {
 
     // Spawn worker in its own task — it registers, opens its own HTTP
     // server, then falls into the dispatch loop.
-    let worker = Worker::new(cfg);
+    let worker = Worker::new(cfg).expect("worker");
     let worker_task = tokio::spawn(async move {
         worker.run().await;
     });

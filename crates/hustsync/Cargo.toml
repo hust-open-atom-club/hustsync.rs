@@ -14,5 +14,8 @@ tokio = { version = "1.50.0", features = ["full"] }
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 anyhow = "1.0.102"
 
+[target.'cfg(windows)'.dependencies]
+windows-services = "0.100"
+
 [lints]
 workspace = true
