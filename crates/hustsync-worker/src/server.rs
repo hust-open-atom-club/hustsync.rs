@@ -3,18 +3,29 @@ use hustsync_internal::msg::{CmdVerb, WorkerCmd};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, Semaphore, mpsc};
 
 use crate::MirrorJob;
 
 pub struct AppState {
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
     pub schedule_queue: Arc<tokio::sync::Mutex<crate::schedule::ScheduleQueue>>,
+    pub semaphore: Arc<Semaphore>,
+    pub concurrent: usize,
     pub reload_tx: Option<mpsc::Sender<()>>,
+    pub metrics: Arc<crate::metrics::Metrics>,
 }
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
-    Router::new().route("/", post(handle_cmd)).with_state(state)
+    let app = Router::new().route("/", post(handle_cmd));
+    #[cfg(feature = "p8s")]
+    let app = {
+        use crate::metrics::serve;
+        use axum::routing::get;
+        app.route("/metrics", get(serve::all))
+            .route("/metrics/:group", get(serve::one))
+    };
+    app.with_state(state)
 }
 
 #[allow(clippy::cognitive_complexity, clippy::significant_drop_tightening)]
