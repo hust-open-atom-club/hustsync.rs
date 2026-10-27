@@ -11,12 +11,9 @@ serde = "1.0.228"
 serde_json = "1.0.145"
 thiserror = "2.0.17"
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = [
-    "chrono",
-    "env-filter",
-    "local-time",
-    "time",
-] }
+serlog = { version = "0.1.1", features = ["file", "loki", "mail", "aws-lc-rs", "config", "tracing"] }
+toml = "0.9"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["registry", "std"] }
 
 
 [lints]

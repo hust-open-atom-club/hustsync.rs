@@ -11,9 +11,9 @@ use std::time::Duration;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
-use crate::ManagerError;
 use crate::database::{DbAdapterTrait, make_db_adapter};
 use crate::handlers;
+use crate::{ManagerError, Metrics};
 
 pub(crate) const ERROR_KEY: &str = "error";
 pub(crate) const INFO_KEY: &str = "message";
@@ -22,6 +22,7 @@ pub struct Manager {
     pub config: Arc<ManagerConfig>,
     pub adapter: Option<Arc<dyn DbAdapterTrait>>,
     pub http_client: Option<Client>,
+    pub metrics: Metrics,
 }
 
 impl Manager {
@@ -31,6 +32,7 @@ impl Manager {
             config: Arc::clone(&config),
             adapter: None,
             http_client: None,
+            metrics: Metrics::new()?,
         };
 
         if !config.files.ca_cert.is_empty() {
@@ -75,6 +77,7 @@ impl Manager {
 
         let mut router = Router::new()
             .route("/ping", get(handlers::ping_handler))
+            .route("/metrics", get(crate::metrics::serve))
             .route("/jobs", get(handlers::list_all_jobs))
             .route("/jobs/disabled", delete(handlers::flush_disabled_jobs))
             .route("/workers", get(handlers::list_all_workers))

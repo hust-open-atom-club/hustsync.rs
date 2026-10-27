@@ -1,6 +1,6 @@
 //! `exec_on_success` / `exec_on_failure` hook.
 //!
-//! Runs each configured shell command via `sh -c` with a standardised
+//! Runs each configured command through the platform shell (`sh -c`, or `cmd /C` on Windows) with a standardised
 //! env block using canonical `HUSTSYNC_*` variables plus legacy
 //! `TUNASYNC_*` aliases with the same values. Non-zero exit from one
 //! command is logged but does not abort the list; the next command still runs.
@@ -87,7 +87,14 @@ async fn spawn_shell(
     cmd: &str,
     env: &[(String, String)],
 ) -> std::io::Result<std::process::ExitStatus> {
+    #[cfg(windows)]
+    let mut child = Command::new("cmd");
+    // cmd.exe has its own quoting, so the line goes through untouched.
+    #[cfg(windows)]
+    child.arg("/C").raw_arg(cmd);
+    #[cfg(not(windows))]
     let mut child = Command::new("sh");
+    #[cfg(not(windows))]
     child.arg("-c").arg(cmd);
     for (k, v) in env {
         child.env(k, v);

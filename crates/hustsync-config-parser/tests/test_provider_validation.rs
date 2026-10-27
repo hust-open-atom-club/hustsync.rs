@@ -18,9 +18,11 @@ fn worker_with_single_mirror(mirror: MirrorConfig) -> WorkerConfig {
         global: None,
         manager: None,
         cgroup: None,
+        docker: None,
         server: None,
         mirrors: Some(vec![mirror]),
         include: None,
+        log: None,
     }
 }
 
@@ -34,7 +36,7 @@ fn named_rsync_mirror(name: &str, upstream: &str) -> MirrorConfig {
 }
 
 #[test]
-fn reject_enabled_cgroup_until_runtime_support_exists() {
+fn enabled_cgroup_passes_validation() {
     let mut cfg = worker_with_single_mirror(named_rsync_mirror(
         "arch",
         "rsync://mirror.example.org/archlinux/",
@@ -42,20 +44,10 @@ fn reject_enabled_cgroup_until_runtime_support_exists() {
     cfg.cgroup = Some(WorkerCgroupConfig {
         enable: Some(true),
         base_path: Some("/sys/fs/cgroup".into()),
-        group: Some("hustsync".into()),
+        group: None,
     });
 
-    let err = validate_worker_config(&cfg).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            ConfigError::UnsupportedField {
-                ref field,
-                ..
-            } if field == "cgroup.enable"
-        ),
-        "enabled cgroup must be rejected instead of silently ignored, got {err:?}"
-    );
+    validate_worker_config(&cfg).unwrap();
 }
 
 // ---------------------------------------------------------------------------
