@@ -3,14 +3,23 @@ name = "hustsync-worker"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["p8s", "influx"]
+metrics = ["hustsync-internal/metrics"]
+push = ["metrics", "hustsync-internal/push"]
+p8s = ["metrics", "hustsync-internal/p8s"]
+influx = ["push", "hustsync-internal/influx"]
+otlp = ["push", "hustsync-internal/otlp"]
+
 [dependencies]
-async-trait = "0.1.89"
+async-trait = "0.1.92"
 axum = "0.7"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 chrono = "0.4"
+flate2 = "1.1"
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 hustsync-internal = { version = "0.1.0", path = "../hustsync-internal" }
-nix = { version = "0.31.2", features = ["process", "signal"] }
+nix = { version = "0.31.2", features = ["fs", "process", "signal", "user"] }
 regex = "1.12.3"
 reqwest = { version = "0.13.2", features = ["json"] }
 serde = "1"
@@ -24,6 +33,16 @@ tracing = "0.1"
 [lints]
 workspace = true
 
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
 [dev-dependencies]
 tempfile = "3.27.0"
 tower = { version = "0.5", features = ["util"] }

@@ -2,6 +2,8 @@
 
 pub mod error;
 pub mod logger;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 pub mod msg;
 pub mod status;
 pub mod status_web;

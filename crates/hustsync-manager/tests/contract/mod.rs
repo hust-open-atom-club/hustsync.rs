@@ -17,7 +17,9 @@
 
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
-use hustsync_config_parser::{ManagerConfig, ManagerFileConfig, ManagerServerConfig};
+use hustsync_config_parser::{
+    ManagerConfig, ManagerFileConfig, ManagerServerConfig, MetricsConfig,
+};
 use hustsync_manager::Manager;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -36,11 +38,24 @@ use tokio::task::JoinHandle;
 /// The `TempDir` must be kept alive for the duration of the test; drop it
 /// at the end of the test body.
 pub fn spawn_manager() -> (Router, TempDir) {
-    let dir = TempDir::new().expect("create tempdir");
-    let db_path = dir.path().join("test.db");
+    let (manager, dir) = manager_with(None);
+    (manager.make_router(), dir)
+}
 
-    let config = Arc::new(ManagerConfig {
+/// A manager on a fresh redb with the given `[metrics]`, listening on an ephemeral port when run.
+pub fn manager_with(metrics: Option<MetricsConfig>) -> (Arc<Manager>, TempDir) {
+    let dir = TempDir::new().expect("create tempdir");
+    let manager = Manager::new(config(&dir.path().join("test.db"), metrics))
+        .expect("manager_with: Manager::new failed");
+    (Arc::new(manager), dir)
+}
+
+/// A plain-HTTP config on an ephemeral port with its redb at `db`.
+pub fn config(db: &Path, metrics: Option<MetricsConfig>) -> Arc<ManagerConfig> {
+    Arc::new(ManagerConfig {
         debug: false,
+        log: None,
+        metrics,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,
@@ -50,15 +65,10 @@ pub fn spawn_manager() -> (Router, TempDir) {
         files: ManagerFileConfig {
             status_file: String::new(),
             db_type: "redb".to_string(),
-            db_file: db_path.to_string_lossy().into_owned(),
+            db_file: db.to_string_lossy().into_owned(),
             ca_cert: String::new(),
         },
-    });
-
-    let manager = Manager::new(config).expect("spawn_manager: Manager::new failed");
-    let router = Arc::new(manager).make_router();
-
-    (router, dir)
+    })
 }
 
 /// Start a real TLS listener backed by a self-signed certificate generated
@@ -68,7 +78,7 @@ pub fn spawn_manager() -> (Router, TempDir) {
 /// - `addr` — the ephemeral socket address the server is actually listening on.
 /// - `handle` — a `JoinHandle` for the server task; drop or abort it after the
 ///   test to release the port.
-/// - `cert_der` — the DER-encoded self-signed certificate so callers can
+/// - `cert_der` — the DER-encoded CA certificate so callers can
 ///   construct a `reqwest::Certificate` that trusts only this server.
 ///
 /// No PEM or DER files are written to disk.  Certificate generation, TLS
@@ -76,16 +86,35 @@ pub fn spawn_manager() -> (Router, TempDir) {
 /// test environment hermetic and avoids secret-scanner false positives.
 pub async fn spawn_manager_tls() -> (SocketAddr, JoinHandle<()>, Vec<u8>) {
     // ------------------------------------------------------------------ cert
-    // Generate a self-signed cert valid for 127.0.0.1 and localhost so that
-    // reqwest's hostname verification passes when we connect to the server.
-    let certified_key =
-        rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string(), "localhost".to_string()])
-            .expect("rcgen: generate self-signed cert");
+    // A CA signs the server cert: platform verifiers such as Windows' reject a
+    // self-signed leaf used as its own trust anchor.
+    let ca_key = rcgen::KeyPair::generate().expect("rcgen: CA key");
+    let mut ca_params =
+        rcgen::CertificateParams::new(Vec::<String>::new()).expect("rcgen: CA params");
+    ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    ca_params.key_usages = vec![
+        rcgen::KeyUsagePurpose::KeyCertSign,
+        rcgen::KeyUsagePurpose::CrlSign,
+        rcgen::KeyUsagePurpose::DigitalSignature,
+    ];
+    ca_params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "hustsync test CA");
+    let ca = ca_params.self_signed(&ca_key).expect("rcgen: CA cert");
+    let key = rcgen::KeyPair::generate().expect("rcgen: server key");
+    let mut params =
+        rcgen::CertificateParams::new(vec!["127.0.0.1".to_string(), "localhost".to_string()])
+            .expect("rcgen: server params");
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "127.0.0.1");
+    let cert = params
+        .signed_by(&key, &ca, &ca_key)
+        .expect("rcgen: server cert");
 
-    let cert_pem = certified_key.cert.pem().into_bytes();
-    let key_pem = certified_key.key_pair.serialize_pem().into_bytes();
-    // Keep the DER bytes for the reqwest trust anchor; we clone before moving.
-    let cert_der = certified_key.cert.der().to_vec();
+    let cert_pem = cert.pem().into_bytes();
+    let key_pem = key.serialize_pem().into_bytes();
+    let cert_der = ca.der().to_vec();
 
     // --------------------------------------------------------------- manager
     let dir = TempDir::new().expect("create tempdir for TLS manager");
@@ -93,6 +122,8 @@ pub async fn spawn_manager_tls() -> (SocketAddr, JoinHandle<()>, Vec<u8>) {
 
     let config = Arc::new(ManagerConfig {
         debug: false,
+        log: None,
+        metrics: None,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,
