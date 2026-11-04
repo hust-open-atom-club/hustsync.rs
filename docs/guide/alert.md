@@ -54,3 +54,11 @@ sinks = [
 | `wait` | Waits 5 minutes after the first event and sends everything since in one mail, so at most one mail per 5 minutes; when a whole upstream fails, dozens of mirrors still make one mail |
 
 For the other keys, see the mail section of the serlog spec.
+
+## Metrics
+
+| Metric | Meaning |
+|:--:|:--:|
+| `hustsync_mirror_failures{mirror,worker}` | Failed rounds in a row per mirror since the manager started |
+| `hustsync_worker_manager_up{manager}` | Whether the worker's last request to that manager succeeded |
+| `hustsync_worker_manager_failures{manager}` | Failed requests in a row |

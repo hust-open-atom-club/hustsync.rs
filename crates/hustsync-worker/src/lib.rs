@@ -233,7 +233,8 @@ impl Worker {
 
         let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
         let reach = Arc::new(reach::Reach::default());
-        let metrics = metrics::Metrics::new(cfg.metrics.as_ref()).map_err(std::io::Error::other)?;
+        let metrics = metrics::Metrics::new(cfg.metrics.as_ref(), Arc::clone(&reach))
+            .map_err(std::io::Error::other)?;
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
 
