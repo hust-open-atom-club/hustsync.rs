@@ -56,3 +56,9 @@ The test binary runs as root; build as an ordinary user:
 ```bash
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -E'   cargo test -p hustsync-worker --test cgroup_root -- --ignored --test-threads=1
 ```
+
+v1 is tested in qemu; the script downloads Ubuntu 24.04's kernel:
+
+```bash
+scripts/cgroup-v1-qemu.sh
+```

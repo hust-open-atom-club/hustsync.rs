@@ -48,3 +48,27 @@ jobs:
           docker pull -q alpine:3.23
       - run: cargo test --workspace --all-features
       - run: cargo test --workspace --no-default-features
+
+  cgroup:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: cgroup v2, as root
+        run: |
+          bin=$(cargo test -p hustsync-worker --test cgroup_root --no-run --message-format=json |
+            jq -r 'select(.executable != null and (.target.name == "cgroup_root")) | .executable')
+          sudo "$bin" --ignored --test-threads=1
+      - name: KVM for the v1 guest
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: cgroup v1, in a qemu guest
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 busybox-static cpio musl-tools
+          scripts/cgroup-v1-qemu.sh
