@@ -146,6 +146,8 @@ impl Manager {
 
         let is_tls =
             !self.config.server.ssl_cert.is_empty() && !self.config.server.ssl_key.is_empty();
+        #[cfg(feature = "push")]
+        let pushes = crate::metrics::push(&self);
 
         if !is_tls {
             let listener = tokio::net::TcpListener::bind(&socket_addr)
@@ -179,6 +181,8 @@ impl Manager {
                 .await
                 .map_err(|e| ManagerError::Bind(e.to_string()))?;
         }
+        #[cfg(feature = "push")]
+        pushes.iter().for_each(tokio::task::JoinHandle::abort);
         Ok(())
     }
 }

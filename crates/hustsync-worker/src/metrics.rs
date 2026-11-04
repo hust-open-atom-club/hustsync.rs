@@ -25,11 +25,13 @@ impl metrics::Group for Group {
     }
 }
 
-/// Group caches; empty when the worker is built without metrics.
+/// Group caches and push targets; empty when the worker is built without metrics.
 #[derive(Default)]
 pub struct Metrics {
     #[cfg(feature = "metrics")]
     board: Board<Group>,
+    #[cfg(feature = "push")]
+    push: Vec<metrics::push::Target<Group>>,
 }
 
 impl Metrics {
@@ -42,9 +44,15 @@ impl Metrics {
         let cfg = table.map(metrics::MetricsConfig::parse).transpose()?;
         #[cfg(feature = "metrics")]
         let cfg = cfg.as_ref();
+        #[cfg(all(feature = "metrics", not(feature = "push")))]
+        if cfg.is_some_and(|c| !c.push.is_empty()) {
+            return Err("[[metrics.push]]: built without a push feature".into());
+        }
         Ok(Self {
             #[cfg(feature = "metrics")]
             board: Board::new(cfg)?,
+            #[cfg(feature = "push")]
+            push: metrics::push::Target::all(cfg.map_or(&[][..], |c| &c.push))?,
         })
     }
 }
@@ -95,6 +103,22 @@ async fn jobs(s: &AppState) -> Res<Vec<MetricFamily>> {
         out.extend(g.collect());
     }
     Ok(out)
+}
+
+/// Pushes to each `[[metrics.push]]` target until the handles are aborted.
+#[cfg(feature = "push")]
+pub fn push(
+    s: &std::sync::Arc<AppState>,
+    client: &reqwest::Client,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let weak = std::sync::Arc::downgrade(s);
+    metrics::push::spawn(s.metrics.push.clone(), client, move |g| {
+        let weak = std::sync::Weak::clone(&weak);
+        async move {
+            let s = weak.upgrade().ok_or("worker stopped")?;
+            gather(&s, g).await
+        }
+    })
 }
 
 #[cfg(feature = "p8s")]

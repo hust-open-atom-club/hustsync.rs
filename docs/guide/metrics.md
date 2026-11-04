@@ -1,19 +1,20 @@
 # Metrics
 
-The manager and the worker expose p8s metrics for Prometheus or Telegraf to scrape.
+The manager and the worker expose p8s metrics for Prometheus or Telegraf to scrape, and can push them to Telegraf or InfluxDB.
 
 ## Build features
 
 | Feature | Provides | Default |
 |:--:|:--:|:--:|
 | `p8s` | `GET /metrics`, `/metrics/all`, `/metrics/<group>` | on |
+| `influx` | Pushes InfluxDB line protocol | on |
 
 ```bash
 cargo build --release
 cargo build --release --no-default-features
 ```
 
-Without it no metrics code is built, and a config with `[metrics]` fails at start-up.
+With all of them off no metrics code is built, and a config using a missing one fails at start-up.
 
 ## Endpoints
 
@@ -73,8 +74,30 @@ The manager and the worker take the same keys:
 ```toml
 [metrics]
 cache = { mirrors = 10, workers = 30 }
+
+[[metrics.push]]
+url = "http://telegraf:8186/telegraf"
+interval = 30
+groups = ["mirrors", "workers", "syncs"]
 ```
 
 | Key | Default | Description |
 |:--:|:--:|:--:|
 | `cache` | empty | Group name to seconds; groups not listed are computed per request |
+| `push.url` | required | Receiver address |
+| `push.interval` | 30 | Seconds |
+| `push.groups` | all | Groups to push |
+| `push.headers` | empty | Extra request headers, such as InfluxDB's `Authorization = "Token …"` |
+
+A failing push logs one warning when it starts failing and one info line when it recovers.
+
+## Receivers
+
+| Receiver | Config |
+|:--:|:--:|
+| Prometheus | Scrape with the `scrape_configs` above |
+| Telegraf pull | `inputs.prometheus`, `metric_version = 2` |
+| Telegraf push | `inputs.http_listener_v2`, `data_format = "influx"`; the output matches the pull line for line |
+| InfluxDB | `url` set to `/api/v2/write?org=…&bucket=…`, with the token in `headers` |
+
+The line protocol follows Telegraf 1.40 `inputs.prometheus` with `metric_version = 2`: the measurement is `prometheus`, tags are sorted by key, the field name is the metric name, and a histogram becomes one line for `_count` and `_sum` plus one per bucket.

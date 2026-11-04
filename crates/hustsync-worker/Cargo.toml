@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["p8s"]
+default = ["p8s", "influx"]
 metrics = ["hustsync-internal/metrics"]
+push = ["metrics", "hustsync-internal/push"]
 p8s = ["metrics", "hustsync-internal/p8s"]
+influx = ["push", "hustsync-internal/influx"]
 
 [dependencies]
 async-trait = "0.1.92"

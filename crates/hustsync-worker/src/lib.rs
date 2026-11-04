@@ -558,6 +558,18 @@ impl Worker {
         })
     }
 
+    /// Pushes metrics until the worker exits.
+    #[cfg(feature = "push")]
+    fn start_push(&self, state: &Arc<server::AppState>) {
+        let client = self.http_client.clone().unwrap_or_default();
+        let pushes = metrics::push(state, &client);
+        let exit = self.exit_token.clone();
+        tokio::spawn(async move {
+            exit.cancelled().await;
+            pushes.iter().for_each(tokio::task::JoinHandle::abort);
+        });
+    }
+
     async fn start_http_server(&self, state: Arc<server::AppState>) -> bool {
         let app = server::make_http_server(state);
         let listen_addr = self
@@ -922,6 +934,8 @@ impl Worker {
         if !self.start_http_server(Arc::clone(&state)).await {
             return;
         }
+        #[cfg(feature = "push")]
+        self.start_push(&state);
 
         self.start_message_relay().await;
         self.start_dispatch_loop();
