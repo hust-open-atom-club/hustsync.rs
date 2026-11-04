@@ -51,6 +51,8 @@ pub struct Metrics {
     board: Board<Group>,
     syncs: IntCounterVec,
     took: HistogramVec,
+    #[cfg(feature = "push")]
+    pub(crate) push: Vec<metrics::push::Target<Group>>,
 }
 
 impl Metrics {
@@ -58,6 +60,10 @@ impl Metrics {
         let cfg = table.map(metrics::MetricsConfig::parse).transpose()?;
         let cfg = cfg.as_ref();
         let bad = |e: metrics::prometheus::Error| e.to_string();
+        #[cfg(not(feature = "push"))]
+        if cfg.is_some_and(|c| !c.push.is_empty()) {
+            return Err("[[metrics.push]]: built without a push feature".into());
+        }
         Ok(Self {
             board: Board::new(cfg)?,
             syncs: IntCounterVec::new(
@@ -74,6 +80,8 @@ impl Metrics {
                 &["worker", "result"],
             )
             .map_err(bad)?,
+            #[cfg(feature = "push")]
+            push: metrics::push::Target::all(cfg.map_or(&[][..], |c| &c.push))?,
         })
     }
 
@@ -109,6 +117,20 @@ pub async fn gather(mgr: &Manager, g: Group) -> Res<Families> {
             }
         })
         .await
+}
+
+/// Pushes to each `[[metrics.push]]` target until the manager stops.
+#[cfg(feature = "push")]
+pub fn push(mgr: &std::sync::Arc<Manager>) -> Vec<tokio::task::JoinHandle<()>> {
+    let client = mgr.http_client.clone().unwrap_or_default();
+    let weak = std::sync::Arc::downgrade(mgr);
+    metrics::push::spawn(mgr.metrics.push.clone(), &client, move |g| {
+        let weak = std::sync::Weak::clone(&weak);
+        async move {
+            let mgr = weak.upgrade().ok_or("manager stopped")?;
+            gather(&mgr, g).await
+        }
+    })
 }
 
 #[cfg(feature = "p8s")]

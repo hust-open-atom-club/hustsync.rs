@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["p8s"]
+default = ["p8s", "influx"]
 p8s = ["hustsync-manager/p8s", "hustsync-worker/p8s"]
+influx = ["hustsync-manager/influx", "hustsync-worker/influx"]
 
 [dependencies]
 # log = "0.4.28"

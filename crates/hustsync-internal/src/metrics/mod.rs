@@ -1,6 +1,11 @@
 //! Metrics split into named groups, gathered on demand and cached per group.
 
 mod config;
+#[cfg(feature = "influx")]
+pub mod influx;
+#[cfg(feature = "push")]
+pub mod push;
+
 use std::{
     collections::HashMap,
     error::Error,
@@ -9,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use config::MetricsConfig;
+pub use config::{MetricsConfig, PushConfig};
 pub use prometheus;
 use prometheus::{IntGaugeVec, Opts, core::Collector, proto::MetricFamily};
 
