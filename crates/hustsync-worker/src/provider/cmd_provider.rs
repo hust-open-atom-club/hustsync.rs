@@ -111,7 +111,8 @@ impl MirrorProvider for CmdProvider {
             .ok_or_else(|| ProviderError::Config("Command is empty".into()))?;
         let mut cmd = common
             .runner
-            .command(prog, args, common.job(&effective_log_file, &env));
+            .command(prog, args, common.job(&effective_log_file, &env))
+            .await?;
         cmd.stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
 
