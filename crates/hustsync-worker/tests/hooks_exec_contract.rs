@@ -5,6 +5,7 @@
 //! the expected env. `sh -c` is used so the env vars propagate into the
 //! spawned process without needing a compiled test binary.
 
+#![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::HashMap;

@@ -11,7 +11,10 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 fn create_test_app(db_name: &str) -> axum::Router {
-    let db_path = format!("/tmp/{}.db", db_name);
+    let db_path = std::env::temp_dir()
+        .join(format!("{db_name}.db"))
+        .to_string_lossy()
+        .into_owned();
     let _ = std::fs::remove_file(&db_path);
 
     let config = Arc::new(ManagerConfig {
