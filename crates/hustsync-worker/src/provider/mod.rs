@@ -258,6 +258,32 @@ pub(crate) fn rsync_env(
         .collect()
 }
 
+/// A local path as rsync takes it; on Windows `C:\x` would read as host `C`.
+pub(crate) fn rsync_path(p: &str) -> String {
+    if cfg!(windows) {
+        cygpath(p)
+    } else {
+        p.to_owned()
+    }
+}
+
+/// `C:\x` → `/proc/cygdrive/c/x`, `\\host\share` → `//host/share`, which Cygwin and MSYS2 both read.
+fn cygpath(p: &str) -> String {
+    match p.as_bytes() {
+        [d, b':', rest @ ..]
+            if d.is_ascii_alphabetic() && matches!(rest, [] | [b'/' | b'\\', ..]) =>
+        {
+            format!(
+                "/proc/cygdrive/{}{}",
+                char::from(d.to_ascii_lowercase()),
+                p[2..].replace('\\', "/")
+            )
+        }
+        [b'\\', b'\\', ..] => p.replace('\\', "/"),
+        _ => p.to_owned(),
+    }
+}
+
 /// Resolve the effective log file path for a sync run.
 ///
 /// A pre-exec hook (e.g. loglimit) may have rotated the log to a
@@ -654,5 +680,25 @@ pub fn build_provider(
         _ => Err(ProviderError::Config(format!(
             "unknown provider type `{p_type}`"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cygpath;
+
+    #[test]
+    fn cygpath_rewrites_windows_paths() {
+        for (from, to) in [
+            (r"C:\mirrors\debian", "/proc/cygdrive/c/mirrors/debian"),
+            ("e:/srv/", "/proc/cygdrive/e/srv/"),
+            ("D:", "/proc/cygdrive/d"),
+            (r"\\nas\pub\x", "//nas/pub/x"),
+            ("rsync://host/m/", "rsync://host/m/"),
+            ("a::m/", "a::m/"),
+            ("/srv/x", "/srv/x"),
+        ] {
+            assert_eq!(cygpath(from), to, "{from}");
+        }
     }
 }

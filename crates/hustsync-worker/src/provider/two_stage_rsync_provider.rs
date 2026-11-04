@@ -12,7 +12,7 @@ use hustsync_internal::util::translate_rsync_exit_status;
 use super::{
     BASE_RSYNC_ARGS, BASE_RSYNC_STAGE1_ARGS, CommonProviderConfig, MirrorProvider, ProviderError,
     ProviderType, RunContext, impl_provider_getters, log_provider_failure, resolve_log_file,
-    rsync_env, run_child_with_cancellation, store_rsync_data_size,
+    rsync_env, rsync_path, run_child_with_cancellation, store_rsync_data_size,
 };
 
 /// Stage-1 filter rules for the `debian` profile.
@@ -181,8 +181,8 @@ impl TwoStageRsyncProvider {
         }
 
         // Positional args
-        options.push(self.config.common.upstream_url.clone());
-        options.push(self.config.common.working_dir.clone());
+        options.push(rsync_path(&self.config.common.upstream_url));
+        options.push(rsync_path(&self.config.common.working_dir));
 
         Ok(options)
     }
