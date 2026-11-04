@@ -11,6 +11,7 @@ use axum::{
 use http_body_util::BodyExt as _;
 use hustsync_worker::{
     metrics::Metrics,
+    reach::Reach,
     schedule::ScheduleQueue,
     server::{AppState, make_http_server},
 };
@@ -69,7 +70,7 @@ async fn unknown_groups_are_404() -> Res {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(
         body,
-        "unknown metric group `mirrors`; groups are jobs, process"
+        "unknown metric group `mirrors`; groups are jobs, manager, process"
     );
     Ok(())
 }
@@ -78,9 +79,43 @@ async fn unknown_groups_are_404() -> Res {
 async fn cached_jobs_keep_their_values() -> Res {
     let cfg: toml::Table = toml::from_str("cache = { jobs = 3600 }")?;
     let semaphore = Arc::new(Semaphore::new(3));
-    let s = state(Arc::clone(&semaphore), Metrics::new(Some(&cfg))?);
+    let s = state(
+        Arc::clone(&semaphore),
+        Metrics::new(Some(&cfg), Arc::default())?,
+    );
     let (_, before) = get(&s, "/metrics/jobs").await?;
     let _held = semaphore.acquire_owned().await?;
     assert_eq!(get(&s, "/metrics/jobs").await?.1, before);
+    Ok(())
+}
+
+#[tokio::test]
+async fn manager_links_show_outages() -> Res {
+    let reach = Arc::new(Reach::default());
+    reach.ok("http://a:14242");
+    reach.fail("http://b:14242", &"connection refused");
+    reach.fail("http://b:14242", &"connection refused");
+    let s = state(
+        Arc::new(Semaphore::new(3)),
+        Metrics::new(None, Arc::clone(&reach))?,
+    );
+    let (status, text) = get(&s, "/metrics/manager").await?;
+    assert_eq!(status, StatusCode::OK);
+    for line in [
+        r#"hustsync_worker_manager_up{manager="http://a:14242"} 1"#,
+        r#"hustsync_worker_manager_up{manager="http://b:14242"} 0"#,
+        r#"hustsync_worker_manager_failures{manager="http://b:14242"} 2"#,
+    ] {
+        assert!(
+            text.lines().any(|l| l == line),
+            "missing `{line}` in\n{text}"
+        );
+    }
+    assert!(text.contains(
+        r#"hustsync_worker_manager_last_success_timestamp_seconds{manager="http://a:14242"}"#
+    ));
+    assert!(!text.contains(
+        r#"hustsync_worker_manager_last_success_timestamp_seconds{manager="http://b:14242"}"#
+    ));
     Ok(())
 }

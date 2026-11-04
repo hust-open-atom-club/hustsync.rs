@@ -1,4 +1,6 @@
-//! The worker's metrics in groups: jobs, queue and concurrency, and the process itself.
+//! The worker's metrics in groups: jobs, queue and concurrency, its links to the managers, and the process.
+
+use std::sync::Arc;
 
 #[cfg(feature = "metrics")]
 use hustsync_internal::metrics::{self, Board, Families, Res, prometheus::proto::MetricFamily};
@@ -10,16 +12,18 @@ use crate::server::AppState;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Group {
     Jobs,
+    Manager,
     Process,
 }
 
 #[cfg(feature = "metrics")]
 impl metrics::Group for Group {
-    const ALL: &'static [Self] = &[Self::Jobs, Self::Process];
+    const ALL: &'static [Self] = &[Self::Jobs, Self::Manager, Self::Process];
 
     fn name(self) -> &'static str {
         match self {
             Self::Jobs => "jobs",
+            Self::Manager => "manager",
             Self::Process => "process",
         }
     }
@@ -30,10 +34,17 @@ impl metrics::Group for Group {
 pub struct Metrics {
     #[cfg(feature = "metrics")]
     board: Board<Group>,
+    #[cfg(feature = "metrics")]
+    reach: Arc<crate::reach::Reach>,
 }
 
 impl Metrics {
-    pub fn new(table: Option<&toml::Table>) -> Result<Self, String> {
+    pub fn new(
+        table: Option<&toml::Table>,
+        reach: Arc<crate::reach::Reach>,
+    ) -> Result<Self, String> {
+        #[cfg(not(feature = "metrics"))]
+        let _ = reach;
         #[cfg(not(feature = "metrics"))]
         if table.is_some() {
             return Err("[metrics]: built without any metrics feature".into());
@@ -45,6 +56,8 @@ impl Metrics {
         Ok(Self {
             #[cfg(feature = "metrics")]
             board: Board::new(cfg)?,
+            #[cfg(feature = "metrics")]
+            reach,
         })
     }
 }
@@ -57,6 +70,7 @@ pub async fn gather(s: &AppState, g: Group) -> Res<Families> {
         .get(g, || async move {
             match g {
                 Group::Jobs => jobs(s).await,
+                Group::Manager => links(&s.metrics.reach),
                 Group::Process => metrics::process(),
             }
         })
@@ -95,6 +109,44 @@ async fn jobs(s: &AppState) -> Res<Vec<MetricFamily>> {
         out.extend(g.collect());
     }
     Ok(out)
+}
+
+#[cfg(feature = "metrics")]
+fn links(reach: &crate::reach::Reach) -> Res<Vec<MetricFamily>> {
+    use hustsync_internal::metrics::prometheus::{GaugeVec, IntGaugeVec, Opts, core::Collector};
+
+    let up = IntGaugeVec::new(
+        Opts::new(
+            "hustsync_worker_manager_up",
+            "Whether the manager took the last request.",
+        ),
+        &["manager"],
+    )?;
+    let failures = IntGaugeVec::new(
+        Opts::new(
+            "hustsync_worker_manager_failures",
+            "Failed requests in a row.",
+        ),
+        &["manager"],
+    )?;
+    let last = GaugeVec::new(
+        Opts::new(
+            "hustsync_worker_manager_last_success_timestamp_seconds",
+            "Unix time of the last request the manager took.",
+        ),
+        &["manager"],
+    )?;
+    for (m, l) in reach.all() {
+        up.with_label_values(&[m.as_str()]).set(i64::from(l.up));
+        failures
+            .with_label_values(&[m.as_str()])
+            .set(l.failures.into());
+        if let Some(t) = l.last_ok {
+            last.with_label_values(&[m.as_str()])
+                .set(t.timestamp() as f64);
+        }
+    }
+    Ok([up.collect(), failures.collect(), last.collect()].concat())
 }
 
 #[cfg(feature = "p8s")]
