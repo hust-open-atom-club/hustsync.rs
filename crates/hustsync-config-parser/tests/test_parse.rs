@@ -122,7 +122,7 @@ use_ipv4 = true
 name = "m1"
 provider = "rsync"
 upstream = "rsync://example.test/m1/"
-snapshot_path = "/srv/snapshots"
+not_a_field = "/srv/snapshots"
 "#
         )
         .unwrap();
@@ -204,7 +204,7 @@ dangerous_global_rsync_success_exit_codes = [0, 1, 23]
             r#"
 [[mirrors]]
 name = "archlinux"
-snapshot_path = "/srv/snapshots"
+not_a_field = "/srv/snapshots"
 "#
         )
         .unwrap();
@@ -231,7 +231,7 @@ snapshot_path = "/srv/snapshots"
             r#"
 [[mirrors]]
 name = "archlinux"
-snapshot_path = "/srv/snapshots"
+not_a_field = "/srv/snapshots"
 "#
         )
         .unwrap();

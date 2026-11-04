@@ -20,12 +20,16 @@ use async_trait::async_trait;
 
 pub use crate::error::{HookError, HookErrorKind};
 
+#[cfg(target_os = "linux")]
+pub mod btrfs;
 pub mod exec;
 pub mod loglimit;
 pub mod working_dir;
 #[cfg(target_os = "linux")]
 pub mod zfs;
 
+#[cfg(target_os = "linux")]
+pub use btrfs::BtrfsSnapshotHook;
 pub use exec::ExecPostHook;
 pub use loglimit::LogLimitHook;
 pub use working_dir::WorkingDirHook;
