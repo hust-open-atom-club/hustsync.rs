@@ -20,5 +20,8 @@ toml = "0.9"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["registry", "std"] }
 prometheus = { version = "0.14", default-features = false, features = ["process"], optional = true }
 
+[dev-dependencies]
+tempfile = "3.23.0"
+
 [lints]
 workspace = true
