@@ -389,9 +389,8 @@ pub(crate) async fn run_child_with_cancellation(
 
 /// Execution context passed into every `run()` call.
 ///
-/// `cancel` is a caller-supplied cancellation token. JobActor currently supplies
-/// a fresh default token and handles operator commands through `terminate()`;
-/// this field alone does not establish an end-to-end cancellation deadline.
+/// `cancel` is cancelled by JobActor on Stop, Disable, Restart and Halt; the
+/// Provider then stops its child and returns `ProviderError::Terminated`.
 ///
 /// `attempt` is the zero-based index supplied by JobActor (HookCtx uses one-based
 /// attempts). It is diagnostic context, not a separate retry policy: the actor
