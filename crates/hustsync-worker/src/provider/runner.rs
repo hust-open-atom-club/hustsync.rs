@@ -91,9 +91,16 @@ impl Runner {
             }
             _ => Command::new(prog),
         };
-        cmd.args(args).current_dir(job.dir).envs(job.env);
+        cmd.args(args)
+            .current_dir(job.dir)
+            .envs(job.env)
+            .stdin(std::process::Stdio::null());
+        // A session of its own keeps the job off the worker's terminal, so shells like fpsync never stop on SIGTTOU.
         #[cfg(unix)]
-        cmd.process_group(0);
+        // SAFETY: setsid is async-signal-safe.
+        unsafe {
+            cmd.pre_exec(|| nix::unistd::setsid().map(drop).map_err(Into::into));
+        }
         if let Self::Cgroup(cg, mem) = self {
             cgroup::attach(&mut cmd, &cg.create(job.name, *mem).await?)?;
         }
