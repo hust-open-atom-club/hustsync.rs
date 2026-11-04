@@ -1,4 +1,5 @@
 # Manager, worker and the hust-mirrors site; /status.json is served from the manager's /jobs.
+# `--profile monitoring` adds the stack in docs/guide/monitoring.md.
 name: hustsync
 
 services:
@@ -37,7 +38,19 @@ services:
     depends_on: [manager, web]
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - ../prometheus:/etc/prometheus:ro
+      - p8s:/prometheus
+    restart: unless-stopped
+
 volumes:
   db:
   data:
   log:
+  p8s:

@@ -1,6 +1,6 @@
 # Alerts
 
-hustsync logs an event with the target `hustsync::alert` when a fault starts and when it ends; serlog's mail sink sends it.
+Alerts come two ways: hustsync logs an event with the target `hustsync::alert` when a fault starts and when it ends, for serlog's mail sink to send; or p8s evaluates the metrics, with rules in [monitoring.md](monitoring.md). The two are independent; either works alone.
 
 ## Events
 
