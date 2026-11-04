@@ -906,6 +906,7 @@ dependencies = [
  "tokio-util",
  "tower",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

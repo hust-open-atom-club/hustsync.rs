@@ -1,6 +1,6 @@
 # Resource isolation
 
-Each mirror syncs in its own cgroup: memory is capped, leftover processes are killed when the sync ends, and exceeding the cap is reported as an OOM. cgroup v1 and v2 are both supported and detected automatically.
+Each mirror syncs in its own cgroup: memory is capped, leftover processes are killed when the sync ends, and exceeding the cap is reported as an OOM. cgroup v1 and v2 are both supported and detected automatically. On Windows the same config uses Job Objects; see [windows.md](windows.md).
 
 ## Configuration
 

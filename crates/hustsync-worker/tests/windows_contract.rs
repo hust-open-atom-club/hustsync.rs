@@ -1,11 +1,12 @@
-//! Windows-only behaviour: hooks run through `cmd`, stopped jobs end their whole process tree, rsync takes drive paths.
+//! Windows-only behaviour: hooks run through `cmd`, stopped jobs end their whole process tree, Job Objects cap memory, rsync takes drive paths.
 
 #![cfg(windows)]
 
-use std::{collections::HashMap, path::Path, process::Command, time::Duration};
+use std::{collections::HashMap, path::Path, process::Command, sync::Arc, time::Duration};
 
-use hustsync_config_parser::{MirrorConfig, WorkerConfig};
+use hustsync_config_parser::{MemBytes, MirrorConfig, WorkerCgroupConfig, WorkerConfig};
 use hustsync_worker::{
+    cgroup::Cgroups,
     hooks::{ExecPostHook, HookCtx, JobHook},
     provider::{
         CommonProviderConfig, MirrorProvider, ProviderError, RunContext, Runner, build_provider,
@@ -19,6 +20,7 @@ type Res<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 /// Pings no other process on the machine is likely to run.
 const MARK: &str = "127.0.0.79";
+const JOB_MARK: &str = "127.0.0.78";
 
 fn provider(tmp: &TempDir, command: &str, runner: Runner) -> Res<CmdProvider> {
     let path = |p: &str| tmp.path().join(p).to_string_lossy().into_owned();
@@ -41,6 +43,11 @@ fn provider(tmp: &TempDir, command: &str, runner: Runner) -> Res<CmdProvider> {
         fail_on_match: None,
         size_pattern: None,
     })?)
+}
+
+fn job(mem: Option<MemBytes>) -> Res<Runner> {
+    let cg = Cgroups::init(&WorkerCgroupConfig::default())?;
+    Ok(Runner::Cgroup(Arc::new(cg), mem))
 }
 
 /// Starts `p`, cancels it once a ping marked `mark` is up, and checks the ping went with it.
@@ -101,6 +108,23 @@ async fn cancel_ends_the_process_tree() -> Res {
     let tmp = TempDir::new()?;
     let p = provider(&tmp, &format!("cmd /C ping -n 60 {MARK}"), Runner::Direct)?;
     cancel_tree(p, MARK).await
+}
+
+#[tokio::test]
+async fn job_cancel_ends_the_process_tree() -> Res {
+    let tmp = TempDir::new()?;
+    let p = provider(&tmp, &format!("cmd /C ping -n 60 {JOB_MARK}"), job(None)?)?;
+    cancel_tree(p, JOB_MARK).await
+}
+
+#[tokio::test]
+async fn job_memory_limit_reports_oom() -> Res {
+    let tmp = TempDir::new()?;
+    let cmd = "powershell -NoProfile -Command \"$b = New-Object byte[] 1073741824; $b[0] = 1\"";
+    let p = provider(&tmp, cmd, job(Some(MemBytes(256 << 20)))?)?;
+    let res = p.run(RunContext::default()).await;
+    assert!(matches!(res, Err(ProviderError::OutOfMemory)), "{res:?}");
+    Ok(())
 }
 
 /// MSYS2's rsync, the one the Windows docs recommend.

@@ -103,6 +103,19 @@ impl CommonProviderConfig {
         }
     }
 
+    /// Spawns `cmd` and hands the child to the runner, killing it if that fails.
+    pub(crate) async fn spawn(
+        &self,
+        cmd: &mut tokio::process::Command,
+    ) -> std::io::Result<tokio::process::Child> {
+        let mut child = cmd.spawn()?;
+        if let Err(e) = self.runner.adopt(&self.name, &child) {
+            let _ = child.kill().await;
+            return Err(e);
+        }
+        Ok(child)
+    }
+
     /// Stops the running job.
     pub(crate) async fn stop(&self, pgid: &AtomicU32) {
         self.runner.stop(&self.name, pgid).await;
