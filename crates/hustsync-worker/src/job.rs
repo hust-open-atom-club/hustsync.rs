@@ -256,10 +256,9 @@ impl JobActor {
             Err((n, e)) => {
                 tracing::warn!("Job {} pre_job hook aborted: {}", name, e);
                 Self::run_post(PostPhase::PostFail, &hooks, n, &mut hook_ctx).await;
-                return Err(ProviderError::Execution {
-                    code: -1,
-                    msg: format!("pre_job hook failed: {e}"),
-                });
+                let msg = format!("error exec hook pre_job: {e}");
+                report(SyncStatus::Failed, msg.clone(), true).await;
+                return Err(ProviderError::Execution { code: -1, msg });
             }
         };
 
@@ -279,10 +278,9 @@ impl JobActor {
                     tracing::warn!("Job {} pre_exec hook aborted: {}", name, e);
                     Self::run_post(PostPhase::PostFail, &hooks, n, &mut hook_ctx).await;
                     Self::run_post(PostPhase::PostFail, &hooks, pre_job_count, &mut hook_ctx).await;
-                    return Err(ProviderError::Execution {
-                        code: -1,
-                        msg: format!("pre_exec hook failed: {e}"),
-                    });
+                    let msg = format!("error exec hook pre_exec: {e}");
+                    report(SyncStatus::Failed, msg.clone(), true).await;
+                    return Err(ProviderError::Execution { code: -1, msg });
                 }
             };
 
