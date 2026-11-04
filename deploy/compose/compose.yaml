@@ -74,7 +74,7 @@ services:
     ports: ["${GRAFANA_PORT:-3000}:3000"]
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
-      GF_PLUGINS_PREINSTALL_SYNC: marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel
+      GF_PLUGINS_PREINSTALL_SYNC: marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel,yesoreyeram-infinity-datasource
     volumes:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - ../grafana/dashboards:/var/lib/grafana/dashboards:ro

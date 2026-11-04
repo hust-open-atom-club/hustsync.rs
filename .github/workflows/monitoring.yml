@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Provision Grafana
         run: |
-          docker run -d --name grafana --restart on-failure:3 -p 3000:3000 -e GF_PLUGINS_PREINSTALL_SYNC=marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel \
+          docker run -d --name grafana --restart on-failure:3 -p 3000:3000 -e GF_PLUGINS_PREINSTALL_SYNC=marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel,yesoreyeram-infinity-datasource \
             -v "$PWD/deploy/grafana/provisioning:/etc/grafana/provisioning:ro" \
             -v "$PWD/deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro" grafana/grafana:13.2.4
           for _ in $(seq 120); do curl -fs http://localhost:3000/api/health >/dev/null && break; sleep 1; done
