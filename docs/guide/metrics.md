@@ -41,12 +41,20 @@ scrape_configs:
 | Group | Metric | Meaning |
 |:--:|:--:|:--:|
 | `mirrors` | `hustsync_mirrors{status}` | Mirrors per status; they sum to the total |
+| | `hustsync_mirror_state{mirror,worker}` | 0 none, 1 failed, 2 success, 3 syncing, 4 pre-syncing, 5 paused, 6 disabled |
+| | `hustsync_mirror_info{mirror,worker,upstream,role}` | Always 1; carries the upstream and role |
+| | `hustsync_mirror_size_bytes{mirror,worker}` | Mirror size |
 | | `hustsync_mirror_sync_duration_seconds{mirror,worker}` | Duration of the last sync |
 | | `hustsync_mirror_last_success_timestamp_seconds{mirror,worker}` | Time of the last success |
+| | `hustsync_mirror_next_sync_timestamp_seconds{mirror,worker}` | Time of the next sync |
 | `workers` | `hustsync_workers` | Registered workers |
 | | `hustsync_workers_online` `hustsync_worker_up{worker}` | Probed at scrape time; a reply within 2 s counts as online |
+| | `hustsync_worker_last_online_timestamp_seconds{worker}` | When the worker last contacted the manager |
 | `syncs` | `hustsync_syncs_total{mirror,worker,result}` | Successful and failed syncs |
+| | `hustsync_sync_duration_seconds{worker,result}` | Histogram of sync durations, buckets from 1 s to 1 day |
 | `process` | `hustsync_build_info{version}` and `process_*` | Version; on Linux also CPU, memory, file descriptors and threads |
+
+Size comes from `size` in the status: `K`, `M`, `G` and `T` are powers of 1000, as with rsync `-h`; `KiB` and the like are powers of 1024; `unknown` gives no line.
 
 ## worker
 
