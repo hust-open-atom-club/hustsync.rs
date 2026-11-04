@@ -294,6 +294,7 @@ mod cmd_provider_contract {
 
         // Give the child process time to start before firing the token.
         tokio::time::sleep(Duration::from_millis(50)).await;
+        let started = std::time::Instant::now();
         cancel.cancel();
 
         let result = tokio::time::timeout(Duration::from_secs(10), run_handle)
@@ -301,6 +302,10 @@ mod cmd_provider_contract {
             .expect("run() did not return within 10 s after cancellation")
             .expect("task panicked");
 
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "stopping must not wait out the SIGKILL grace period"
+        );
         assert!(
             matches!(result, Err(ProviderError::Terminated)),
             "expected Terminated, got {:?}",
