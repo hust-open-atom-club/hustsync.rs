@@ -12,7 +12,7 @@ use hustsync_config_parser::{MemBytes, MirrorConfig, WorkerDockerConfig};
 use hustsync_internal::util::expand_tilde;
 use tokio::process::Command;
 
-use crate::cgroup::{self, Cgroups};
+use crate::cgroup::Cgroups;
 
 /// How a provider's command is launched.
 #[derive(Debug, Default)]
@@ -95,15 +95,27 @@ impl Runner {
         #[cfg(unix)]
         cmd.process_group(0);
         if let Self::Cgroup(cg, mem) = self {
-            cgroup::attach(&mut cmd, &cg.create(job.name, *mem).await?)?;
+            cg.enter(job.name, *mem, &mut cmd).await?;
         }
         Ok(cmd)
     }
 
-    /// Stops the running job: `docker stop` for containers, then the process group.
+    /// Hands a spawned child to its cgroup where it cannot join before exec.
+    pub fn adopt(&self, name: &str, child: &tokio::process::Child) -> io::Result<()> {
+        match self {
+            Self::Cgroup(cg, _) => cg.adopt(name, child),
+            _ => Ok(()),
+        }
+    }
+
+    /// Stops the running job: `docker stop` or the cgroup first, then the process group.
     pub async fn stop(&self, name: &str, pgid: &AtomicU32) {
-        if let Self::Docker(_) = self {
-            let _ = docker(["stop", "-t", "2", &container(name)]).output().await;
+        match self {
+            Self::Docker(_) => {
+                let _ = docker(["stop", "-t", "2", &container(name)]).output().await;
+            }
+            Self::Cgroup(cg, _) => cg.kill(name),
+            Self::Direct => {}
         }
         #[cfg(unix)]
         super::terminate_pgid(pgid, name).await;

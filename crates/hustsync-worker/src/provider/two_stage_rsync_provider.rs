@@ -228,7 +228,7 @@ impl TwoStageRsyncProvider {
             stage
         );
 
-        let mut spawned_child = match cmd.spawn() {
+        let mut spawned_child = match self.config.common.spawn(&mut cmd).await {
             Ok(child) => child,
             Err(err) => {
                 self.running_pgid.store(0, Ordering::Release);

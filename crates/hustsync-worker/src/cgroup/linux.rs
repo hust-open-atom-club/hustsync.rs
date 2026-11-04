@@ -1,4 +1,4 @@
-//! One cgroup per job (v1 or v2): memory limit, leftover cleanup and OOM detection.
+//! Linux cgroups (v1 or v2), one per job: memory limit, leftover cleanup and OOM detection.
 
 use std::{
     io,
@@ -7,7 +7,11 @@ use std::{
 };
 
 use hustsync_config_parser::{MemBytes, WorkerCgroupConfig};
-use tokio::fs;
+use nix::{
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
+use tokio::{fs, process::Command};
 
 /// Where the worker moves itself in implicit mode, so its parent group can hold children.
 const OWN: &str = "__worker";
@@ -31,12 +35,6 @@ pub struct Cgroups {
 impl Cgroups {
     /// Finds the parent group; an empty `group` means the worker's own group, as in tunasync.
     pub fn init(cfg: &WorkerCgroupConfig) -> io::Result<Self> {
-        if !cfg!(target_os = "linux") {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "cgroup needs Linux",
-            ));
-        }
         let base = Path::new(cfg.base_path.as_deref().unwrap_or("/sys/fs/cgroup"));
         let ver = if base.join("cgroup.controllers").exists() {
             Version::V2
@@ -59,7 +57,7 @@ impl Cgroups {
             parent: root.join(rel.trim_start_matches('/')),
         };
         if implicit && ver == Version::V2 && cg.parent != root {
-            cg.adopt()?;
+            cg.move_self()?;
         } else if !implicit && !pids(&cg.parent)?.is_empty() {
             return Err(io::Error::other(format!(
                 "cgroup {} still has processes",
@@ -105,6 +103,24 @@ impl Cgroups {
         Ok(dir)
     }
 
+    /// Creates `name`'s group and makes `cmd` join it before exec.
+    pub async fn enter(
+        &self,
+        name: &str,
+        mem: Option<MemBytes>,
+        cmd: &mut Command,
+    ) -> io::Result<()> {
+        attach(cmd, &self.create(name, mem).await?)
+    }
+
+    /// Nothing to do once spawned: the child joined its group before exec.
+    pub const fn adopt(&self, _name: &str, _child: &tokio::process::Child) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Leftovers are killed by `finish`, after the job's own process group got its SIGTERM.
+    pub const fn kill(&self, _name: &str) {}
+
     /// Kills what is left in `name`'s group and removes it; returns whether the OOM killer fired.
     pub async fn finish(&self, name: &str) -> bool {
         let dir = self.dir(name);
@@ -127,7 +143,7 @@ impl Cgroups {
     }
 
     /// Moves every process of the parent into `__worker`, since a v2 group with children must be empty.
-    fn adopt(&self) -> io::Result<()> {
+    fn move_self(&self) -> io::Result<()> {
         let own = self.parent.join(OWN);
         if !own.exists() {
             std::fs::create_dir(&own)?;
@@ -148,8 +164,7 @@ impl Cgroups {
 }
 
 /// Moves the child into `dir` between fork and exec, so nothing it spawns escapes.
-#[cfg(target_os = "linux")]
-pub fn attach(cmd: &mut tokio::process::Command, dir: &Path) -> io::Result<()> {
+pub fn attach(cmd: &mut Command, dir: &Path) -> io::Result<()> {
     use nix::{
         fcntl::{OFlag, open},
         sys::stat::Mode,
@@ -171,14 +186,6 @@ pub fn attach(cmd: &mut tokio::process::Command, dir: &Path) -> io::Result<()> {
         });
     }
     Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn attach(_cmd: &mut tokio::process::Command, _dir: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "cgroup needs Linux",
-    ))
 }
 
 /// The worker's own group, from `/proc/self/cgroup`.
@@ -211,12 +218,7 @@ async fn clear(dir: &Path) -> io::Result<()> {
         if left.is_empty() {
             break;
         }
-        #[cfg(unix)]
         for pid in left {
-            use nix::{
-                sys::signal::{Signal, kill},
-                unistd::Pid,
-            };
             let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
         }
         tokio::time::sleep(Duration::from_millis(pause)).await;
