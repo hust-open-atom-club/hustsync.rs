@@ -1029,6 +1029,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serlog",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.9.8",

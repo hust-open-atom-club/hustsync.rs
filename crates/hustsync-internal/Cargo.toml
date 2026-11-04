@@ -29,3 +29,6 @@ prost = { version = "0.14", optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3.23.0"
