@@ -597,23 +597,18 @@ impl Worker {
                     continue;
                 };
 
-                // Skip Failed reports for paused/disabled jobs (mirrors Go behaviour).
-                {
-                    let jobs = jobs_handle.read().await;
-                    if let Some(job) = jobs.get(&msg.name) {
-                        let state = job.state();
-                        if msg.status == hustsync_internal::status::SyncStatus::Failed
-                            && (state == crate::job::STATE_PAUSED
-                                || state == crate::job::STATE_DISABLED)
-                        {
-                            tracing::info!(
-                                "Job {} state is {}, skip reporting Failed status",
-                                msg.name,
-                                state
-                            );
-                            continue;
-                        }
-                    }
+                let state = jobs_handle
+                    .read()
+                    .await
+                    .get(&msg.name)
+                    .map(MirrorJob::state);
+                if matches!(state, Some(job::STATE_PAUSED | job::STATE_DISABLED)) {
+                    tracing::info!(
+                        "Job {} is stopped, skip reporting {:?}",
+                        msg.name,
+                        msg.status
+                    );
+                    continue;
                 }
 
                 let smsg = hustsync_internal::msg::MirrorStatus {

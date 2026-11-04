@@ -9,7 +9,7 @@ use hustsync_internal::status::SyncStatus;
 use hustsync_worker::{
     JobMessage, MirrorJob,
     hooks::{HookCtx, HookError, JobHook},
-    job::{CtrlAction, JobActor},
+    job::{CtrlAction, JobActor, STATE_PAUSED},
     provider::{
         CommonProviderConfig, ProviderError,
         cmd_provider::{CmdProvider, CmdProviderConfig},
@@ -107,5 +107,45 @@ async fn failed_pre_job_hook_reports_and_reschedules() -> Res {
         "{}",
         failed.msg
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn stop_while_waiting_for_a_slot_skips_the_run() -> Res {
+    let dir = TempDir::new()?;
+    let (job, mut rx, sem) = spawn(&dir, "true", 1, vec![], 1)?;
+    let held = Arc::clone(&sem).acquire_owned().await?;
+    job.send_ctrl(CtrlAction::Start).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    job.send_ctrl(CtrlAction::Stop).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    drop(held);
+    assert!(next(&mut rx, 2).await.is_none());
+    assert_eq!(job.state(), STATE_PAUSED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn restart_cancels_the_running_sync() -> Res {
+    let dir = TempDir::new()?;
+    let (job, mut rx, _sem) = spawn(&dir, "sleep 30", 1, vec![], 1)?;
+    job.send_ctrl(CtrlAction::Start).await?;
+    assert_eq!(status(&mut rx, 5).await?, SyncStatus::PreSyncing);
+    assert_eq!(status(&mut rx, 5).await?, SyncStatus::Syncing);
+    job.send_ctrl(CtrlAction::Restart).await?;
+    assert_eq!(status(&mut rx, 10).await?, SyncStatus::PreSyncing);
+    Ok(())
+}
+
+#[tokio::test]
+async fn stop_during_sync_reports_nothing() -> Res {
+    let dir = TempDir::new()?;
+    let (job, mut rx, _sem) = spawn(&dir, "sleep 30", 1, vec![], 1)?;
+    job.send_ctrl(CtrlAction::Start).await?;
+    assert_eq!(status(&mut rx, 5).await?, SyncStatus::PreSyncing);
+    assert_eq!(status(&mut rx, 5).await?, SyncStatus::Syncing);
+    job.send_ctrl(CtrlAction::Stop).await?;
+    assert!(next(&mut rx, 5).await.is_none());
+    assert_eq!(job.state(), STATE_PAUSED);
     Ok(())
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
 use tokio::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use crate::JobMessage;
 use crate::provider::{MirrorProvider, ProviderError};
@@ -76,8 +77,19 @@ pub struct JobActor {
     pub hooks: Arc<Vec<Arc<dyn crate::hooks::JobHook>>>,
 }
 
+/// What one sync run takes from its actor.
+struct Run {
+    name: Box<str>,
+    provider: Arc<dyn MirrorProvider>,
+    semaphore: Arc<tokio::sync::Semaphore>,
+    manager_tx: mpsc::Sender<JobMessage>,
+    state: Arc<AtomicU32>,
+    hooks: Arc<Vec<Arc<dyn crate::hooks::JobHook>>>,
+}
+
 struct RunningJob {
     done: tokio::task::JoinHandle<Result<(), ProviderError>>,
+    cancel: CancellationToken,
 }
 
 impl JobActor {
@@ -207,41 +219,43 @@ impl JobActor {
         provider: &dyn MirrorProvider,
         attempt: u32,
         env: std::collections::HashMap<String, String>,
+        cancel: CancellationToken,
     ) -> Result<(), ProviderError> {
-        use crate::provider::RunContext;
-        let ctx = RunContext {
+        let ctx = crate::provider::RunContext {
+            cancel,
             attempt,
             env,
-            ..RunContext::default()
         };
         provider.run(ctx).await
     }
 
     #[allow(clippy::cognitive_complexity)]
     async fn run_sync_loop(
-        name: Box<str>,
-        provider: Arc<dyn MirrorProvider>,
-        semaphore: Arc<tokio::sync::Semaphore>,
-        manager_tx: mpsc::Sender<JobMessage>,
-        state: Arc<AtomicU32>,
-        hooks: Arc<Vec<Arc<dyn crate::hooks::JobHook>>>,
+        run: Run,
         force: bool,
+        cancel: CancellationToken,
     ) -> Result<(), ProviderError> {
+        let Run {
+            name,
+            provider,
+            semaphore,
+            manager_tx,
+            state,
+            hooks,
+        } = run;
         // 1. Acquire semaphore (Concurrency control)
-        let _permit = if !force {
-            tracing::debug!("Job {} waiting for semaphore...", name);
-            Some(
-                semaphore
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| ProviderError::Execution {
-                        code: -1,
-                        msg: "semaphore closed".into(),
-                    })?,
-            )
-        } else {
+        let _permit = if force {
             tracing::info!("Job {} bypassing semaphore (ForceStart)", name);
             None
+        } else {
+            tracing::debug!("Job {} waiting for semaphore...", name);
+            tokio::select! {
+                permit = semaphore.acquire_owned() => Some(permit.map_err(|_| ProviderError::Execution {
+                    code: -1,
+                    msg: "semaphore closed".into(),
+                })?),
+                () = cancel.cancelled() => return Err(ProviderError::Terminated),
+            }
         };
 
         let report = |status: SyncStatus, msg: String, schedule: bool| {
@@ -288,7 +302,8 @@ impl JobActor {
 
             // 3b. Provider run with hook-injected env.
             let provider_env = hook_ctx.env.clone();
-            let run_result = Self::invoke_provider(provider.as_ref(), i, provider_env).await;
+            let run_result =
+                Self::invoke_provider(provider.as_ref(), i, provider_env, cancel.clone()).await;
 
             // 3c. post_exec always runs, regardless of success/fail.
             Self::run_post(PostPhase::PostExec, &hooks, pre_exec_count, &mut hook_ctx).await;
@@ -318,7 +333,10 @@ impl JobActor {
                         .await;
 
                     let current_state = state.load(Ordering::Acquire);
-                    if current_state == STATE_PAUSED || current_state == STATE_DISABLED {
+                    if cancel.is_cancelled()
+                        || current_state == STATE_PAUSED
+                        || current_state == STATE_DISABLED
+                    {
                         tracing::info!(
                             "Job {} was terminated by user (state {}), not reporting as Failed.",
                             name,
@@ -343,18 +361,25 @@ impl JobActor {
     }
 
     fn spawn_run(&self, force: bool) -> RunningJob {
-        let name = self.name.clone();
-        let provider = Arc::clone(&self.provider);
-        let semaphore = Arc::clone(&self.semaphore);
-        let manager_tx = self.manager_tx.clone();
-        let state = Arc::clone(&self.state);
-        let hooks = Arc::clone(&self.hooks);
+        let run = Run {
+            name: self.name.clone(),
+            provider: Arc::clone(&self.provider),
+            semaphore: Arc::clone(&self.semaphore),
+            manager_tx: self.manager_tx.clone(),
+            state: Arc::clone(&self.state),
+            hooks: Arc::clone(&self.hooks),
+        };
+        let cancel = CancellationToken::new();
+        let done = tokio::spawn(Self::run_sync_loop(run, force, cancel.clone()));
+        RunningJob { done, cancel }
+    }
 
-        let done = tokio::spawn(async move {
-            Self::run_sync_loop(name, provider, semaphore, manager_tx, state, hooks, force).await
-        });
-
-        RunningJob { done }
+    /// Cancels a running sync and waits for it to wind down.
+    async fn cancel_run(run: Option<RunningJob>) {
+        if let Some(r) = run {
+            r.cancel.cancel();
+            let _ = r.done.await;
+        }
     }
 
     #[allow(clippy::cognitive_complexity)]
@@ -384,25 +409,16 @@ impl JobActor {
                         match ctrl {
                             CtrlAction::Stop => {
                                 self.state.store(STATE_PAUSED, Ordering::Release);
-                                let _ = self.provider.terminate().await;
-                                if let Some(r) = running.take() {
-                                    let _ = r.done.await;
-                                }
+                                Self::cancel_run(running.take()).await;
                             }
                             CtrlAction::Disable => {
                                 self.state.store(STATE_DISABLED, Ordering::Release);
-                                let _ = self.provider.terminate().await;
-                                if let Some(r) = running.take() {
-                                    let _ = r.done.await;
-                                }
+                                Self::cancel_run(running.take()).await;
                                 self.disabled.notify_waiters();
                             }
                             CtrlAction::Restart => {
                                 tracing::info!("Job {} restarting, terminating current process...", self.name);
-                                let _ = self.provider.terminate().await;
-                                if let Some(r) = running.take() {
-                                    let _ = r.done.await;
-                                }
+                                Self::cancel_run(running.take()).await;
                                 tokio::time::sleep(Duration::from_secs(1)).await;
                                 self.state.store(STATE_READY, Ordering::Release);
                                 running = Some(self.spawn_run(false));
@@ -413,10 +429,7 @@ impl JobActor {
                             }
                             CtrlAction::Halt => {
                                 self.state.store(STATE_HALTING, Ordering::Release);
-                                let _ = self.provider.terminate().await;
-                                if let Some(r) = running.take() {
-                                    let _ = r.done.await;
-                                }
+                                Self::cancel_run(running.take()).await;
                                 return;
                             }
                             _ => {}
