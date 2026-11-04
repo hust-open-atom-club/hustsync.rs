@@ -1,0 +1,50 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - name: Clippy, default features
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy, no default features
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+      - name: Clippy, every feature
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tools the provider tests drive
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rsync lsyncd fpart ftpsync
+          docker pull -q alpine:3.23
+      - run: cargo test --workspace --all-features
+      - run: cargo test --workspace --no-default-features
