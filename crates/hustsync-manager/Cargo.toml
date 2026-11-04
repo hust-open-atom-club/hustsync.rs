@@ -9,6 +9,7 @@ metrics = ["hustsync-internal/metrics"]
 push = ["metrics", "hustsync-internal/push"]
 p8s = ["metrics", "hustsync-internal/p8s"]
 influx = ["push", "hustsync-internal/influx"]
+otlp = ["push", "hustsync-internal/otlp"]
 
 [dependencies]
 axum = "0.8.8"

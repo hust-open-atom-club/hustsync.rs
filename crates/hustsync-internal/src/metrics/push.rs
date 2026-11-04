@@ -11,12 +11,21 @@ use tokio::{
     time::{MissedTickBehavior, interval},
 };
 
-use super::{Families, Group, PushConfig, Res, groups};
+use super::{Families, Group, PushConfig, PushFormat, Res, groups};
+
+/// Who pushes; OTLP writes it into the resource attributes.
+#[derive(Clone, Debug)]
+pub struct Origin {
+    pub service: &'static str,
+    pub instance: String,
+    pub start: SystemTime,
+}
 
 /// A checked `[[metrics.push]]` entry.
 #[derive(Debug, Clone)]
 pub struct Target<G> {
     url: String,
+    format: PushFormat,
     every: Duration,
     groups: Vec<G>,
     headers: HeaderMap,
@@ -24,6 +33,17 @@ pub struct Target<G> {
 
 impl<G: Group> Target<G> {
     pub fn new(cfg: &PushConfig) -> Result<Self, String> {
+        let built = match cfg.format {
+            PushFormat::Influx => cfg!(feature = "influx"),
+            PushFormat::Otlp => cfg!(feature = "otlp"),
+        };
+        if !built {
+            return Err(format!(
+                "metrics push to {}: built without the `{}` feature",
+                cfg.url,
+                cfg.format.as_str()
+            ));
+        }
         if cfg.interval == 0 {
             return Err(format!(
                 "metrics push to {}: interval must be positive",
@@ -42,6 +62,7 @@ impl<G: Group> Target<G> {
             .collect::<Result<_, String>>()?;
         Ok(Self {
             url: cfg.url.clone(),
+            format: cfg.format,
             every: Duration::from_secs(cfg.interval),
             groups: cfg
                 .groups
@@ -56,7 +77,7 @@ impl<G: Group> Target<G> {
         cfgs.iter().map(Self::new).collect()
     }
 
-    async fn run<F, Fut>(self, client: Client, gather: F)
+    async fn run<F, Fut>(self, client: Client, origin: Origin, gather: F)
     where
         F: Fn(G) -> Fut + Sync,
         Fut: Future<Output = Res<Families>> + Send,
@@ -66,7 +87,7 @@ impl<G: Group> Target<G> {
         let mut ok = true;
         loop {
             tick.tick().await;
-            match self.once(&client, &gather).await {
+            match self.once(&client, &origin, &gather).await {
                 Ok(()) if !ok => {
                     ok = true;
                     tracing::info!("metrics push to {} works again", self.url);
@@ -80,7 +101,7 @@ impl<G: Group> Target<G> {
         }
     }
 
-    async fn once<F, Fut>(&self, client: &Client, gather: &F) -> Res<()>
+    async fn once<F, Fut>(&self, client: &Client, origin: &Origin, gather: &F) -> Res<()>
     where
         F: Fn(G) -> Fut + Sync,
         Fut: Future<Output = Res<Families>> + Send,
@@ -89,11 +110,28 @@ impl<G: Group> Target<G> {
         for &g in &self.groups {
             fams.push(gather(g).await?);
         }
+        let now = SystemTime::now();
+        let (body, kind) = match self.format {
+            #[cfg(feature = "influx")]
+            PushFormat::Influx => (
+                super::influx::encode(&fams, now),
+                "text/plain; charset=utf-8",
+            ),
+            #[cfg(feature = "otlp")]
+            PushFormat::Otlp => (
+                prost::Message::encode_to_vec(&super::otlp::encode(&fams, origin, now)),
+                "application/x-protobuf",
+            ),
+            #[cfg(not(all(feature = "influx", feature = "otlp")))]
+            f => return Err(format!("built without the `{}` feature", f.as_str()).into()),
+        };
+        #[cfg(not(feature = "otlp"))]
+        let _ = origin;
         client
             .post(&self.url)
             .headers(self.headers.clone())
-            .header(CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(super::influx::encode(&fams, SystemTime::now()))
+            .header(CONTENT_TYPE, kind)
+            .body(body)
             .send()
             .await?
             .error_for_status()?;
@@ -102,7 +140,12 @@ impl<G: Group> Target<G> {
 }
 
 /// Starts one task per target; each gathers its groups through `gather` and posts them.
-pub fn spawn<G, F, Fut>(targets: Vec<Target<G>>, client: &Client, gather: F) -> Vec<JoinHandle<()>>
+pub fn spawn<G, F, Fut>(
+    targets: Vec<Target<G>>,
+    client: &Client,
+    origin: &Origin,
+    gather: F,
+) -> Vec<JoinHandle<()>>
 where
     G: Group,
     F: Fn(G) -> Fut + Clone + Send + Sync + 'static,
@@ -110,6 +153,6 @@ where
 {
     targets
         .into_iter()
-        .map(|t| tokio::spawn(t.run(client.clone(), gather.clone())))
+        .map(|t| tokio::spawn(t.run(client.clone(), origin.clone(), gather.clone())))
         .collect()
 }

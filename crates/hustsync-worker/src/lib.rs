@@ -562,7 +562,7 @@ impl Worker {
     #[cfg(feature = "push")]
     fn start_push(&self, state: &Arc<server::AppState>) {
         let client = self.http_client.clone().unwrap_or_default();
-        let pushes = metrics::push(state, &client);
+        let pushes = metrics::push(state, self.name(), &client);
         let exit = self.exit_token.clone();
         tokio::spawn(async move {
             exit.cancelled().await;

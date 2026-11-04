@@ -31,6 +31,8 @@ impl MetricsConfig {
 #[serde(deny_unknown_fields)]
 pub struct PushConfig {
     pub url: String,
+    #[serde(default)]
+    pub format: PushFormat,
     /// Seconds between pushes.
     #[serde(default = "PushConfig::interval")]
     pub interval: u64,
@@ -43,5 +45,25 @@ pub struct PushConfig {
 impl PushConfig {
     const fn interval() -> u64 {
         30
+    }
+}
+
+/// Wire format of a push target.
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PushFormat {
+    /// InfluxDB line protocol, as Telegraf's `http_listener_v2` and InfluxDB take it.
+    #[default]
+    Influx,
+    /// OTLP/HTTP with protobuf bodies.
+    Otlp,
+}
+
+impl PushFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Influx => "influx",
+            Self::Otlp => "otlp",
+        }
     }
 }
