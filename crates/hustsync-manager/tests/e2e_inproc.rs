@@ -106,7 +106,14 @@ fn worker_config(
         mirrors: Some(vec![MirrorConfig {
             name: Some(mirror_name.into()),
             provider: Some("command".into()),
-            command: Some("/bin/echo".into()),
+            command: Some(
+                if cfg!(windows) {
+                    "cmd /C echo"
+                } else {
+                    "/bin/echo"
+                }
+                .into(),
+            ),
             upstream: Some("unused://for-cmd-provider/".into()),
             retry: None,
             exec_on_status: None,

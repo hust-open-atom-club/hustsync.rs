@@ -85,13 +85,14 @@ impl Runner {
     }
 
     /// Stops the running job: `docker stop` for containers, then the process group.
-    #[cfg_attr(not(unix), allow(unused_variables))]
     pub async fn stop(&self, name: &str, pgid: &AtomicU32) {
         if let Self::Docker(_) = self {
             let _ = docker(["stop", "-t", "2", &container(name)]).output().await;
         }
         #[cfg(unix)]
         super::terminate_pgid(pgid, name).await;
+        #[cfg(windows)]
+        kill_tree(pgid).await;
     }
 
     /// Waits for `--rm` to remove the container so the next run can reuse its name.
@@ -143,6 +144,18 @@ impl Docker {
         args.extend(self.options.iter().cloned());
         args.push(self.image.clone());
         args
+    }
+}
+
+/// Ends the process `pid` and everything it started; Windows has no process groups to signal.
+#[cfg(windows)]
+async fn kill_tree(pid: &AtomicU32) {
+    let pid = pid.load(std::sync::atomic::Ordering::Acquire);
+    if pid != 0 && pid != u32::MAX {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .output()
+            .await;
     }
 }
 
