@@ -215,10 +215,16 @@ impl Worker {
             retry.retry = Some(2); // defaultMaxRetry
         }
 
-        if !cfg!(target_os = "linux") && cfg.zpool().is_some() {
+        if !cfg!(target_os = "linux")
+            && (cfg.zpool().is_some()
+                || cfg
+                    .btrfs_snapshot
+                    .as_ref()
+                    .is_some_and(|b| b.enable == Some(true)))
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
-                "[zfs] works on Linux only",
+                "[zfs] and [btrfs_snapshot] work on Linux only",
             ));
         }
 
@@ -339,10 +345,15 @@ impl Worker {
         g_cfg: &WorkerConfig,
     ) -> Vec<Arc<dyn hooks::JobHook>> {
         let mut chain: Vec<Arc<dyn hooks::JobHook>> = Vec::new();
-        // Before working_dir, which would turn a missing dataset into a plain directory.
+        // Before working_dir, which would turn a missing dataset or subvolume into a plain directory.
         #[cfg(target_os = "linux")]
-        if let Some(pool) = g_cfg.zpool() {
-            chain.push(Arc::new(hooks::ZfsHook::new(pool)));
+        {
+            if let Some(pool) = g_cfg.zpool() {
+                chain.push(Arc::new(hooks::ZfsHook::new(pool)));
+            }
+            if let Some(snap) = g_cfg.snapshot_path(m_cfg) {
+                chain.push(Arc::new(hooks::BtrfsSnapshotHook::new(snap)));
+            }
         }
         // 1. Built-in: ensure working_dir exists before anything else.
         chain.push(Arc::new(hooks::WorkingDirHook::new()));
@@ -1231,6 +1242,25 @@ mod tests {
 
         handle_a.abort();
         handle_b.abort();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn snapshot_hooks_run_before_working_dir() {
+        let cfg = WorkerConfig {
+            zfs: Some(hustsync_config_parser::WorkerZfsConfig {
+                enable: Some(true),
+                zpool: Some("tank".into()),
+            }),
+            btrfs_snapshot: Some(hustsync_config_parser::WorkerBtrfsSnapshotConfig {
+                enable: Some(true),
+                snapshot_path: Some("/srv/publish".into()),
+            }),
+            ..WorkerConfig::default()
+        };
+        let hooks = Worker::build_hooks(&command_mirror("m", "true"), &cfg);
+        let names: Vec<_> = hooks.iter().take(3).map(|h| h.name()).collect();
+        assert_eq!(names, ["zfs", "btrfs_snapshot", "working_dir"]);
     }
 
     fn strings(items: &[&str]) -> Vec<String> {

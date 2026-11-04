@@ -20,6 +20,7 @@ fn worker_with_single_mirror(mirror: MirrorConfig) -> WorkerConfig {
         cgroup: None,
         docker: None,
         zfs: None,
+        btrfs_snapshot: None,
         server: None,
         mirrors: Some(vec![mirror]),
         include: None,

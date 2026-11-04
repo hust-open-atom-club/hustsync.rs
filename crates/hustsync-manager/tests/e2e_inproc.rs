@@ -91,6 +91,7 @@ fn worker_config(
         cgroup: None,
         docker: None,
         zfs: None,
+        btrfs_snapshot: None,
         server: Some(WorkerServerConfig {
             hostname: Some("127.0.0.1".into()),
             // Bind worker on a fixed port — no ephemeral here because
@@ -135,6 +136,7 @@ fn worker_config(
             docker_image: None,
             docker_volumes: None,
             docker_options: None,
+            snapshot_path: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
