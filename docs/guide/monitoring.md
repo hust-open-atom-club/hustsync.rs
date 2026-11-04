@@ -35,7 +35,8 @@ flowchart LR
 |:--:|:--:|:--:|
 | Prometheus 3.15 | `deploy/prometheus/prometheus.yml` | Scrapes each group on its own interval: mirror state every 15 s, sync counts every 30 s, workers and processes every minute |
 | Alert rules | `deploy/prometheus/rules.yml` | See below |
-| Alloy 1.20 | `deploy/alloy/config.alloy` | Takes program logs pushed by serlog on port 3100; tails the sync logs under each mirror's `log_dir`, taking the mirror name from the file name; takes OTLP metrics on port 4318 and forwards them to Prometheus |
+| Alloy 1.20 | `deploy/alloy/config.alloy` | Takes program logs pushed by serlog on port 3100; tails the sync logs under each mirror's `log_dir`, taking the mirror name from the file name; takes OTLP metrics on port 4318 and forwards them to Prometheus; reads the nginx access log and counts visitors by location |
+| GeoIP database | compose's `geoip` service | Downloads db-ip.com's free city database monthly, CC BY 4.0 |
 | Loki 3.7 | The image's own config | Stores logs |
 | Telegraf 1.40 | `deploy/telegraf/telegraf.conf` | Scrapes the groups, takes pushes on port 8186 and writes to InfluxDB |
 | Grafana 13.2 | `deploy/grafana/` | Data sources and boards load with the container |
@@ -86,6 +87,10 @@ Fits one 1920×1080 screen:
 
 | Section | Panel | Form |
 |:--:|:--:|:--:|
+| Access | Requests, traffic, countries or regions, provinces in China | Numbers |
+| | Where visitors come from | Map: provinces within China, countries or regions elsewhere; larger circles mean more visits |
+| | Top sources | Bars of the top 12 places |
+| | Request rate, send rate | Lines for the six places with the most requests |
 | Sync activity | Syncs | One bar per 10 minutes, green for success and red for failure |
 | | Size | Treemap grouped by worker; area is size |
 | | Daily syncs, daily failures | Calendar heatmaps of the last 90 days |
@@ -102,6 +107,8 @@ Fits one 1920×1080 screen:
 | Logs | Program log volume, program logs, alert events, sync logs | Bars and logs |
 
 Program logs are pushed by hustsync through the loki sink in `[log]`; sync logs are the files hustsync writes in `log_dir`, read by Alloy.
+
+Access data comes from the mirror site's nginx access log in `combined` format. The log goes to its own `access` volume, as the nginx image's `/var/log/nginx/access.log` is a link to stdout that Alloy cannot read. Alloy takes the visitor IP and bytes sent from each line, looks up country and province in the GeoIP database, and counts them as `hustsync_access_requests_total` and `hustsync_access_sent_bytes_total`, labelled `country`, `region` (provinces in China only) and `place` (a Chinese place name); provinces also carry their capital's `lat` and `lon` for the map. The lines themselves stay out of Loki, as a busy site writes millions a day.
 
 ### Plugins
 
@@ -120,5 +127,5 @@ Compose installs them through `GF_PLUGINS_PREINSTALL_SYNC`; every other panel is
 |:--:|:--:|
 | Prometheus | Change the `targets` in `prometheus.yml` |
 | Grafana | Import the JSON in `deploy/grafana/dashboards/` and install the plugins above |
-| Alloy | Replace `/var/log/hustsync` in `config.alloy` with the worker's `log_dir` |
+| Alloy | Replace `/var/log/hustsync` in `config.alloy` with the worker's `log_dir` and `/var/log/access/access.log` with the site's access log; put the GeoIP database in `/etc/alloy/geoip/`, and have Prometheus scrape Alloy on port 12345 |
 | Telegraf | Change `urls` and the output |

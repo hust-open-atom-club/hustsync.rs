@@ -28,3 +28,10 @@ scrape_configs:
   - job_name: hustsync-process
     metrics_path: /metrics/process
     static_configs: [{ targets: ["manager:14242", "worker:6000"] }]
+  - job_name: hustsync-access
+    scrape_interval: 15s
+    static_configs: [{ targets: ["alloy:12345"] }]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: hustsync_access_.*
+        action: keep

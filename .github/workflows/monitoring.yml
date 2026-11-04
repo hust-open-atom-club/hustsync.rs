@@ -78,6 +78,13 @@ jobs:
       - name: No provisioning errors
         run: "! docker logs grafana 2>&1 | grep -E 'level=error.*(provisioning|dashboard)'"
 
+  access:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Visitors counted by country and province
+        run: scripts/access-geoip.sh
+
   compose:
     runs-on: ubuntu-26.04
     steps:
