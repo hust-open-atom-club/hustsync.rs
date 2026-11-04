@@ -1,6 +1,9 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, ValueHint::FilePath};
@@ -10,6 +13,9 @@ use hustsync_config_parser::{
 use hustsync_manager::Manager;
 use hustsync_worker::Worker;
 use tracing::{info, warn};
+
+#[cfg(windows)]
+mod service;
 
 /// Wait for SIGTERM or SIGINT on Unix; Ctrl-C on other platforms.
 #[cfg(unix)]
@@ -62,6 +68,13 @@ async fn shutdown_signal() {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    /// Append logs to `FILE` instead of stdout
+    #[arg(long, global = true, value_name = "FILE", value_hint = FilePath)]
+    log_file: Option<PathBuf>,
+    /// Run under the Windows service control manager
+    #[cfg(windows)]
+    #[arg(long, global = true)]
+    service: bool,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -130,12 +143,18 @@ struct WorkerArgs {
 }
 
 #[allow(clippy::cognitive_complexity)]
-async fn start_manager(manager_args: ManagerArgs) -> Result<()> {
+async fn start_manager(
+    manager_args: ManagerArgs,
+    log: Option<&Path>,
+    stop: impl Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     hustsync_internal::logger::init_logger(
         manager_args.verbose,
         manager_args.debug,
         manager_args.with_systemd,
-    );
+        log,
+    )
+    .context("open log file")?;
 
     let mut config = match hustsync_manager::load_config(manager_args.config.unwrap_or_default()) {
         Ok(cfg) => cfg,
@@ -181,7 +200,7 @@ async fn start_manager(manager_args: ManagerArgs) -> Result<()> {
 
     let manager = Arc::new(manager);
     Arc::clone(&manager)
-        .run(shutdown_signal())
+        .run(stop)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| "manager start")?;
@@ -212,12 +231,18 @@ async fn reload_worker_from_path(worker: &Worker, config_path: &std::path::Path)
     }
 }
 
-async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
+async fn start_worker(
+    worker_args: WorkerArgs,
+    log: Option<&Path>,
+    stop: impl Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     hustsync_internal::logger::init_logger(
         worker_args.verbose,
         worker_args.debug,
         worker_args.with_systemd,
-    );
+        log,
+    )
+    .context("open log file")?;
 
     let config_path = worker_args
         .config
@@ -245,13 +270,10 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
         }
     };
 
-    // SIGTERM/SIGINT → cancel exit token → Worker::shutdown().
-    // Signal delivery is decoupled from the worker's exit_token so the
-    // worker's existing shutdown path (exit_token.cancelled() → shutdown())
-    // handles cleanup without any changes to worker internals.
+    // A signal or a service stop cancels the exit token; the worker's own shutdown path cleans up.
     let exit_token = worker.exit_token.clone();
     tokio::spawn(async move {
-        shutdown_signal().await;
+        stop.await;
         exit_token.cancel();
     });
 
@@ -304,13 +326,26 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command {
-        Commands::Manager(m) => start_manager(m).await.with_context(|| "manager start"),
-        Commands::Worker(w) => start_worker(w).await.with_context(|| "worker start"),
+    #[cfg(windows)]
+    if cli.service {
+        return service::serve(cli);
     }
+    block_on(cli, shutdown_signal())
+}
+
+/// Runs the chosen role until `stop` resolves.
+fn block_on(cli: Cli, stop: impl Future<Output = ()> + Send + 'static) -> Result<()> {
+    let log = cli.log_file.as_deref();
+    tokio::runtime::Runtime::new()
+        .context("start tokio")?
+        .block_on(async {
+            match cli.command {
+                Commands::Manager(m) => start_manager(m, log, stop).await.context("manager start"),
+                Commands::Worker(w) => start_worker(w, log, stop).await.context("worker start"),
+            }
+        })
 }
 
 #[cfg(test)]
