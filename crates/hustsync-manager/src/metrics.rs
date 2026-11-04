@@ -6,8 +6,8 @@ use hustsync_internal::{
     metrics::{
         self, Board, Families, Res,
         prometheus::{
-            GaugeVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, core::Collector,
-            proto::MetricFamily,
+            GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+            Registry, core::Collector, proto::MetricFamily,
         },
     },
     msg::{MirrorStatus, WorkerStatus},
@@ -18,6 +18,12 @@ use tokio::task::JoinSet;
 use crate::Manager;
 
 const MIRROR: [&str; 2] = ["mirror", "worker"];
+
+/// Bucket bounds of `hustsync_sync_duration_seconds`, one second to one day.
+const TOOK: [f64; 16] = [
+    1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0, 7200.0, 14400.0,
+    28800.0, 43200.0, 86400.0,
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Group {
@@ -44,6 +50,7 @@ impl metrics::Group for Group {
 pub struct Metrics {
     board: Board<Group>,
     syncs: IntCounterVec,
+    took: HistogramVec,
 }
 
 impl Metrics {
@@ -58,6 +65,15 @@ impl Metrics {
                 &["mirror", "worker", "result"],
             )
             .map_err(bad)?,
+            took: HistogramVec::new(
+                HistogramOpts::new(
+                    "hustsync_sync_duration_seconds",
+                    "Durations of finished syncs.",
+                )
+                .buckets(TOOK.to_vec()),
+                &["worker", "result"],
+            )
+            .map_err(bad)?,
         })
     }
 
@@ -66,9 +82,17 @@ impl Metrics {
         if !matches!(s.status, SyncStatus::Success | SyncStatus::Failed) {
             return;
         }
+        let result = s.status.as_str();
         self.syncs
-            .with_label_values(&[s.name.as_str(), &s.worker, s.status.as_str()])
+            .with_label_values(&[s.name.as_str(), &s.worker, result])
             .inc();
+        if s.last_started.timestamp() > 0
+            && let Ok(d) = (s.last_ended - s.last_started).to_std()
+        {
+            self.took
+                .with_label_values(&[s.worker.as_str(), result])
+                .observe(d.as_secs_f64());
+        }
     }
 }
 
@@ -80,7 +104,7 @@ pub async fn gather(mgr: &Manager, g: Group) -> Res<Families> {
             match g {
                 Group::Mirrors => mirrors(mgr),
                 Group::Workers => workers(mgr).await,
-                Group::Syncs => Ok(m.syncs.collect()),
+                Group::Syncs => Ok([m.syncs.collect(), m.took.collect()].concat()),
                 Group::Process => metrics::process(),
             }
         })
@@ -148,6 +172,24 @@ fn mirrors(mgr: &Manager) -> Res<Vec<MetricFamily>> {
     for s in SyncStatus::ALL {
         by_status.with_label_values(&[s.as_str()]).set(0);
     }
+    let state = add(
+        &reg,
+        IntGaugeVec::new(
+            Opts::new(
+                "hustsync_mirror_state",
+                "Status: 0 none, 1 failed, 2 success, 3 syncing, 4 pre-syncing, 5 paused, 6 disabled.",
+            ),
+            &MIRROR,
+        )?,
+    )?;
+    let info = add(
+        &reg,
+        IntGaugeVec::new(
+            Opts::new("hustsync_mirror_info", "Upstream and role of each mirror."),
+            &["mirror", "worker", "upstream", "role"],
+        )?,
+    )?;
+    let size = gauge(&reg, "hustsync_mirror_size_bytes", "Size of the mirror.")?;
     let took = gauge(
         &reg,
         "hustsync_mirror_sync_duration_seconds",
@@ -158,19 +200,34 @@ fn mirrors(mgr: &Manager) -> Res<Vec<MetricFamily>> {
         "hustsync_mirror_last_success_timestamp_seconds",
         "Unix time of the last successful sync.",
     )?;
+    let next = gauge(
+        &reg,
+        "hustsync_mirror_next_sync_timestamp_seconds",
+        "Unix time of the next scheduled sync.",
+    )?;
 
     for m in &mirrors {
         let labels = [m.name.as_str(), &m.worker];
         by_status.with_label_values(&[m.status.as_str()]).inc();
+        let code = SyncStatus::ALL.iter().position(|s| *s == m.status);
+        state
+            .with_label_values(&labels)
+            .set(i64::try_from(code.unwrap_or_default())?);
+        let role = if m.is_master { "master" } else { "slave" };
+        info.with_label_values(&[m.name.as_str(), &m.worker, &m.upstream, role])
+            .set(1);
+        if let Ok(b) = parse_size::parse_size(m.size.replace(',', "")) {
+            size.with_label_values(&labels).set(b as f64);
+        }
         if m.last_started.timestamp() > 0
             && let Ok(d) = (m.last_ended - m.last_started).to_std()
         {
             took.with_label_values(&labels).set(d.as_secs_f64());
         }
-        if m.last_update.timestamp() > 0 {
-            fresh
-                .with_label_values(&labels)
-                .set(m.last_update.timestamp() as f64);
+        for (g, t) in [(&fresh, m.last_update), (&next, m.next_scheduled)] {
+            if t.timestamp() > 0 {
+                g.with_label_values(&labels).set(t.timestamp() as f64);
+            }
         }
     }
     Ok(reg.gather())
@@ -193,6 +250,22 @@ async fn workers(mgr: &Manager) -> Res<Vec<MetricFamily>> {
         worker_up
             .with_label_values(&[id.as_str()])
             .set(i64::from(*ok));
+    }
+    let seen = add(
+        &reg,
+        GaugeVec::new(
+            Opts::new(
+                "hustsync_worker_last_online_timestamp_seconds",
+                "Unix time the worker last reached the manager.",
+            ),
+            &["worker"],
+        )?,
+    )?;
+    for w in &workers {
+        if w.last_online.timestamp() > 0 {
+            seen.with_label_values(&[w.id.as_str()])
+                .set(w.last_online.timestamp() as f64);
+        }
     }
     add(
         &reg,

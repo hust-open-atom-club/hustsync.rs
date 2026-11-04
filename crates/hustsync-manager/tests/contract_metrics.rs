@@ -34,16 +34,20 @@ async fn register(app: &Router, id: &str, url: &str) -> Res {
     Ok(())
 }
 
-async fn report(app: &Router, worker: &str, mirror: &str, status: &str) -> Res {
+async fn report_sized(app: &Router, worker: &str, mirror: &str, status: &str, size: &str) -> Res {
     let zero = "1970-01-01T00:00:00Z";
     let s = json!({
-        "name": mirror, "worker": worker, "upstream": "", "size": "", "error_msg": "",
-        "last_update": zero, "last_started": zero, "last_ended": zero, "next_schedule": zero,
-        "status": status, "is_master": true
+        "name": mirror, "worker": worker, "upstream": "rsync://up/m/", "size": size, "error_msg": "",
+        "last_update": zero, "last_started": zero, "last_ended": zero,
+        "next_schedule": "2030-01-01T00:00:00Z", "status": status, "is_master": true
     });
     let uri = format!("/workers/{worker}/jobs/{mirror}");
     assert_eq!(post(app, &uri, s).await?, StatusCode::OK);
     Ok(())
+}
+
+async fn report(app: &Router, worker: &str, mirror: &str, status: &str) -> Res {
+    report_sized(app, worker, mirror, status, "").await
 }
 
 async fn get_text(app: &Router, uri: &str) -> Res<(StatusCode, String)> {
@@ -77,22 +81,28 @@ async fn metrics_cover_syncs_mirrors_and_workers() -> Res {
 
     register(&app, "w1", &url).await?;
     register(&app, "w2", "http://127.0.0.1:9/").await?;
-    for (mirror, status) in [
-        ("m1", "pre-syncing"),
-        ("m1", "success"),
-        ("m2", "failed"),
-        ("m2", "failed"),
+    for (mirror, status, size) in [
+        ("m1", "pre-syncing", ""),
+        ("m1", "success", "1.5G"),
+        ("m2", "failed", "unknown"),
+        ("m2", "failed", "unknown"),
     ] {
-        report(&app, "w1", mirror, status).await?;
+        report_sized(&app, "w1", mirror, status, size).await?;
     }
 
     let text = scrape(&app, "/metrics").await?;
     for line in [
         r#"hustsync_syncs_total{mirror="m1",result="success",worker="w1"} 1"#,
         r#"hustsync_syncs_total{mirror="m2",result="failed",worker="w1"} 2"#,
+        r#"hustsync_sync_duration_seconds_count{result="success",worker="w1"} 1"#,
         r#"hustsync_mirrors{status="success"} 1"#,
         r#"hustsync_mirrors{status="failed"} 1"#,
         r#"hustsync_mirrors{status="syncing"} 0"#,
+        r#"hustsync_mirror_state{mirror="m1",worker="w1"} 2"#,
+        r#"hustsync_mirror_state{mirror="m2",worker="w1"} 1"#,
+        r#"hustsync_mirror_info{mirror="m1",role="master",upstream="rsync://up/m/",worker="w1"} 1"#,
+        r#"hustsync_mirror_size_bytes{mirror="m1",worker="w1"} 1500000000"#,
+        r#"hustsync_mirror_next_sync_timestamp_seconds{mirror="m1",worker="w1"} 1893456000"#,
         "hustsync_workers 2",
         "hustsync_workers_online 1",
         r#"hustsync_worker_up{worker="w1"} 1"#,
@@ -106,6 +116,7 @@ async fn metrics_cover_syncs_mirrors_and_workers() -> Res {
     for prefix in [
         r#"hustsync_mirror_sync_duration_seconds{mirror="m1",worker="w1"} "#,
         r#"hustsync_mirror_last_success_timestamp_seconds{mirror="m1",worker="w1"} "#,
+        r#"hustsync_worker_last_online_timestamp_seconds{worker="w1"} "#,
     ] {
         assert!(
             text.lines().any(|l| l.starts_with(prefix)),
@@ -113,6 +124,7 @@ async fn metrics_cover_syncs_mirrors_and_workers() -> Res {
         );
     }
     assert!(!text.contains(r#"hustsync_mirror_last_success_timestamp_seconds{mirror="m2""#));
+    assert!(!text.contains(r#"hustsync_mirror_size_bytes{mirror="m2""#));
     Ok(())
 }
 
