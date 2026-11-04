@@ -49,8 +49,29 @@ services:
       - p8s:/prometheus
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:3.7.8
+    profiles: [monitoring]
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki:/loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.20.1
+    profiles: [monitoring]
+    command: run /etc/alloy/config.alloy --storage.path=/var/lib/alloy
+    volumes:
+      - ../alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - log:/var/log/hustsync:ro
+      - alloy:/var/lib/alloy
+    depends_on: [loki]
+    restart: unless-stopped
+
 volumes:
   db:
   data:
   log:
   p8s:
+  loki:
+  alloy:

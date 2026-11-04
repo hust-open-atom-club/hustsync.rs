@@ -22,6 +22,15 @@ jobs:
       - name: Alert rule tests
         run: docker run --rm -v "$PWD/deploy/prometheus:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.0 test rules rules.test.yml
 
+  alloy:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate
+        run: docker run --rm -v "$PWD/deploy/alloy:/w" grafana/alloy:v1.20.1 validate /w/config.alloy
+      - name: Formatted
+        run: docker run --rm -v "$PWD/deploy/alloy:/w" grafana/alloy:v1.20.1 fmt /w/config.alloy | diff - deploy/alloy/config.alloy
+
   compose:
     runs-on: ubuntu-26.04
     steps:

@@ -13,6 +13,10 @@ docker compose --profile monitoring up -d
 |:--:|:--:|:--:|
 | Prometheus 3.15 | `deploy/prometheus/prometheus.yml` | Scrapes each group on its own interval: mirror state every 15 s, sync counts every 30 s, workers and processes every minute |
 | Alert rules | `deploy/prometheus/rules.yml` | See below |
+| Alloy 1.20 | `deploy/alloy/config.alloy` | Takes program logs pushed by serlog on port 3100; tails the sync logs under each mirror's `log_dir`, taking the mirror name from the file name |
+| Loki 3.7 | The image's own config | Stores logs |
+
+The manager's and the worker's `[log]` already push to Alloy with `on_fail = "ignore"`: without the `monitoring` profile, logs still go to the console and failed pushes are dropped quietly.
 
 ## Alert rules
 
@@ -38,3 +42,4 @@ To use Alertmanager, add an `alerting` section to `prometheus.yml`. For hustsync
 | Component | What to do |
 |:--:|:--:|
 | Prometheus | Change the `targets` in `prometheus.yml` |
+| Alloy | Replace `/var/log/hustsync` in `config.alloy` with the worker's `log_dir` |
