@@ -32,6 +32,7 @@ async fn spawn_manager_listening() -> (std::net::SocketAddr, tokio::task::JoinHa
     let db_path = dir.path().join("manager.db");
     let cfg = Arc::new(hustsync_config_parser::ManagerConfig {
         debug: false,
+        log: None,
         server: hustsync_config_parser::ManagerServerConfig {
             addr: "127.0.0.1".into(),
             port: 0,
@@ -139,6 +140,7 @@ fn worker_config(
             mirrors: None,
         }]),
         include: None,
+        log: None,
     }
 }
 
