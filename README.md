@@ -16,6 +16,8 @@ The Rust implementation currently covers the core manager, worker, and control C
 
 Some Go-only worker features are not implemented yet, including Docker wrapping, cgroup enforcement, ZFS hooks, and btrfs snapshot hooks. The upstream version baseline has not yet been established; see [Compatibility](docs/COMPATIBILITY.md) before making compatibility claims.
 
+Deployment guides live in [`docs/guide`](docs/guide/get_started.md); a ready-to-run Docker Compose setup lives in [`deploy/compose`](deploy/compose).
+
 ## Architecture & Project Structure
 
 The project is organized as a Cargo workspace with the following core crates:
