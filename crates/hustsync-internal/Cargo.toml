@@ -20,5 +20,8 @@ toml = "0.9"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["registry", "std"] }
 prometheus = { version = "0.14", default-features = false, features = ["process"], optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.31.2", features = ["resource"] }
+
 [lints]
 workspace = true
