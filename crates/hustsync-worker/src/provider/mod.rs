@@ -26,7 +26,7 @@ pub mod rsync_provider;
 pub mod runner;
 pub mod two_stage_rsync_provider;
 
-pub use runner::{Job, Runner};
+pub use runner::{Docker, Job, Runner};
 
 /// Base rsync arguments shared by both the standard rsync provider (full
 /// sync) and the two-stage provider's stage-2 pass.
@@ -368,6 +368,7 @@ pub(crate) async fn run_child_with_cancellation(
     };
     let err = tokio::select! {
         res = child.wait() => {
+            common.runner.finish(&common.name).await;
             return res.map_err(ProviderError::Io);
         }
         () = cancel.cancelled() => ProviderError::Terminated,
@@ -377,6 +378,7 @@ pub(crate) async fn run_child_with_cancellation(
     common.stop(pgid).await;
     let _ = child.start_kill();
     let _ = child.wait().await;
+    common.runner.finish(&common.name).await;
     Err(err)
 }
 
@@ -575,6 +577,8 @@ pub fn build_provider(
         codes
     };
 
+    let runner = Runner::new(g_cfg.docker.as_ref(), m_cfg);
+
     let common = CommonProviderConfig {
         name: name.to_string(),
         upstream_url: m_cfg.upstream.clone().unwrap_or_default(),
@@ -587,7 +591,7 @@ pub fn build_provider(
         env: m_cfg.env.clone().unwrap_or_default(),
         is_master,
         success_exit_codes,
-        runner: Runner::default(),
+        runner,
     };
 
     match p_type {
