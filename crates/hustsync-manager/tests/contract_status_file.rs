@@ -24,6 +24,7 @@ fn spawn_manager_with_status_file() -> (axum::Router, TempDir, std::path::PathBu
 
     let config = Arc::new(ManagerConfig {
         debug: false,
+        alert: None,
         log: None,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
