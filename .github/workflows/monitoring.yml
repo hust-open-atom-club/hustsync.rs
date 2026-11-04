@@ -1,0 +1,29 @@
+name: monitoring
+
+on:
+  push:
+    paths: ["deploy/**", "scripts/**", "crates/**", ".github/workflows/monitoring.yml"]
+  pull_request:
+    paths: ["deploy/**", "scripts/**", "crates/**", ".github/workflows/monitoring.yml"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rules:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prometheus config
+        run: docker run --rm -v "$PWD/deploy/prometheus:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.0 check config prometheus.yml
+      - name: Alert rule tests
+        run: docker run --rm -v "$PWD/deploy/prometheus:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.0 test rules rules.test.yml
+
+  compose:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose -f deploy/compose/compose.yaml --profile monitoring config -q

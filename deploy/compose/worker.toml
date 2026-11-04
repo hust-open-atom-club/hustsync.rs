@@ -8,6 +8,7 @@ retry = 1
 
 [manager]
 api_base = "http://manager:14242"
+heartbeat = 60
 
 [server]
 hostname = "worker"
