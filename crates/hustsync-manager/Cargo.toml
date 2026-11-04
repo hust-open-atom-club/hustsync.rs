@@ -3,10 +3,14 @@ name = "hustsync-manager"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["p8s"]
+metrics = ["hustsync-internal/metrics"]
+p8s = ["metrics", "hustsync-internal/p8s"]
+
 [dependencies]
 axum = "0.8.8"
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
-prometheus = { version = "0.14", default-features = false }
 chrono = { version = "0.4.43", features = ["serde"] }
 hustsync-config-parser = { path = "../hustsync-config-parser" }
 hustsync-internal = { path = "../hustsync-internal" }
@@ -18,12 +22,12 @@ serde_json = "1.0.145"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.17"
 tokio = { version = "1.50.0", features = ["rt"] }
+toml = "0.9"
 tower-http = { version = "0.6.8", features = ["catch-panic", "timeout", "trace"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 [dev-dependencies]
-toml = "0.9"
 tempfile = "3.23.0"
 tower = { version = "0.5", features = ["util"] }
 http = "1.0"

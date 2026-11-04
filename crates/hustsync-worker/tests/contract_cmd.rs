@@ -58,6 +58,7 @@ mod contract_cmd {
             semaphore: Arc::new(Semaphore::new(1)),
             concurrent: 1,
             reload_tx: None,
+            metrics: Default::default(),
         })
     }
 
@@ -78,6 +79,7 @@ mod contract_cmd {
             semaphore: Arc::new(Semaphore::new(1)),
             concurrent: 1,
             reload_tx: None,
+            metrics: Default::default(),
         });
         (state, rx)
     }
@@ -367,6 +369,7 @@ mod contract_cmd {
             semaphore: Arc::new(Semaphore::new(1)),
             concurrent: 1,
             reload_tx: Some(reload_tx),
+            metrics: Default::default(),
         });
 
         let (status, body) = post_cmd(state, worker_cmd("", CmdVerb::Reload)).await;
@@ -390,6 +393,7 @@ mod contract_cmd {
             semaphore: Arc::new(Semaphore::new(1)),
             concurrent: 1,
             reload_tx: Some(reload_tx),
+            metrics: Default::default(),
         });
 
         let (status1, body1) = post_cmd(Arc::clone(&state), worker_cmd("", CmdVerb::Reload)).await;

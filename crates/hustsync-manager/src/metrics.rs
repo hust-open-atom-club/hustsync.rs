@@ -1,75 +1,140 @@
-//! Prometheus metrics: sync counters kept in memory, gauges rebuilt from the database per scrape.
+//! Metrics in groups: sync counters live in memory, the rest is read from the database when asked for.
 
-use std::{error::Error, sync::Arc, time::Duration};
+use std::time::Duration;
 
-use axum::{
-    extract::State,
-    http::{StatusCode, header},
-    response::{IntoResponse, Response},
-};
 use hustsync_internal::{
+    metrics::{
+        self, Board, Families, Res,
+        prometheus::{
+            GaugeVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, core::Collector,
+            proto::MetricFamily,
+        },
+    },
     msg::{MirrorStatus, WorkerStatus},
     status::SyncStatus,
-};
-use prometheus::{
-    GaugeVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, TEXT_FORMAT, TextEncoder,
-    core::Collector,
 };
 use tokio::task::JoinSet;
 
 use crate::Manager;
 
-type Res<T> = Result<T, Box<dyn Error + Send + Sync>>;
-
 const MIRROR: [&str; 2] = ["mirror", "worker"];
 
-/// Counters that live as long as the manager.
-pub struct Metrics {
-    reg: Registry,
-    syncs: IntCounterVec,
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Group {
+    Mirrors,
+    Workers,
+    Syncs,
+    Process,
 }
 
-impl Metrics {
-    pub fn new() -> prometheus::Result<Self> {
-        let reg = Registry::new();
-        let syncs = add(
-            &reg,
-            IntCounterVec::new(
-                Opts::new("hustsync_syncs_total", "Finished sync attempts by result."),
-                &["mirror", "worker", "result"],
-            )?,
-        )?;
-        Ok(Self { reg, syncs })
-    }
+impl metrics::Group for Group {
+    const ALL: &'static [Self] = &[Self::Mirrors, Self::Workers, Self::Syncs, Self::Process];
 
-    /// Counts a finished sync attempt.
-    pub fn record(&self, s: &MirrorStatus) {
-        if matches!(s.status, SyncStatus::Success | SyncStatus::Failed) {
-            self.syncs
-                .with_label_values(&[s.name.as_str(), &s.worker, s.status.as_str()])
-                .inc();
+    fn name(self) -> &'static str {
+        match self {
+            Self::Mirrors => "mirrors",
+            Self::Workers => "workers",
+            Self::Syncs => "syncs",
+            Self::Process => "process",
         }
     }
 }
 
-/// `GET /metrics` in the Prometheus text format.
-pub async fn serve(State(mgr): State<Arc<Manager>>) -> Response {
-    match encode(&mgr).await {
-        Ok(body) => ([(header::CONTENT_TYPE, TEXT_FORMAT)], body).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+/// Counters that live as long as the manager, and the group caches.
+pub struct Metrics {
+    board: Board<Group>,
+    syncs: IntCounterVec,
+}
+
+impl Metrics {
+    pub fn new(table: Option<&toml::Table>) -> Result<Self, String> {
+        let cfg = table.map(metrics::MetricsConfig::parse).transpose()?;
+        let cfg = cfg.as_ref();
+        let bad = |e: metrics::prometheus::Error| e.to_string();
+        Ok(Self {
+            board: Board::new(cfg)?,
+            syncs: IntCounterVec::new(
+                Opts::new("hustsync_syncs_total", "Finished sync attempts by result."),
+                &["mirror", "worker", "result"],
+            )
+            .map_err(bad)?,
+        })
+    }
+
+    /// Counts a finished sync attempt.
+    pub fn record(&self, s: &MirrorStatus) {
+        if !matches!(s.status, SyncStatus::Success | SyncStatus::Failed) {
+            return;
+        }
+        self.syncs
+            .with_label_values(&[s.name.as_str(), &s.worker, s.status.as_str()])
+            .inc();
     }
 }
 
-async fn encode(mgr: &Manager) -> Res<String> {
-    let mut all = mgr.metrics.reg.gather();
-    all.extend(snapshot(mgr).await?.gather());
-    Ok(TextEncoder::new().encode_to_string(&all)?)
+/// The group, from the cache when it is fresh.
+pub async fn gather(mgr: &Manager, g: Group) -> Res<Families> {
+    let m = &mgr.metrics;
+    m.board
+        .get(g, || async move {
+            match g {
+                Group::Mirrors => mirrors(mgr),
+                Group::Workers => workers(mgr).await,
+                Group::Syncs => Ok(m.syncs.collect()),
+                Group::Process => metrics::process(),
+            }
+        })
+        .await
 }
 
-/// Gauges describing mirrors and workers right now.
-async fn snapshot(mgr: &Manager) -> Res<Registry> {
+#[cfg(feature = "p8s")]
+pub mod serve {
+    //! `GET /metrics`, `/metrics/all` and `/metrics/<group>` in the p8s text format.
+
+    use std::sync::Arc;
+
+    use axum::{
+        extract::{Path, State},
+        http::{StatusCode, header},
+        response::{IntoResponse, Response},
+    };
+    use hustsync_internal::metrics::{self, Families, Group as _, Res};
+
+    use super::{Group, gather};
+    use crate::Manager;
+
+    pub async fn all(State(mgr): State<Arc<Manager>>) -> Response {
+        reply(gather_all(&mgr).await)
+    }
+
+    pub async fn one(State(mgr): State<Arc<Manager>>, Path(name): Path<String>) -> Response {
+        if name == "all" {
+            return reply(gather_all(&mgr).await);
+        }
+        let Some(g) = Group::parse(&name) else {
+            return (StatusCode::NOT_FOUND, metrics::unknown::<Group>(&name)).into_response();
+        };
+        reply(gather(&mgr, g).await.map(|f| vec![f]))
+    }
+
+    async fn gather_all(mgr: &Manager) -> Res<Vec<Families>> {
+        let mut out = Vec::new();
+        for &g in Group::ALL {
+            out.push(gather(mgr, g).await?);
+        }
+        Ok(out)
+    }
+
+    fn reply(groups: Res<Vec<Families>>) -> Response {
+        match groups.and_then(|g| metrics::text(&g)) {
+            Ok(body) => ([(header::CONTENT_TYPE, metrics::TEXT)], body).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
+    }
+}
+
+fn mirrors(mgr: &Manager) -> Res<Vec<MetricFamily>> {
     let db = mgr.adapter.as_ref().ok_or("database not initialised")?;
-    let workers = db.list_workers()?;
     let mirrors = db.list_all_mirror_status()?;
     let reg = Registry::new();
 
@@ -83,27 +148,17 @@ async fn snapshot(mgr: &Manager) -> Res<Registry> {
     for s in SyncStatus::ALL {
         by_status.with_label_values(&[s.as_str()]).set(0);
     }
+    let took = gauge(
+        &reg,
+        "hustsync_mirror_sync_duration_seconds",
+        "Duration of the last finished sync.",
+    )?;
+    let fresh = gauge(
+        &reg,
+        "hustsync_mirror_last_success_timestamp_seconds",
+        "Unix time of the last successful sync.",
+    )?;
 
-    let took = add(
-        &reg,
-        GaugeVec::new(
-            Opts::new(
-                "hustsync_mirror_sync_duration_seconds",
-                "Duration of the last finished sync.",
-            ),
-            &MIRROR,
-        )?,
-    )?;
-    let fresh = add(
-        &reg,
-        IntGaugeVec::new(
-            Opts::new(
-                "hustsync_mirror_last_success_timestamp_seconds",
-                "Unix time of the last successful sync.",
-            ),
-            &MIRROR,
-        )?,
-    )?;
     for m in &mirrors {
         let labels = [m.name.as_str(), &m.worker];
         by_status.with_label_values(&[m.status.as_str()]).inc();
@@ -115,11 +170,18 @@ async fn snapshot(mgr: &Manager) -> Res<Registry> {
         if m.last_update.timestamp() > 0 {
             fresh
                 .with_label_values(&labels)
-                .set(m.last_update.timestamp());
+                .set(m.last_update.timestamp() as f64);
         }
     }
+    Ok(reg.gather())
+}
 
+async fn workers(mgr: &Manager) -> Res<Vec<MetricFamily>> {
+    let db = mgr.adapter.as_ref().ok_or("database not initialised")?;
+    let workers = db.list_workers()?;
     let up = probe(mgr, &workers).await;
+    let reg = Registry::new();
+
     let worker_up = add(
         &reg,
         IntGaugeVec::new(
@@ -142,8 +204,7 @@ async fn snapshot(mgr: &Manager) -> Res<Registry> {
         IntGauge::new("hustsync_workers_online", "Workers answering HTTP.")?,
     )?
     .set(i64::try_from(up.iter().filter(|(_, ok)| *ok).count())?);
-
-    Ok(reg)
+    Ok(reg.gather())
 }
 
 /// Contacts every worker; any HTTP response counts as online.
@@ -160,7 +221,11 @@ async fn probe(mgr: &Manager, workers: &[WorkerStatus]) -> Vec<(String, bool)> {
     set.join_all().await
 }
 
-fn add<C: Collector + Clone + 'static>(reg: &Registry, c: C) -> prometheus::Result<C> {
+fn gauge(reg: &Registry, name: &str, help: &str) -> Res<GaugeVec> {
+    Ok(add(reg, GaugeVec::new(Opts::new(name, help), &MIRROR)?)?)
+}
+
+fn add<C: Collector + Clone + 'static>(reg: &Registry, c: C) -> metrics::prometheus::Result<C> {
     reg.register(Box::new(c.clone()))?;
     Ok(c)
 }

@@ -9,7 +9,7 @@ This table is the authoritative boundary for dependencies within the workspace. 
 | Crate | Responsibility | Allowed normal dependencies within the workspace |
 | --- | --- | --- |
 | `hustsync-config-parser` | TOML parsing, includes, inheritance expansion, semantic validation | None |
-| `hustsync-internal` | Wire types, status conversion, logging, and HTTP/path utilities | None |
+| `hustsync-internal` | Wire types, status conversion, logging, shared metrics code, and HTTP/path utilities | None |
 | `hustsync-manager` | HTTP control plane, registration, persistence, and status file | config-parser, internal |
 | `hustsync-worker` | Local scheduling, actors, Providers, Hooks, and reporting | config-parser, internal |
 | `hustsync` | Daemon CLI, configuration overrides, signals, and component startup | config-parser, internal, manager, worker |
