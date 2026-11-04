@@ -1,13 +1,14 @@
-//! Windows-only behaviour: hooks run through `cmd`, stopped jobs end their whole process tree.
+//! Windows-only behaviour: hooks run through `cmd`, stopped jobs end their whole process tree, rsync takes drive paths.
 
 #![cfg(windows)]
 
-use std::{collections::HashMap, process::Command, time::Duration};
+use std::{collections::HashMap, path::Path, process::Command, time::Duration};
 
+use hustsync_config_parser::{MirrorConfig, WorkerConfig};
 use hustsync_worker::{
     hooks::{ExecPostHook, HookCtx, JobHook},
     provider::{
-        CommonProviderConfig, MirrorProvider, ProviderError, RunContext, Runner,
+        CommonProviderConfig, MirrorProvider, ProviderError, RunContext, Runner, build_provider,
         cmd_provider::{CmdProvider, CmdProviderConfig},
     },
 };
@@ -100,4 +101,36 @@ async fn cancel_ends_the_process_tree() -> Res {
     let tmp = TempDir::new()?;
     let p = provider(&tmp, &format!("cmd /C ping -n 60 {MARK}"), Runner::Direct)?;
     cancel_tree(p, MARK).await
+}
+
+/// MSYS2's rsync, the one the Windows docs recommend.
+const MSYS_RSYNC: &str = r"C:\msys64\usr\bin\rsync.exe";
+
+#[tokio::test]
+async fn rsync_mirrors_into_a_drive_path() -> Res {
+    if !Path::new(MSYS_RSYNC).exists() {
+        eprintln!("skipped: {MSYS_RSYNC} not installed");
+        return Ok(());
+    }
+    let tmp = TempDir::new()?;
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(src.join("pool"))?;
+    std::fs::write(src.join("pool/a.deb"), "deb")?;
+    let dir = |p: &str| tmp.path().join(p).to_string_lossy().into_owned();
+    let m = MirrorConfig {
+        name: Some("local".into()),
+        provider: Some("rsync".into()),
+        command: Some(MSYS_RSYNC.into()),
+        upstream: Some(format!("{}/", dir("src").replace('\\', "/"))),
+        mirror_dir: Some(dir("dst")),
+        log_dir: Some(dir("log")),
+        ..MirrorConfig::default()
+    };
+    let p = build_provider("local", &m, &WorkerConfig::default(), None)?;
+    p.run(RunContext::default()).await?;
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dst/pool/a.deb"))?,
+        "deb"
+    );
+    Ok(())
 }
