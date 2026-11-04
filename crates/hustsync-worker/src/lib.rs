@@ -189,6 +189,9 @@ pub struct Worker {
     cgroups: Option<Arc<cgroup::Cgroups>>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
+    /// Tells the status relay to send what is queued and stop.
+    drain: CancellationToken,
+    relay: Mutex<Option<tokio::task::JoinHandle<()>>>,
 
     pub http_client: Option<Client>,
 }
@@ -274,6 +277,8 @@ impl Worker {
             cgroups,
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
+            drain: CancellationToken::new(),
+            relay: Mutex::new(None),
             http_client: None,
         };
 
@@ -604,9 +609,16 @@ impl Worker {
         let worker_name = self.name();
         let schedule_queue = Arc::clone(&self.schedule_queue);
         let jobs_handle = Arc::clone(&self.jobs);
+        let drain = self.drain.clone();
 
-        tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
+        let relay = tokio::spawn(async move {
+            loop {
+                let msg = tokio::select! {
+                    biased;
+                    m = rx.recv() => m,
+                    () = drain.cancelled() => rx.try_recv().ok(),
+                };
+                let Some(msg) = msg else { break };
                 let (Some(client), Some(manager_cfg)) = (&http_client, &cfg.manager) else {
                     continue;
                 };
@@ -706,6 +718,7 @@ impl Worker {
                 }
             }
         });
+        *self.relay.lock().await = Some(relay);
     }
 
     /// Spawn the dispatch ticker that fires ready jobs every 5 seconds.
@@ -735,7 +748,8 @@ impl Worker {
         });
     }
 
-    /// Send Halt to all job actors and join them. There is no overall deadline here.
+    /// Send Halt to all job actors and join them, with no overall deadline, then give
+    /// the relay up to 10 s to send what is queued.
     // The complexity lint over-counts here because it accumulates closure complexity
     // from `start_message_relay`'s spawned async block into this function's score.
     #[allow(clippy::cognitive_complexity)]
@@ -754,6 +768,15 @@ impl Worker {
             if let Err(e) = res {
                 tracing::error!("Job actor panicked or cancelled: {}", e);
             }
+        }
+        self.drain.cancel();
+        let relay = self.relay.lock().await.take();
+        if let Some(relay) = relay
+            && tokio::time::timeout(Duration::from_secs(10), relay)
+                .await
+                .is_err()
+        {
+            tracing::warn!("Gave up telling the manager the last job states");
         }
         tracing::info!("Worker fully stopped.");
     }
@@ -1214,6 +1237,73 @@ mod tests {
 
         handle_a.abort();
         handle_b.abort();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_reports_interrupted_jobs_before_exit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        type Bodies = Arc<Mutex<Vec<(String, serde_json::Value)>>>;
+
+        async fn record(State(log): State<Bodies>, uri: Uri, body: String) -> StatusCode {
+            let json = serde_json::from_str(&body).unwrap_or_default();
+            log.lock().await.push((uri.path().to_string(), json));
+            StatusCode::OK
+        }
+
+        async fn last(log: &Bodies, path: &str) -> Option<serde_json::Value> {
+            let log = log.lock().await;
+            log.iter()
+                .rev()
+                .find(|(p, _)| p == path)
+                .map(|(_, v)| v.clone())
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let log = Bodies::default();
+        let app = axum::Router::new()
+            .fallback(any(record))
+            .with_state(Arc::clone(&log));
+        let manager = tokio::spawn(axum::serve(listener, app).into_future());
+
+        let tmp = tempfile::tempdir()?;
+        let dir = |d: &str| Some(tmp.path().join(d).to_string_lossy().into_owned());
+        let mut cfg = worker_config_with_managers(vec![url]);
+        cfg.global = Some(WorkerGlobalConfig {
+            mirror_dir: dir("data"),
+            log_dir: dir("log"),
+            ..cfg.global.unwrap_or_default()
+        });
+        cfg.server = Some(WorkerServerConfig {
+            listen_port: Some(0),
+            ..cfg.server.unwrap_or_default()
+        });
+        cfg.mirrors = Some(vec![command_mirror("slow", "sleep 30")]);
+        let worker = Arc::new(Worker::new(cfg)?);
+        let run = tokio::spawn({
+            let w = Arc::clone(&worker);
+            async move { w.run().await }
+        });
+
+        let path = "/workers/broadcast-worker/jobs/slow";
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while last(&log, path)
+                .await
+                .is_none_or(|v| v["status"] != "syncing")
+            {
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await?;
+
+        worker.exit_token.cancel();
+        tokio::time::timeout(Duration::from_secs(8), run).await??;
+        let status = last(&log, path).await.ok_or("no status")?;
+        assert_eq!(status["status"], "failed", "{status}");
+        assert_eq!(status["error_msg"], "worker stopped", "{status}");
+        manager.abort();
+        Ok(())
     }
 
     fn strings(items: &[&str]) -> Vec<String> {
