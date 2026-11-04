@@ -31,6 +31,33 @@ jobs:
       - name: Formatted
         run: docker run --rm -v "$PWD/deploy/alloy:/w" grafana/alloy:v1.20.1 fmt /w/config.alloy | diff - deploy/alloy/config.alloy
 
+  grafana:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Provision Grafana
+        run: |
+          docker run -d --name grafana --restart on-failure:3 -p 3000:3000 -e GF_PLUGINS_PREINSTALL_SYNC=marcusolsson-treemap-panel,volkovlabs-echarts-panel,marcusolsson-dynamictext-panel,tim012432-calendarheatmap-panel \
+            -v "$PWD/deploy/grafana/provisioning:/etc/grafana/provisioning:ro" \
+            -v "$PWD/deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro" grafana/grafana:13.2.4
+          for _ in $(seq 120); do curl -fs http://localhost:3000/api/health >/dev/null && break; sleep 1; done
+      - name: Dashboards loaded
+        run: |
+          for f in deploy/grafana/dashboards/*.json; do
+            uid=$(jq -r .uid "$f")
+            want=$(jq '.panels | length' "$f")
+            got=$(curl -fsS -u admin:admin "http://localhost:3000/api/dashboards/uid/$uid" | jq '.dashboard.panels | length')
+            echo "$uid: $got of $want panels"
+            [[ $got == "$want" ]]
+          done
+      - name: Panel plugins installed
+        run: |
+          for id in $(jq -r '[.. | objects | select(has("type") and has("gridPos") and .type != "row") | .type] | unique[]' deploy/grafana/dashboards/*.json); do
+            curl -fsS -u admin:admin "http://localhost:3000/api/plugins/$id/settings" >/dev/null || { echo "missing panel $id"; exit 1; }
+          done
+      - name: No provisioning errors
+        run: "! docker logs grafana 2>&1 | grep -E 'level=error.*(provisioning|dashboard)'"
+
   compose:
     runs-on: ubuntu-26.04
     steps:
