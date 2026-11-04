@@ -24,6 +24,7 @@ pub struct Manager {
     pub config: Arc<ManagerConfig>,
     pub adapter: Option<Arc<dyn DbAdapterTrait>>,
     pub http_client: Option<Client>,
+    pub streaks: crate::Streaks,
     #[cfg(feature = "metrics")]
     pub metrics: Metrics,
 }
@@ -41,6 +42,7 @@ impl Manager {
             config: Arc::clone(&config),
             adapter: None,
             http_client: None,
+            streaks: crate::Streaks::new(config.alert.unwrap_or_default().failures),
             #[cfg(feature = "metrics")]
             metrics: Metrics::new(config.metrics.as_ref()).map_err(ManagerError::Metrics)?,
         };
