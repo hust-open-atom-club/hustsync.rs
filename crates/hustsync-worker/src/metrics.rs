@@ -109,10 +109,16 @@ async fn jobs(s: &AppState) -> Res<Vec<MetricFamily>> {
 #[cfg(feature = "push")]
 pub fn push(
     s: &std::sync::Arc<AppState>,
+    worker: String,
     client: &reqwest::Client,
 ) -> Vec<tokio::task::JoinHandle<()>> {
+    let origin = metrics::push::Origin {
+        service: "hustsync-worker",
+        instance: worker,
+        start: std::time::SystemTime::now(),
+    };
     let weak = std::sync::Arc::downgrade(s);
-    metrics::push::spawn(s.metrics.push.clone(), client, move |g| {
+    metrics::push::spawn(s.metrics.push.clone(), client, &origin, move |g| {
         let weak = std::sync::Weak::clone(&weak);
         async move {
             let s = weak.upgrade().ok_or("worker stopped")?;

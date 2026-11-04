@@ -1,6 +1,6 @@
 # Metrics
 
-The manager and the worker expose p8s metrics for Prometheus or Telegraf to scrape, and can push them to Telegraf or InfluxDB.
+The manager and the worker expose p8s metrics for Prometheus or Telegraf to scrape, and can push them to Telegraf, InfluxDB or Alloy.
 
 ## Build features
 
@@ -8,13 +8,15 @@ The manager and the worker expose p8s metrics for Prometheus or Telegraf to scra
 |:--:|:--:|:--:|
 | `p8s` | `GET /metrics`, `/metrics/all`, `/metrics/<group>` | on |
 | `influx` | Pushes InfluxDB line protocol | on |
+| `otlp` | Pushes OTLP/HTTP protobuf | off |
 
 ```bash
 cargo build --release
+cargo build --release --features otlp
 cargo build --release --no-default-features
 ```
 
-With all of them off no metrics code is built, and a config using a missing one fails at start-up.
+With all three off no metrics code is built, and a config using a missing one fails at start-up.
 
 ## Endpoints
 
@@ -79,12 +81,17 @@ cache = { mirrors = 10, workers = 30 }
 url = "http://telegraf:8186/telegraf"
 interval = 30
 groups = ["mirrors", "workers", "syncs"]
+
+[[metrics.push]]
+url = "http://alloy:4318/v1/metrics"
+format = "otlp"
 ```
 
 | Key | Default | Description |
 |:--:|:--:|:--:|
 | `cache` | empty | Group name to seconds; groups not listed are computed per request |
 | `push.url` | required | Receiver address |
+| `push.format` | `influx` | `influx` or `otlp` |
 | `push.interval` | 30 | Seconds |
 | `push.groups` | all | Groups to push |
 | `push.headers` | empty | Extra request headers, such as InfluxDB's `Authorization = "Token …"` |
@@ -99,5 +106,6 @@ A failing push logs one warning when it starts failing and one info line when it
 | Telegraf pull | `inputs.prometheus`, `metric_version = 2` |
 | Telegraf push | `inputs.http_listener_v2`, `data_format = "influx"`; the output matches the pull line for line |
 | InfluxDB | `url` set to `/api/v2/write?org=…&bucket=…`, with the token in `headers` |
+| Alloy | The `http` endpoint of `otelcol.receiver.otlp`; once written to Prometheus through `otelcol.exporter.prometheus`, metric names match the scraped ones, `job` is `hustsync-manager` or `hustsync-worker`, and `instance` is the manager address or the worker name |
 
 The line protocol follows Telegraf 1.40 `inputs.prometheus` with `metric_version = 2`: the measurement is `prometheus`, tags are sorted by key, the field name is the metric name, and a histogram becomes one line for `_count` and `_sum` plus one per bucket.

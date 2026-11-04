@@ -7,6 +7,7 @@ edition = "2024"
 default = ["p8s", "influx"]
 p8s = ["hustsync-manager/p8s", "hustsync-worker/p8s"]
 influx = ["hustsync-manager/influx", "hustsync-worker/influx"]
+otlp = ["hustsync-manager/otlp", "hustsync-worker/otlp"]
 
 [dependencies]
 # log = "0.4.28"

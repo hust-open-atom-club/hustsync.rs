@@ -9,6 +9,7 @@ metrics = ["hustsync-internal/metrics"]
 push = ["metrics", "hustsync-internal/push"]
 p8s = ["metrics", "hustsync-internal/p8s"]
 influx = ["push", "hustsync-internal/influx"]
+otlp = ["push", "hustsync-internal/otlp"]
 
 [dependencies]
 async-trait = "0.1.92"

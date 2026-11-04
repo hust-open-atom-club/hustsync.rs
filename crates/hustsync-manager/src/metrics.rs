@@ -123,8 +123,13 @@ pub async fn gather(mgr: &Manager, g: Group) -> Res<Families> {
 #[cfg(feature = "push")]
 pub fn push(mgr: &std::sync::Arc<Manager>) -> Vec<tokio::task::JoinHandle<()>> {
     let client = mgr.http_client.clone().unwrap_or_default();
+    let origin = metrics::push::Origin {
+        service: "hustsync-manager",
+        instance: format!("{}:{}", mgr.config.server.addr, mgr.config.server.port),
+        start: std::time::SystemTime::now(),
+    };
     let weak = std::sync::Arc::downgrade(mgr);
-    metrics::push::spawn(mgr.metrics.push.clone(), &client, move |g| {
+    metrics::push::spawn(mgr.metrics.push.clone(), &client, &origin, move |g| {
         let weak = std::sync::Weak::clone(&weak);
         async move {
             let mgr = weak.upgrade().ok_or("manager stopped")?;

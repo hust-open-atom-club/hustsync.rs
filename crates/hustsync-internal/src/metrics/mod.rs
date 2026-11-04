@@ -3,6 +3,8 @@
 mod config;
 #[cfg(feature = "influx")]
 pub mod influx;
+#[cfg(feature = "otlp")]
+pub mod otlp;
 #[cfg(feature = "push")]
 pub mod push;
 
@@ -14,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use config::{MetricsConfig, PushConfig};
+pub use config::{MetricsConfig, PushConfig, PushFormat};
 pub use prometheus;
 use prometheus::{IntGaugeVec, Opts, core::Collector, proto::MetricFamily};
 
