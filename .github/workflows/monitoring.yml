@@ -41,6 +41,16 @@ jobs:
       - name: Telegraf pull and push agree
         run: scripts/telegraf-pull-push.sh target/debug/hustsync
 
+  otlp:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p hustsync --features otlp
+      - name: OTLP through Alloy into Prometheus
+        run: scripts/otlp-alloy.sh target/debug/hustsync
+
   compose:
     runs-on: ubuntu-26.04
     steps:

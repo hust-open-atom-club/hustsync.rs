@@ -36,3 +36,23 @@ loki.write "loki" {
 		url = "http://loki:3100/loki/api/v1/push"
 	}
 }
+
+otelcol.receiver.otlp "metrics" {
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		metrics = [otelcol.exporter.prometheus.p8s.input]
+	}
+}
+
+otelcol.exporter.prometheus "p8s" {
+	forward_to = [prometheus.remote_write.p8s.receiver]
+}
+
+prometheus.remote_write "p8s" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
+	}
+}

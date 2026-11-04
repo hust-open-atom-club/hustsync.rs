@@ -13,7 +13,7 @@ docker compose --profile monitoring up -d
 |:--:|:--:|:--:|
 | Prometheus 3.15 | `deploy/prometheus/prometheus.yml` | Scrapes each group on its own interval: mirror state every 15 s, sync counts every 30 s, workers and processes every minute |
 | Alert rules | `deploy/prometheus/rules.yml` | See below |
-| Alloy 1.20 | `deploy/alloy/config.alloy` | Takes program logs pushed by serlog on port 3100; tails the sync logs under each mirror's `log_dir`, taking the mirror name from the file name |
+| Alloy 1.20 | `deploy/alloy/config.alloy` | Takes program logs pushed by serlog on port 3100; tails the sync logs under each mirror's `log_dir`, taking the mirror name from the file name; takes OTLP metrics on port 4318 and forwards them to Prometheus |
 | Loki 3.7 | The image's own config | Stores logs |
 | Telegraf 1.40 | `deploy/telegraf/telegraf.conf` | Scrapes the groups, takes pushes on port 8186 and writes to InfluxDB |
 | InfluxDB 3 Core | compose | Reachable only inside the compose network; one query reads at most 432 Parquet files, about five days of data, so longer ranges need `--query-file-limit` |

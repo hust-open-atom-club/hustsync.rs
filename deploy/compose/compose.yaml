@@ -44,6 +44,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=90d
+      - --web.enable-remote-write-receiver
     volumes:
       - ../prometheus:/etc/prometheus:ro
       - p8s:/prometheus
@@ -65,7 +66,7 @@ services:
       - ../alloy/config.alloy:/etc/alloy/config.alloy:ro
       - log:/var/log/hustsync:ro
       - alloy:/var/lib/alloy
-    depends_on: [loki]
+    depends_on: [loki, prometheus]
     restart: unless-stopped
 
   influxdb:
