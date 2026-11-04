@@ -22,6 +22,16 @@ jobs:
       - name: Alert rule tests
         run: docker run --rm -v "$PWD/deploy/prometheus:/w" -w /w --entrypoint promtool prom/prometheus:v3.15.0 test rules rules.test.yml
 
+  telegraf:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p hustsync
+      - name: Telegraf pull and push agree
+        run: scripts/telegraf-pull-push.sh target/debug/hustsync
+
   compose:
     runs-on: ubuntu-26.04
     steps:

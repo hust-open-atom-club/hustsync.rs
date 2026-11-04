@@ -49,8 +49,26 @@ services:
       - p8s:/prometheus
     restart: unless-stopped
 
+  influxdb:
+    image: influxdb:3-core
+    profiles: [monitoring]
+    # Reachable only inside the compose network.
+    command: influxdb3 serve --node-id hustsync --object-store file --data-dir /var/lib/influxdb3 --without-auth
+    volumes:
+      - influx:/var/lib/influxdb3
+    restart: unless-stopped
+
+  telegraf:
+    image: telegraf:1.40
+    profiles: [monitoring]
+    volumes:
+      - ../telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on: [influxdb]
+    restart: unless-stopped
+
 volumes:
   db:
   data:
   log:
   p8s:
+  influx:
