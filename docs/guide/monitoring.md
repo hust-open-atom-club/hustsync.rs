@@ -67,6 +67,7 @@ The boards load with Grafana into the hustsync folder, refresh every 5 minutes b
 | Board | File | Use |
 |:--:|:--:|:--:|
 | Overview | `hustsync.json` | The first screen shows everything; details follow below |
+| Mirrors | `hustsync-mirrors.json` | Mirrors only: needs attention, overview, status, durations, sync logs |
 
 ### Overview, first screen
 
