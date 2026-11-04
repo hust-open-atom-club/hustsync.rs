@@ -1,20 +1,31 @@
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
+use axum::{
+    Json, Router,
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
 use hustsync_internal::msg::{CmdVerb, WorkerCmd};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, Semaphore, mpsc};
 
 use crate::MirrorJob;
 
 pub struct AppState {
     pub jobs: Arc<RwLock<HashMap<String, MirrorJob>>>,
     pub schedule_queue: Arc<tokio::sync::Mutex<crate::schedule::ScheduleQueue>>,
+    pub semaphore: Arc<Semaphore>,
+    pub concurrent: usize,
     pub reload_tx: Option<mpsc::Sender<()>>,
 }
 
 pub fn make_http_server(state: Arc<AppState>) -> Router {
-    Router::new().route("/", post(handle_cmd)).with_state(state)
+    Router::new()
+        .route("/", post(handle_cmd))
+        .route("/metrics", get(crate::metrics::serve))
+        .with_state(state)
 }
 
 #[allow(clippy::cognitive_complexity, clippy::significant_drop_tightening)]
