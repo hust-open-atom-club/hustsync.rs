@@ -31,6 +31,16 @@ jobs:
       - name: Formatted
         run: docker run --rm -v "$PWD/deploy/alloy:/w" grafana/alloy:v1.20.1 fmt /w/config.alloy | diff - deploy/alloy/config.alloy
 
+  telegraf:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p hustsync
+      - name: Telegraf pull and push agree
+        run: scripts/telegraf-pull-push.sh target/debug/hustsync
+
   compose:
     runs-on: ubuntu-26.04
     steps:
