@@ -90,6 +90,7 @@ fn worker_config(
         }),
         cgroup: None,
         docker: None,
+        zfs: None,
         server: Some(WorkerServerConfig {
             hostname: Some("127.0.0.1".into()),
             // Bind worker on a fixed port — no ephemeral here because

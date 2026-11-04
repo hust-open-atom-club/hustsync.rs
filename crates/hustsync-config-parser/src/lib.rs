@@ -10,8 +10,10 @@ use thiserror::Error;
 use tracing::warn;
 
 mod mem;
+mod snapshot;
 
 pub use mem::MemBytes;
+pub use snapshot::WorkerZfsConfig;
 /// Typed error returned by every public entry-point in this crate.
 ///
 /// Variants carry enough context for callers to produce actionable
@@ -124,6 +126,7 @@ pub struct WorkerConfig {
     pub manager: Option<WorkerManagerConfig>,
     pub cgroup: Option<WorkerCgroupConfig>,
     pub docker: Option<WorkerDockerConfig>,
+    pub zfs: Option<WorkerZfsConfig>,
     pub server: Option<WorkerServerConfig>,
     pub mirrors: Option<Vec<MirrorConfig>>,
     pub include: Option<IncludeConfig>,
@@ -136,6 +139,7 @@ impl Default for WorkerConfig {
             manager: Some(WorkerManagerConfig::default()),
             cgroup: Some(WorkerCgroupConfig::default()),
             docker: None,
+            zfs: None,
             server: Some(WorkerServerConfig::default()),
             mirrors: Some(vec![MirrorConfig::default()]),
             include: None,
@@ -392,6 +396,7 @@ struct LenientWorkerConfig {
     manager: Option<WorkerManagerConfig>,
     cgroup: Option<WorkerCgroupConfig>,
     docker: Option<WorkerDockerConfig>,
+    zfs: Option<WorkerZfsConfig>,
     server: Option<WorkerServerConfig>,
     mirrors: Option<Vec<LenientMirrorConfig>>,
     include: Option<IncludeConfig>,
@@ -489,6 +494,7 @@ impl From<LenientWorkerConfig> for WorkerConfig {
             manager: l.manager,
             cgroup: l.cgroup,
             docker: l.docker,
+            zfs: l.zfs,
             server: l.server,
             mirrors: l
                 .mirrors
@@ -816,6 +822,8 @@ fn contains_unbracketed_ipv6(upstream: &str) -> bool {
 /// 4. `size_pattern`, when set, must compile and have exactly one capture group.
 /// 5. `stage1_profile`, when set, must be one of the known profiles.
 pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
+    snapshot::validate(cfg)?;
+
     let Some(mirrors) = cfg.mirrors.as_deref() else {
         return Ok(());
     };

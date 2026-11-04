@@ -215,6 +215,13 @@ impl Worker {
             retry.retry = Some(2); // defaultMaxRetry
         }
 
+        if !cfg!(target_os = "linux") && cfg.zpool().is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "[zfs] works on Linux only",
+            ));
+        }
+
         let cfg = Arc::new(cfg);
 
         let cgroups = cfg
@@ -332,6 +339,11 @@ impl Worker {
         g_cfg: &WorkerConfig,
     ) -> Vec<Arc<dyn hooks::JobHook>> {
         let mut chain: Vec<Arc<dyn hooks::JobHook>> = Vec::new();
+        // Before working_dir, which would turn a missing dataset into a plain directory.
+        #[cfg(target_os = "linux")]
+        if let Some(pool) = g_cfg.zpool() {
+            chain.push(Arc::new(hooks::ZfsHook::new(pool)));
+        }
         // 1. Built-in: ensure working_dir exists before anything else.
         chain.push(Arc::new(hooks::WorkingDirHook::new()));
         // 2. Built-in: rotate and stamp the log file before the provider
