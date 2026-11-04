@@ -135,6 +135,7 @@ fn worker_config(
             docker_volumes: None,
             docker_options: None,
             fpsync_options: None,
+            lsyncd_options: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,

@@ -244,8 +244,8 @@ impl JobActor {
             hooks,
         } = run;
         // 1. Acquire semaphore (Concurrency control)
-        let _permit = if force {
-            tracing::info!("Job {} bypassing semaphore (ForceStart)", name);
+        let _permit = if force || provider.daemon() {
+            tracing::info!("Job {} runs without a concurrency slot", name);
             None
         } else {
             tracing::debug!("Job {} waiting for semaphore...", name);

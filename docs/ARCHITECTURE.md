@@ -52,7 +52,7 @@ Before forwarding Stop/Disable, Manager makes a best-effort write of Paused/Disa
 
 ## Concurrency, Retries, and Cleanup
 
-A normal execution acquires an owned permit at the start of `run_sync_loop`. The permit covers hooks, all retries, and JobMessage sends, and is released when the future returns; it does not wait for Manager HTTP completion. ForceStart bypasses the semaphore. The actor owns the retry loop, with its count taken from Provider configuration and no backoff delay in the loop. The interval is the next periodic scheduling interval, not retry backoff. The actor supplies a zero-based `RunContext.attempt` to the Provider; HookCtx uses one-based attempts.
+A normal execution acquires an owned permit at the start of `run_sync_loop`. The permit covers hooks, all retries, and JobMessage sends, and is released when the future returns; it does not wait for Manager HTTP completion. ForceStart and resident Providers such as lsyncd bypass the semaphore. The actor owns the retry loop, with its count taken from Provider configuration and no backoff delay in the loop. The interval is the next periodic scheduling interval, not retry backoff. The actor supplies a zero-based `RunContext.attempt` to the Provider; HookCtx uses one-based attempts.
 
 During execution, Stop/Disable/Halt first change runtime state, cancel the run's token, and then await the running JoinHandle. Disable subsequently notifies HTTP waiters but does not exit the actor; Halt does. Restart terminates and awaits the old execution before starting a new one. Worker shutdown sends Halt and joins actors, with no overall deadline. Background HTTP, relay, and ticker tasks are not all part of the actor JoinSet, so joining actors does not mean every background task has drained.
 

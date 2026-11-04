@@ -11,7 +11,7 @@ use hustsync_worker::{
     hooks::{HookCtx, HookError, JobHook},
     job::{CtrlAction, JobActor, STATE_PAUSED},
     provider::{
-        CommonProviderConfig, ProviderError,
+        CommonProviderConfig, ProviderError, ProviderType,
         cmd_provider::{CmdProvider, CmdProviderConfig},
     },
 };
@@ -147,5 +147,19 @@ async fn stop_during_sync_reports_nothing() -> Res {
     job.send_ctrl(CtrlAction::Stop).await?;
     assert!(next(&mut rx, 5).await.is_none());
     assert_eq!(job.state(), STATE_PAUSED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn daemons_run_without_a_slot() -> Res {
+    let dir = TempDir::new()?;
+    let (job, mut rx, sem) = spawn_with(&dir, 1, vec![], 1, |cfg| {
+        CmdProvider::with_argv(cfg, ProviderType::Lsyncd, vec!["sleep".into(), "30".into()])
+    })?;
+    let _held = Arc::clone(&sem).acquire_owned().await?;
+    job.send_ctrl(CtrlAction::Start).await?;
+    assert_eq!(status(&mut rx, 5).await?, SyncStatus::PreSyncing);
+    assert_eq!(status(&mut rx, 5).await?, SyncStatus::Syncing);
+    job.send_ctrl(CtrlAction::Stop).await?;
     Ok(())
 }

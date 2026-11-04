@@ -79,6 +79,10 @@ impl CmdProvider {
 impl MirrorProvider for CmdProvider {
     impl_provider_getters!(CmdProvider, field kind);
 
+    fn daemon(&self) -> bool {
+        self.kind == ProviderType::Lsyncd
+    }
+
     async fn run(&self, ctx: RunContext) -> Result<(), ProviderError> {
         if ctx.attempt > 1 {
             tracing::debug!(

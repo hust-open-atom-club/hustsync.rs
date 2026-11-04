@@ -445,6 +445,7 @@ pub enum ProviderType {
     Rsync,
     TwoStageRsync,
     Fpsync,
+    Lsyncd,
 }
 
 #[async_trait]
@@ -487,6 +488,11 @@ pub trait MirrorProvider: Send + Sync {
 
     /// Is this a master mirror node?
     fn is_master(&self) -> bool;
+
+    /// Whether the provider keeps running until stopped, like lsyncd.
+    fn daemon(&self) -> bool {
+        false
+    }
 }
 
 /// Construct a concrete provider from a `MirrorConfig` + the worker's
@@ -663,15 +669,22 @@ pub fn build_provider(
             };
             Ok(Box::new(TwoStageRsyncProvider::new(cfg)?))
         }
-        "fpsync" => {
+        "fpsync" | "lsyncd" => {
+            let (tool, opts) = match p_type {
+                "fpsync" => (Tool::Fpsync, &m_cfg.fpsync_options),
+                _ => (Tool::Lsyncd, &m_cfg.lsyncd_options),
+            };
             let bin = m_cfg.command.as_deref().unwrap_or(p_type);
-            let tool = Tool::Fpsync;
             let argv = tool.argv(
                 bin,
-                m_cfg.fpsync_options.as_deref().unwrap_or_default(),
+                opts.as_deref().unwrap_or_default(),
                 &common.upstream_url,
                 &common.working_dir,
             );
+            let mut common = common;
+            if tool.daemon() {
+                common.timeout = Duration::ZERO;
+            }
             let cfg = CmdProviderConfig {
                 command: argv.join(" "),
                 fail_on_match: m_cfg.fail_on_match.clone(),
