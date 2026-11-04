@@ -189,6 +189,7 @@ pub struct Worker {
     pub semaphore: Arc<Semaphore>,
     concurrent: usize,
     cgroups: Option<Arc<cgroup::Cgroups>>,
+    metrics: Arc<metrics::Metrics>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
 
@@ -228,6 +229,7 @@ impl Worker {
             .map(Arc::new);
 
         let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
+        let metrics = metrics::Metrics::new(cfg.metrics.as_ref()).map_err(std::io::Error::other)?;
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
 
@@ -275,6 +277,7 @@ impl Worker {
             semaphore,
             concurrent,
             cgroups,
+            metrics: Arc::new(metrics),
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
             http_client: None,
@@ -544,15 +547,19 @@ impl Worker {
 
     /// Bind and spawn the HTTP (or HTTPS) control server, hooked to the exit token.
     /// Returns `false` if the server could not be started (address parse or TLS error).
-    async fn start_http_server(&self, reload_tx: Option<mpsc::Sender<()>>) -> bool {
-        let app_state = Arc::new(server::AppState {
+    fn app_state(&self, reload_tx: Option<mpsc::Sender<()>>) -> Arc<server::AppState> {
+        Arc::new(server::AppState {
             jobs: Arc::clone(&self.jobs),
             schedule_queue: Arc::clone(&self.schedule_queue),
             semaphore: Arc::clone(&self.semaphore),
             concurrent: self.concurrent,
             reload_tx,
-        });
-        let app = server::make_http_server(app_state);
+            metrics: Arc::clone(&self.metrics),
+        })
+    }
+
+    async fn start_http_server(&self, state: Arc<server::AppState>) -> bool {
+        let app = server::make_http_server(state);
         let listen_addr = self
             .cfg
             .server
@@ -911,7 +918,8 @@ impl Worker {
         let initial_statuses = self.fetch_job_status().await;
         self.bootstrap_queue(initial_statuses).await;
 
-        if !self.start_http_server(reload_tx).await {
+        let state = self.app_state(reload_tx);
+        if !self.start_http_server(Arc::clone(&state)).await {
             return;
         }
 

@@ -217,6 +217,7 @@ pub async fn update_job_of_worker(
 
     match adapter.update_mirror_status(&worker_id, &mirror_id, status) {
         Ok(new_status) => {
+            #[cfg(feature = "metrics")]
             manager.metrics.record(&new_status);
             refresh_status_file(&manager, adapter.as_ref());
             ok_json(new_status)

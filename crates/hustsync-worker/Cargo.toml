@@ -3,6 +3,11 @@ name = "hustsync-worker"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["p8s"]
+metrics = ["hustsync-internal/metrics"]
+p8s = ["metrics", "hustsync-internal/p8s"]
+
 [dependencies]
 async-trait = "0.1.92"
 axum = "0.7"
@@ -11,7 +16,6 @@ chrono = "0.4"
 hustsync-config-parser = { version = "0.1.0", path = "../hustsync-config-parser" }
 hustsync-internal = { version = "0.1.0", path = "../hustsync-internal" }
 nix = { version = "0.31.2", features = ["fs", "process", "signal", "user"] }
-prometheus = { version = "0.14", default-features = false }
 regex = "1.12.3"
 reqwest = { version = "0.13.2", features = ["json"] }
 serde = "1"
@@ -20,6 +24,7 @@ shlex = "1.3.0"
 thiserror = "2.0.18"
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "macros", "fs", "process", "time"] }
 tokio-util = "0.7"
+toml = "0.9"
 tracing = "0.1"
 
 [lints]

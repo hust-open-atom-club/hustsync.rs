@@ -3,6 +3,10 @@ name = "hustsync-internal"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+metrics = ["dep:prometheus"]
+p8s = ["metrics"]
+
 [dependencies]
 chrono = { version = "0.4.42", features = ["serde"] }
 regex = "1.12.2"
@@ -14,7 +18,7 @@ tracing = "0.1.41"
 serlog = { version = "0.1.1", features = ["file", "loki", "mail", "aws-lc-rs", "config", "tracing"] }
 toml = "0.9"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["registry", "std"] }
-
+prometheus = { version = "0.14", default-features = false, features = ["process"], optional = true }
 
 [lints]
 workspace = true
