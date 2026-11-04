@@ -50,6 +50,7 @@ scrape_configs:
 | | `hustsync_mirror_sync_duration_seconds{mirror,worker}` | Duration of the last sync |
 | | `hustsync_mirror_last_success_timestamp_seconds{mirror,worker}` | Time of the last success |
 | | `hustsync_mirror_next_sync_timestamp_seconds{mirror,worker}` | Time of the next sync |
+| | `hustsync_mirror_failures{mirror,worker}` | Failed rounds in a row since the manager started |
 | `workers` | `hustsync_workers` | Registered workers |
 | | `hustsync_workers_online` `hustsync_worker_up{worker}` | Probed at scrape time; a reply within 2 s counts as online |
 | | `hustsync_worker_last_online_timestamp_seconds{worker}` | When the worker last contacted the manager |
@@ -67,6 +68,9 @@ Size comes from `size` in the status: `K`, `M`, `G` and `T` are powers of 1000, 
 | | `hustsync_worker_jobs_running` | Mirrors syncing now |
 | | `hustsync_worker_jobs_queued` | Mirrors waiting for their next sync |
 | | `hustsync_worker_concurrency` | Concurrency limit |
+| `manager` | `hustsync_worker_manager_up{manager}` | Whether the last request to that manager succeeded |
+| | `hustsync_worker_manager_failures{manager}` | Failed requests in a row |
+| | `hustsync_worker_manager_last_success_timestamp_seconds{manager}` | Time of the last success |
 | `process` | As on the manager | |
 
 ## Configuration

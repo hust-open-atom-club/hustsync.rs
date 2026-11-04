@@ -100,6 +100,8 @@ async fn metrics_cover_syncs_mirrors_and_workers() -> Res {
         r#"hustsync_mirrors{status="syncing"} 0"#,
         r#"hustsync_mirror_state{mirror="m1",worker="w1"} 2"#,
         r#"hustsync_mirror_state{mirror="m2",worker="w1"} 1"#,
+        r#"hustsync_mirror_failures{mirror="m1",worker="w1"} 0"#,
+        r#"hustsync_mirror_failures{mirror="m2",worker="w1"} 1"#,
         r#"hustsync_mirror_info{mirror="m1",role="master",upstream="rsync://up/m/",worker="w1"} 1"#,
         r#"hustsync_mirror_size_bytes{mirror="m1",worker="w1"} 1500000000"#,
         r#"hustsync_mirror_next_sync_timestamp_seconds{mirror="m1",worker="w1"} 1893456000"#,
