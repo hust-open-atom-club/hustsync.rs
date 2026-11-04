@@ -96,7 +96,7 @@ services:
       - ../grafana/provisioning:/etc/grafana/provisioning:ro
       - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana:/var/lib/grafana
-    depends_on: [prometheus, loki]
+    depends_on: [prometheus, loki, influxdb]
     restart: unless-stopped
 
 volumes:

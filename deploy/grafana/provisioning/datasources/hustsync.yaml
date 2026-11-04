@@ -15,3 +15,12 @@ datasources:
     type: loki
     access: proxy
     url: http://loki:3100
+
+  - name: InfluxDB
+    uid: hustsync-influx
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8181
+    jsonData:
+      dbName: hustsync
+      httpMode: GET
