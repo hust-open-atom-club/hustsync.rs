@@ -4,6 +4,7 @@
 - [Compatibility contracts](COMPATIBILITY.md): external interfaces, upstream baseline, fixtures, and evidence limits.
 - [Contribution guide](../CONTRIBUTING.md): selecting validation, reporting results, and splitting commits.
 - [Agent entry point](../AGENTS.md) and [review workflow](../.agents/REVIEW.md): task-specific reading and the correction cycle.
+- [Repository skills](SKILLS.md): discovery, invocation boundaries, and behavioral validation cases.
 - [Configuration examples](example/): check paths, mirror sources, and the runtime environment before use; these are not deployment certification.
 
 ## How to Read These Specifications

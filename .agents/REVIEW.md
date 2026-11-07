@@ -1,6 +1,6 @@
 # Implementation and Review Workflow
 
-This workflow applies to agent implementation and project review. Small text corrections still require self-review; independent review may be scoped to the risk. For substantive changes involving multiple crates, external contracts, scheduling/storage/process lifecycle, or governance rules, use a coordinator, a sole implementer, an independent correctness reviewer, and an independent simplification reviewer. These roles may run sequentially when resources are limited. Do not describe the implementer's self-review as independent review; report unavailable roles explicitly.
+This workflow applies to agent implementation and project review. Small text corrections still require self-review; independent review may be scoped to the risk. For substantive changes involving multiple crates, external contracts, scheduling/storage/process lifecycle, or governance rules, use a coordinator, a sole implementer, an independent correctness reviewer, and an independent simplification reviewer when delegation is authorized by the current task or applicable instructions and resources are available. These roles may run sequentially when resources are limited. This workflow does not itself authorize spawning agents. Without authorized or available delegation, complete self-review and report missing independent review; do not describe the implementer's self-review as independent review.
 
 ## A. Before Editing
 
