@@ -14,7 +14,7 @@ HustSync manages and runs mirror synchronization tasks through three main compon
 
 The Rust implementation currently covers the core manager, worker, and control CLI flows. Worker providers currently include `rsync`, `two-stage-rsync`, and `command`.
 
-Some Go-only worker features are not implemented yet, including Docker wrapping, cgroup enforcement, ZFS hooks, and btrfs snapshot hooks. Treat `tunasync` as the compatibility reference when porting or validating behavior.
+Some Go-only worker features are not implemented yet, including Docker wrapping, cgroup enforcement, ZFS hooks, and btrfs snapshot hooks. The upstream version baseline has not yet been established; see [Compatibility](docs/COMPATIBILITY.md) before making compatibility claims.
 
 ## Architecture & Project Structure
 
@@ -26,6 +26,10 @@ The project is organized as a Cargo workspace with the following core crates:
 - `crates/hustsync-manager`: The manager API and persistence layer, built with Axum.
 - `crates/hustsync-worker`: The worker runtime, scheduler, providers, and hooks.
 - `crates/hustsync-internal`: Shared protocol types, status conversion, logging, and utilities.
+
+## Development Documentation
+
+See the [documentation index](docs/README.md) for architecture and compatibility contracts, and [CONTRIBUTING](CONTRIBUTING.md) for validation and review. Coding agents start with [AGENTS.md](AGENTS.md).
 
 ## Build
 
