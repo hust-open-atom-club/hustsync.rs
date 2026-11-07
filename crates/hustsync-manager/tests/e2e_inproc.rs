@@ -1,8 +1,9 @@
-//! In-process manager ↔ worker ↔ hustsynctl end-to-end test.
+//! In-process manager ↔ worker integration test driven by an HTTP client.
+//! This does not launch the hustsynctl binary or validate its argument parsing.
 //!
 //! Brings up a real manager HTTP server on an ephemeral port, starts a
 //! worker pointing at it, issues a start command through the manager,
-//! and waits for the sync to complete end-to-end. Uses the `cmd`
+//! and waits for the sync to complete. Uses the `command`
 //! provider with `/bin/echo` so the sync finishes in milliseconds
 //! without any network dependency.
 

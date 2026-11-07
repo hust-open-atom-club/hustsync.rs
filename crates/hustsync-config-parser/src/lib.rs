@@ -491,13 +491,10 @@ where
     parse_config_with_options(path, &ConfigLoadOptions::default())
 }
 
-/// Like [`parse_config`] but accepts a [`ConfigLoadOptions`] to control
-/// leniency and other load-time behaviour.
+/// Like [`parse_config`], retaining a [`ConfigLoadOptions`] argument for API compatibility.
 ///
-/// When `opts.allow_unsupported_fields` is `true` and a `WorkerConfig` parse
-/// fails due to unknown fields, a lenient retry is performed.  Each unknown
-/// key is logged at WARN.  For all other `T` types the option is silently
-/// ignored and strict parsing is used.
+/// This generic entry-point currently ignores `opts` and always parses strictly.
+/// Use [`load_worker_config`] for worker-specific leniency and include loading.
 pub fn parse_config_with_options<T>(
     path: impl AsRef<Path>,
     opts: &ConfigLoadOptions,

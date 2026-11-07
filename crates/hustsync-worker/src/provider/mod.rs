@@ -379,14 +379,13 @@ pub(crate) async fn run_child_with_cancellation(
 
 /// Execution context passed into every `run()` call.
 ///
-/// `cancel` carries the operator cancellation signal — providers must select on
-/// it and return `ProviderError::Terminated` promptly (within 10 s).
+/// `cancel` is a caller-supplied cancellation token. JobActor currently supplies
+/// a fresh default token and handles operator commands through `terminate()`;
+/// this field alone does not establish an end-to-end cancellation deadline.
 ///
-/// `attempt` is 1-based and is available for logging only: providers SHOULD log
-/// it at DEBUG level on re-entry (`attempt > 1`) and MUST NOT change sync
-/// behaviour based on it. The retry policy (count, backoff) is entirely the
-/// job-actor's responsibility, matching Go tunasync behaviour where the retry
-/// loop runs outside provider.Run().
+/// `attempt` is the zero-based index supplied by JobActor (HookCtx uses one-based
+/// attempts). It is diagnostic context, not a separate retry policy: the actor
+/// owns the retry loop.
 ///
 /// `env` contains hook-injected variables (e.g. the rotated
 /// `HUSTSYNC_LOG_FILE` from the loglimit hook). Providers layer it on

@@ -11,14 +11,12 @@
 //
 // Fixture layout: crates/hustsync-internal/tests/fixtures/<type>/<name>.json
 //
-// Wire-format notes (verified against Go `internal/msg.go` and `internal/status_web.go`):
+// Wire-format notes for the current Rust types and committed fixtures.
+// These round-trips do not establish compatibility with a pinned Go revision.
 //
-// - MirrorStatus uses #[serde(rename_all = "kebab-case")]. Field names on the wire are
-// therefore hyphenated: "error-msg", "last-update", "is-master", "next-scheduled".
-// This diverges from Go tunasync (which uses snake_case) and from WebMirrorStatus
-// (snake_case). The divergence lives in src/ and is outside testing-qa's lane;
-// these tests pin the *current* Rust behaviour so any future fix in src/ breaks
-// them intentionally, prompting a fixture update.
+// - MirrorStatus uses snake_case field names, including "error_msg",
+// "last_update" and "is_master". Rust's `next_scheduled` is explicitly
+// serialized as "next_schedule".
 //
 // - WebMirrorStatus uses dual text ("YYYY-MM-DD HH:MM:SS ±ZZZZ") plus sibling *_ts
 // Unix-second integer fields. Text timestamps include timezone offset from
@@ -82,9 +80,7 @@ where
 // ---------------------------------------------------------------------------
 
 /// MirrorStatus: worker → manager status push body.
-/// Fixture keys are kebab-case because MirrorStatus carries
-/// #[serde(rename_all = "kebab-case")]. That diverges from Go wire
-/// format (snake_case); pinned here to make the divergence explicit.
+/// Fixture keys are snake_case; `next_scheduled` is renamed to `next_schedule`.
 #[test]
 fn test_roundtrip_mirror_status() {
     assert_roundtrip::<MirrorStatus>("msg/mirror_status.json", &[]);

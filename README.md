@@ -7,7 +7,7 @@
 HustSync manages and runs mirror synchronization tasks through three main components:
 
 - **Manager**: The central control plane. It stores mirror job state, handles worker registration, and exposes an HTTP/HTTPS API for workers and clients. It uses `redb` by default, with Redis support when configured.
-- **Worker**: The execution engine. It connects to the manager, retrieves schedules, and runs mirror jobs from its local configuration.
+- **Worker**: The execution engine. It reads stored job status from the manager at startup, builds its own schedule queue, runs jobs from local configuration, and reports status and schedule snapshots back to the manager.
 - **hustsynctl**: The command-line control tool for listing workers/jobs and sending job commands through the manager.
 
 ## Project Status

@@ -26,9 +26,9 @@ enum PostPhase {
 pub enum CtrlAction {
     Start,
     Stop,       // stop syncing keep the job
-    Disable,    // disable the job (stops goroutine)
+    Disable,    // disable the job; actor remains available for later commands
     Restart,    // restart syncing
-    Ping,       // ensure the goroutine is alive
+    Ping,       // actor no-op; HTTP ping is handled before actor dispatch
     Halt,       // worker halts
     ForceStart, // ignore concurrent limit
 }

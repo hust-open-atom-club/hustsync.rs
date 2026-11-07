@@ -726,7 +726,7 @@ impl Worker {
         });
     }
 
-    /// Halt all running job actors and wait for them to drain (≤ 30 s by design).
+    /// Send Halt to all job actors and join them. There is no overall deadline here.
     // The complexity lint over-counts here because it accumulates closure complexity
     // from `start_message_relay`'s spawned async block into this function's score.
     #[allow(clippy::cognitive_complexity)]
@@ -761,8 +761,8 @@ impl Worker {
     }
 
     /// Build provider + hooks for `m_cfg`, spawn actor, schedule it, and
-    /// insert it into the jobs map. The actor is scheduled at `now` unless
-    /// `initial_state` forces it into disabled/paused.
+    /// insert it into the jobs map. Disabled actors stay unscheduled; all other
+    /// initial states, including paused, are queued at `now`.
     async fn spawn_mirror_from_cfg(
         &self,
         name: &str,
@@ -863,11 +863,11 @@ impl Worker {
 
     /// Apply a freshly-loaded mirror config slice to the running worker.
     ///
-    /// Mirrors absent from the new config are disabled and dropped. Mirrors
-    /// present in both are torn down and rebuilt so the new provider config
-    /// takes effect; the previous paused/disabled state is preserved. New
-    /// mirrors are created and scheduled immediately. Matches Go
-    /// `Worker.ReloadMirrorConfig`.
+    /// Removed mirrors receive Disable and leave the jobs map. Only changed
+    /// mirrors are rebuilt; unchanged mirrors retain their actor and schedule.
+    /// Rebuilt disabled mirrors stay unscheduled; rebuilt paused mirrors retain
+    /// that state initially but are queued immediately. New mirrors are queued
+    /// immediately. This method does not reload the worker's global settings.
     pub async fn reload_mirror_config(
         &self,
         new_mirrors: Vec<hustsync_config_parser::MirrorConfig>,
