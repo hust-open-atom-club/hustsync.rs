@@ -9,6 +9,11 @@ use std::{
 use thiserror::Error;
 use tracing::warn;
 
+mod alert;
+mod mem;
+
+pub use alert::AlertConfig;
+pub use mem::MemBytes;
 /// Typed error returned by every public entry-point in this crate.
 ///
 /// Variants carry enough context for callers to produce actionable
@@ -71,6 +76,11 @@ pub struct ManagerConfig {
     pub server: ManagerServerConfig,
     pub files: ManagerFileConfig,
     pub debug: bool,
+    /// More log sinks for serlog, beside the console or `--log-file` one.
+    #[serde(default)]
+    pub log: Option<toml::Table>,
+    #[serde(default)]
+    pub alert: Option<AlertConfig>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -120,9 +130,12 @@ pub struct WorkerConfig {
     pub global: Option<WorkerGlobalConfig>,
     pub manager: Option<WorkerManagerConfig>,
     pub cgroup: Option<WorkerCgroupConfig>,
+    pub docker: Option<WorkerDockerConfig>,
     pub server: Option<WorkerServerConfig>,
     pub mirrors: Option<Vec<MirrorConfig>>,
     pub include: Option<IncludeConfig>,
+    /// More log sinks for serlog, beside the console or `--log-file` one.
+    pub log: Option<toml::Table>,
 }
 
 impl Default for WorkerConfig {
@@ -131,9 +144,11 @@ impl Default for WorkerConfig {
             global: Some(WorkerGlobalConfig::default()),
             manager: Some(WorkerManagerConfig::default()),
             cgroup: Some(WorkerCgroupConfig::default()),
+            docker: None,
             server: Some(WorkerServerConfig::default()),
             mirrors: Some(vec![MirrorConfig::default()]),
             include: None,
+            log: None,
         }
     }
 }
@@ -188,6 +203,8 @@ pub struct WorkerManagerConfig {
     pub api_base_list: Option<Vec<String>>,
     pub token: Option<String>,
     pub ca_cert: Option<String>,
+    /// Seconds between re-registrations, so the manager and the worker's alerts notice a lost link; 0 or unset sends none.
+    pub heartbeat: Option<u64>,
 }
 
 impl Default for WorkerManagerConfig {
@@ -197,6 +214,7 @@ impl Default for WorkerManagerConfig {
             api_base_list: None,
             token: Some("".into()),
             ca_cert: Some("".into()),
+            heartbeat: None,
         }
     }
 }
@@ -214,9 +232,18 @@ impl Default for WorkerCgroupConfig {
         WorkerCgroupConfig {
             enable: Some(false),
             base_path: Some("/sys/fs/cgroup".into()),
-            group: Some("hustsync".into()),
+            group: None,
         }
     }
+}
+
+/// `[docker]`: runs mirrors that set `docker_image` inside containers.
+#[derive(Debug, Deserialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerDockerConfig {
+    pub enable: Option<bool>,
+    pub volumes: Option<Vec<String>>,
+    pub options: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -273,7 +300,10 @@ pub struct MirrorConfig {
     pub rsync_override: Option<Vec<String>>,
     pub rsync_override_only: Option<bool>,
     pub stage1_profile: Option<String>,
-    pub memory_limit: Option<String>,
+    pub memory_limit: Option<MemBytes>,
+    pub docker_image: Option<String>,
+    pub docker_volumes: Option<Vec<String>>,
+    pub docker_options: Option<Vec<String>>,
     pub success_exit_codes: Option<Vec<i32>>,
     pub rsync_success_exit_codes: Option<Vec<i32>>,
     /// Nested child mirrors. Children inherit unset fields from this parent.
@@ -323,6 +353,9 @@ impl Default for MirrorConfig {
             rsync_override_only: None,
             stage1_profile: None,
             memory_limit: None,
+            docker_image: None,
+            docker_volumes: None,
+            docker_options: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
@@ -371,9 +404,11 @@ struct LenientWorkerConfig {
     global: Option<WorkerGlobalConfig>,
     manager: Option<WorkerManagerConfig>,
     cgroup: Option<WorkerCgroupConfig>,
+    docker: Option<WorkerDockerConfig>,
     server: Option<WorkerServerConfig>,
     mirrors: Option<Vec<LenientMirrorConfig>>,
     include: Option<IncludeConfig>,
+    log: Option<toml::Table>,
 }
 
 // Mirrors LenientWorkerConfig but without deny_unknown_fields so it absorbs
@@ -409,7 +444,10 @@ struct LenientMirrorConfig {
     rsync_override: Option<Vec<String>>,
     rsync_override_only: Option<bool>,
     stage1_profile: Option<String>,
-    memory_limit: Option<String>,
+    memory_limit: Option<MemBytes>,
+    docker_image: Option<String>,
+    docker_volumes: Option<Vec<String>>,
+    docker_options: Option<Vec<String>>,
     success_exit_codes: Option<Vec<i32>>,
     rsync_success_exit_codes: Option<Vec<i32>>,
     #[serde(default)]
@@ -446,6 +484,9 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             rsync_override_only: l.rsync_override_only,
             stage1_profile: l.stage1_profile,
             memory_limit: l.memory_limit,
+            docker_image: l.docker_image,
+            docker_volumes: l.docker_volumes,
+            docker_options: l.docker_options,
             success_exit_codes: l.success_exit_codes,
             rsync_success_exit_codes: l.rsync_success_exit_codes,
             mirrors: l
@@ -461,11 +502,13 @@ impl From<LenientWorkerConfig> for WorkerConfig {
             global: l.global,
             manager: l.manager,
             cgroup: l.cgroup,
+            docker: l.docker,
             server: l.server,
             mirrors: l
                 .mirrors
                 .map(|mv| mv.into_iter().map(MirrorConfig::from).collect()),
             include: l.include,
+            log: l.log,
         }
     }
 }
@@ -719,6 +762,9 @@ fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
         rsync_override_only,
         stage1_profile,
         memory_limit,
+        docker_image,
+        docker_volumes,
+        docker_options,
         success_exit_codes,
         rsync_success_exit_codes,
     );
@@ -785,18 +831,6 @@ fn contains_unbracketed_ipv6(upstream: &str) -> bool {
 /// 4. `size_pattern`, when set, must compile and have exactly one capture group.
 /// 5. `stage1_profile`, when set, must be one of the known profiles.
 pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
-    if cfg
-        .cgroup
-        .as_ref()
-        .and_then(|cgroup| cgroup.enable)
-        .unwrap_or(false)
-    {
-        return Err(ConfigError::UnsupportedField {
-            field: "cgroup.enable".into(),
-            tracked_in: "parity-checklist: Cgroup enforcement parity",
-        });
-    }
-
     let Some(mirrors) = cfg.mirrors.as_deref() else {
         return Ok(());
     };

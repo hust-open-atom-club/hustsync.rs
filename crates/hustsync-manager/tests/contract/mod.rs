@@ -41,6 +41,8 @@ pub fn spawn_manager() -> (Router, TempDir) {
 
     let config = Arc::new(ManagerConfig {
         debug: false,
+        alert: None,
+        log: None,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,
@@ -93,6 +95,8 @@ pub async fn spawn_manager_tls() -> (SocketAddr, JoinHandle<()>, Vec<u8>) {
 
     let config = Arc::new(ManagerConfig {
         debug: false,
+        alert: None,
+        log: None,
         server: ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,

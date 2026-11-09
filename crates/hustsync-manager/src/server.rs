@@ -22,6 +22,7 @@ pub struct Manager {
     pub config: Arc<ManagerConfig>,
     pub adapter: Option<Arc<dyn DbAdapterTrait>>,
     pub http_client: Option<Client>,
+    pub streaks: crate::Streaks,
 }
 
 impl Manager {
@@ -31,6 +32,7 @@ impl Manager {
             config: Arc::clone(&config),
             adapter: None,
             http_client: None,
+            streaks: crate::Streaks::new(config.alert.unwrap_or_default().failures),
         };
 
         if !config.files.ca_cert.is_empty() {
