@@ -1,0 +1,4358 @@
+{
+  "title": "hustsync · 总览",
+  "uid": "hustsync",
+  "description": "镜像站整体状态、新鲜度、即将同步、体积与同步活动",
+  "tags": [
+    "hustsync",
+    "tunasync",
+    "mirror"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "schemaVersion": 41,
+  "version": 1,
+  "links": [
+    {
+      "title": "镜像",
+      "type": "link",
+      "url": "/d/hustsync-mirrors",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "运维",
+      "type": "link",
+      "url": "/d/hustsync-ops",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "InfluxDB",
+      "type": "link",
+      "url": "/d/hustsync-influx",
+      "icon": "dashboard",
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "hustsync",
+      "type": "link",
+      "url": "https://github.com/hust-open-atom-club/hustsync.rs",
+      "targetBlank": true,
+      "icon": "external link"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "p8s",
+        "label": "指标",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "hustsync-p8s"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "options": []
+      },
+      {
+        "name": "loki",
+        "label": "日志",
+        "type": "datasource",
+        "query": "loki",
+        "current": {
+          "text": "Loki",
+          "value": "hustsync-loki"
+        },
+        "hide": 0,
+        "refresh": 1,
+        "options": []
+      },
+      {
+        "name": "worker",
+        "label": "worker",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${p8s}"
+        },
+        "query": {
+          "query": "label_values(hustsync_mirror_state, worker)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery",
+          "qryType": 1
+        },
+        "definition": "label_values(hustsync_mirror_state, worker)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "options": []
+      },
+      {
+        "name": "mirror",
+        "label": "镜像",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${p8s}"
+        },
+        "query": {
+          "query": "label_values(hustsync_mirror_state{worker=~\"$worker\"}, mirror)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery",
+          "qryType": 1
+        },
+        "definition": "label_values(hustsync_mirror_state{worker=~\"$worker\"}, mirror)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1,
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "marcusolsson-dynamictext-panel",
+      "title": "",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "vector(1)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "renderMode": "allRows",
+        "content": "<div class=\"hd\">\n  <div>\n    <div class=\"hd-title\">镜像同步总览</div>\n    <div class=\"hd-sub\">状态、新鲜度、体积与同步活动</div>\n  </div>\n  <div class=\"hd-clock\">\n    <div class=\"hd-time\"></div>\n    <div class=\"hd-date\"></div>\n  </div>\n</div>\n",
+        "defaultContent": "暂无数据",
+        "styles": ".hd {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  height: 100%;\n  padding: 0 12px;\n}\n.hd-title {\n  font-size: 26px;\n  font-weight: 600;\n  letter-spacing: 2px;\n  background: linear-gradient(90deg, #8ab8ff, #38bdb0);\n  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n}\n.hd-sub {\n  margin-top: 4px;\n  font-size: 13px;\n  opacity: 0.65;\n}\n.hd-clock {\n  text-align: right;\n}\n.hd-time {\n  font-size: 28px;\n  font-weight: 500;\n  font-variant-numeric: tabular-nums;\n  letter-spacing: 1px;\n}\n.hd-date {\n  font-size: 13px;\n  opacity: 0.65;\n}\n",
+        "afterRender": "const time = context.element.querySelector('.hd-time');\nconst date = context.element.querySelector('.hd-date');\nconst tick = () => {\n  const now = new Date();\n  time.textContent = now.toLocaleTimeString('zh-CN', { hour12: false });\n  date.textContent = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });\n};\n\ntick();\nconst timer = setInterval(tick, 1000);\nreturn () => clearInterval(timer);\n",
+        "helpers": "",
+        "editors": [
+          "styles",
+          "afterRender"
+        ],
+        "wrap": false,
+        "contentPartials": [],
+        "externalStyles": [],
+        "editor": {
+          "format": "auto",
+          "language": "html"
+        }
+      },
+      "id": 1,
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "stat",
+      "title": "镜像",
+      "description": "manager 登记的镜像数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"})",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 2,
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 3
+      }
+    },
+    {
+      "type": "stat",
+      "title": "24 小时成功率",
+      "description": "过去 24 小时结束的同步里成功的占比，含重试",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_syncs_total{result=\"success\", mirror=~\"$mirror\", worker=~\"$worker\"}[24h])) / sum(increase(hustsync_syncs_total{mirror=~\"$mirror\", worker=~\"$worker\"}[24h]))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#F2495C",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 0.9
+              },
+              {
+                "color": "#73BF69",
+                "value": 0.98
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 3
+      }
+    },
+    {
+      "type": "stat",
+      "title": "总体积",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(hustsync_mirror_size_bytes{mirror=~\"$mirror\", worker=~\"$worker\"})",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B877D9"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 3
+      }
+    },
+    {
+      "type": "stat",
+      "title": "失败",
+      "description": "当前处于失败状态的镜像",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 1) or vector(0)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#F2495C",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 8
+      }
+    },
+    {
+      "type": "stat",
+      "title": "同步中",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 3 or hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 4) or vector(0)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#56A64B"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 6,
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 8
+      }
+    },
+    {
+      "type": "stat",
+      "title": "worker 在线",
+      "description": "manager 抓取时能连上的 worker 数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(hustsync_workers_online)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#F2495C",
+                "value": null
+              },
+              {
+                "color": "#73BF69",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 8
+      }
+    },
+    {
+      "type": "volkovlabs-echarts-panel",
+      "title": "状态分布",
+      "description": "当前各状态的镜像数；悬停看占比",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 0)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 1)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "C",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 2)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "D",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 3)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "E",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 4)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "F",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 5)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "G",
+          "expr": "count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 6)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "renderer": "canvas",
+        "editorMode": "code",
+        "map": "none",
+        "followTheme": true,
+        "getOption": "const states = [\n  ['无', '#8E8E8E'],\n  ['失败', '#F2495C'],\n  ['成功', '#73BF69'],\n  ['同步中', '#56A64B'],\n  ['准备同步', '#96D98D'],\n  ['暂停', '#FADE2A'],\n  ['禁用', '#3D3D3D'],\n];\nconst theme = context.grafana.theme;\nconst data = context.panel.data.series\n  .map((frame) => {\n    const [name, color] = states['ABCDEFG'.indexOf(frame.refId)];\n    const values = frame.fields.find((f) => f.type === 'number')?.values ?? [];\n    return { name, value: values.at(-1) ?? 0, itemStyle: { color } };\n  })\n  .filter((d) => d.value > 0)\n  .sort((a, b) => b.value - a.value);\nconst total = data.reduce((sum, d) => sum + d.value, 0);\n\nreturn {\n  tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 个 · {d}%' },\n  title: {\n    text: String(total),\n    subtext: '个镜像',\n    left: '40%',\n    top: '39%',\n    textAlign: 'center',\n    itemGap: 4,\n    textStyle: { fontSize: 34, fontWeight: 600, color: theme.colors.text.primary },\n    subtextStyle: { fontSize: 13, color: theme.colors.text.secondary },\n  },\n  legend: {\n    orient: 'vertical',\n    left: '70%',\n    top: 'middle',\n    icon: 'circle',\n    itemGap: 16,\n    textStyle: { fontSize: 14, color: theme.colors.text.primary },\n    formatter: (name) => `${name}   ${data.find((d) => d.name === name)?.value ?? 0}`,\n  },\n  series: [\n    {\n      type: 'pie',\n      radius: ['56%', '80%'],\n      center: ['40%', '50%'],\n      padAngle: 2,\n      itemStyle: { borderRadius: 8 },\n      label: { show: false },\n      labelLine: { show: false },\n      emphasis: { scale: true, scaleSize: 6 },\n      animationType: 'expansion',\n      data,\n    },\n  ],\n};\n",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "themeEditor": {
+          "name": "default",
+          "config": "{}"
+        }
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 3
+      }
+    },
+    {
+      "type": "volkovlabs-echarts-panel",
+      "title": "24 小时内同步成功",
+      "description": "24 小时内同步成功过的镜像占全部镜像的比例",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(time() - hustsync_mirror_last_success_timestamp_seconds{mirror=~\"$mirror\", worker=~\"$worker\"} < 86400) / count(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"})",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "renderer": "canvas",
+        "editorMode": "code",
+        "map": "none",
+        "followTheme": true,
+        "getOption": "const RING = { name: '镜像占比', colour: (v) => (v >= 0.9 ? '#73BF69' : v >= 0.7 ? '#FF9830' : '#F2495C') };\nconst theme = context.grafana.theme;\nconst chart = context.panel.chart;\nconst value = context.panel.data.series[0]?.fields.find((f) => f.type === 'number')?.values.at(-1) ?? 0;\nconst color = RING.colour(value);\nconst radius = Math.max(40, Math.min(chart.getWidth(), chart.getHeight()) / 2 - 22);\n\nreturn {\n  series: [\n    {\n      type: 'gauge',\n      center: ['50%', '54%'],\n      radius,\n      startAngle: 225,\n      endAngle: -45,\n      min: 0,\n      max: 100,\n      progress: { show: true, roundCap: true, width: 14, itemStyle: { color } },\n      axisLine: { roundCap: true, lineStyle: { width: 14, color: [[1, theme.colors.background.canvas]] } },\n      axisTick: { show: false },\n      splitLine: { show: false },\n      axisLabel: { show: false },\n      pointer: { show: false },\n      anchor: { show: false },\n      title: { offsetCenter: [0, '70%'], fontSize: 13, color: theme.colors.text.secondary },\n      detail: {\n        offsetCenter: [0, '0%'],\n        valueAnimation: true,\n        formatter: '{value}%',\n        fontSize: 30,\n        fontWeight: 600,\n        color: theme.colors.text.primary,\n      },\n      data: [{ value: Math.round(value * 1000) / 10, name: RING.name }],\n    },\n  ],\n};\n",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "themeEditor": {
+          "name": "default",
+          "config": "{}"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 10,
+        "w": 6,
+        "x": 0,
+        "y": 13
+      }
+    },
+    {
+      "type": "volkovlabs-echarts-panel",
+      "title": "并发占用",
+      "description": "正在同步的任务占各 worker 并发上限之和的比例",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(hustsync_worker_jobs_running) / sum(hustsync_worker_concurrency)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "renderer": "canvas",
+        "editorMode": "code",
+        "map": "none",
+        "followTheme": true,
+        "getOption": "const RING = { name: '运行中 / 上限', colour: () => '#5794F2' };\nconst theme = context.grafana.theme;\nconst chart = context.panel.chart;\nconst value = context.panel.data.series[0]?.fields.find((f) => f.type === 'number')?.values.at(-1) ?? 0;\nconst color = RING.colour(value);\nconst radius = Math.max(40, Math.min(chart.getWidth(), chart.getHeight()) / 2 - 22);\n\nreturn {\n  series: [\n    {\n      type: 'gauge',\n      center: ['50%', '54%'],\n      radius,\n      startAngle: 225,\n      endAngle: -45,\n      min: 0,\n      max: 100,\n      progress: { show: true, roundCap: true, width: 14, itemStyle: { color } },\n      axisLine: { roundCap: true, lineStyle: { width: 14, color: [[1, theme.colors.background.canvas]] } },\n      axisTick: { show: false },\n      splitLine: { show: false },\n      axisLabel: { show: false },\n      pointer: { show: false },\n      anchor: { show: false },\n      title: { offsetCenter: [0, '70%'], fontSize: 13, color: theme.colors.text.secondary },\n      detail: {\n        offsetCenter: [0, '0%'],\n        valueAnimation: true,\n        formatter: '{value}%',\n        fontSize: 30,\n        fontWeight: 600,\n        color: theme.colors.text.primary,\n      },\n      data: [{ value: Math.round(value * 1000) / 10, name: RING.name }],\n    },\n  ],\n};\n",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "themeEditor": {
+          "name": "default",
+          "config": "{}"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 10,
+        "w": 6,
+        "x": 6,
+        "y": 13
+      }
+    },
+    {
+      "type": "marcusolsson-dynamictext-panel",
+      "title": "即将同步",
+      "description": "页内每秒倒数；最后一小时内进度条逐渐填满，已过排期的变红",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "bottomk(10, hustsync_mirror_next_sync_timestamp_seconds{mirror=~\"$mirror\", worker=~\"$worker\"})",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "renderMode": "allRows",
+        "content": "<div class=\"cd\">\n  {{#each data}}\n  <div class=\"cd-row\" data-at=\"{{Value}}\">\n    <span class=\"cd-name\">{{mirror}}</span>\n    <div class=\"cd-track\"><div class=\"cd-fill\"></div></div>\n    <span class=\"cd-left\"></span>\n  </div>\n  {{/each}}\n</div>\n",
+        "defaultContent": "暂无数据",
+        "styles": ".cd {\n  display: flex;\n  flex-direction: column;\n  gap: 11px;\n  padding: 6px 8px;\n}\n.cd-row {\n  display: grid;\n  grid-template-columns: 10em 1fr 6.5em;\n  align-items: center;\n  gap: 14px;\n  font-size: 13px;\n}\n.cd-name {\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.cd-track {\n  height: 10px;\n  border-radius: 5px;\n  background: rgba(128, 128, 128, 0.18);\n  overflow: hidden;\n}\n.cd-fill {\n  height: 100%;\n  border-radius: 5px;\n  background: linear-gradient(90deg, #5794f2, #38bdb0);\n  transition: width 1s linear;\n}\n.cd-left {\n  text-align: right;\n  font-variant-numeric: tabular-nums;\n  color: #8ab8ff;\n}\n.late .cd-fill {\n  background: linear-gradient(90deg, #f2495c, #ff9830);\n}\n.late .cd-left {\n  color: #f2495c;\n}\n",
+        "afterRender": "const list = context.element.querySelector('.cd');\nconst rows = [...context.element.querySelectorAll('.cd-row')].sort((a, b) => a.dataset.at - b.dataset.at);\nrows.forEach((row) => list.appendChild(row));\n\n// A bar fills over the last hour before its sync.\nconst horizon = 3600;\nconst pad = (n) => String(n).padStart(2, '0');\nconst say = (s) => {\n  const a = Math.abs(s);\n  const h = Math.floor(a / 3600);\n  const m = Math.floor((a % 3600) / 60);\n  const sec = Math.floor(a % 60);\n  const t = h ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;\n  return s < 0 ? `已过 ${t}` : t;\n};\nconst tick = () => {\n  const now = Date.now() / 1000;\n  for (const row of rows) {\n    const left = row.dataset.at - now;\n    row.classList.toggle('late', left < 0);\n    row.querySelector('.cd-fill').style.width = `${Math.max(0, Math.min(1, 1 - left / horizon)) * 100}%`;\n    row.querySelector('.cd-left').textContent = say(left);\n  }\n};\n\ntick();\nconst timer = setInterval(tick, 1000);\nreturn () => clearInterval(timer);\n",
+        "helpers": "",
+        "editors": [
+          "styles",
+          "afterRender"
+        ],
+        "wrap": false,
+        "contentPartials": [],
+        "externalStyles": [],
+        "editor": {
+          "format": "auto",
+          "language": "html"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      }
+    },
+    {
+      "type": "row",
+      "id": 12,
+      "title": "同步活动",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "同步次数",
+      "description": "每根柱是一个时段内结束的同步，含重试",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_syncs_total{result=\"success\", mirror=~\"$mirror\", worker=~\"$worker\"}[$__interval]))",
+          "legendFormat": "成功",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "sum(increase(hustsync_syncs_total{result=\"failed\", mirror=~\"$mirror\", worker=~\"$worker\"}[$__interval]))",
+          "legendFormat": "失败",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#73BF69"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F2495C"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "10m",
+      "id": 13,
+      "gridPos": {
+        "h": 12,
+        "w": 14,
+        "x": 0,
+        "y": 24
+      }
+    },
+    {
+      "type": "marcusolsson-treemap-panel",
+      "title": "体积",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "description": "按 worker 分组，格子大小即镜像体积",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "hustsync_mirror_size_bytes{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "{{mirror}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "decimals": 1,
+          "color": {
+            "mode": "continuous-BlPu"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tiling": "treemapSquarify",
+        "textField": "mirror",
+        "sizeField": "Value",
+        "colorField": "Value",
+        "groupByField": "worker"
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 12,
+        "w": 10,
+        "x": 14,
+        "y": 24
+      }
+    },
+    {
+      "type": "tim012432-calendarheatmap-panel",
+      "title": "每日同步",
+      "description": "近 90 天每天成功的同步次数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "round(sum(increase(hustsync_syncs_total{result=\"success\", mirror=~\"$mirror\", worker=~\"$worker\"}[1h])))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "interval": "1h",
+      "timeFrom": "90d",
+      "options": {
+        "colorScheme": "green",
+        "emptyColor": "rgba(128, 128, 128, 0.12)",
+        "autoRectSize": true,
+        "rectSize": 14,
+        "space": 4,
+        "radius": 3,
+        "showWeekLabels": true,
+        "showMonthLabels": true,
+        "showLegend": true,
+        "weekStart": "monday",
+        "monthLabelMode": "custom",
+        "monthLabelCustom": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",
+        "weekLabelMode": "custom",
+        "weekLabelCustom": "日,一,二,三,四,五,六",
+        "aggregation": "sum",
+        "conversionUnit": "",
+        "useTimeRangeOfData": false,
+        "showTooltip": true,
+        "enableDataLinks": false
+      },
+      "id": 15,
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      }
+    },
+    {
+      "type": "tim012432-calendarheatmap-panel",
+      "title": "每日失败",
+      "description": "近 90 天每天失败的同步次数，含重试",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "round(sum(increase(hustsync_syncs_total{result=\"failed\", mirror=~\"$mirror\", worker=~\"$worker\"}[1h])))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "interval": "1h",
+      "timeFrom": "90d",
+      "options": {
+        "colorScheme": "red",
+        "emptyColor": "rgba(128, 128, 128, 0.12)",
+        "autoRectSize": true,
+        "rectSize": 14,
+        "space": 4,
+        "radius": 3,
+        "showWeekLabels": true,
+        "showMonthLabels": true,
+        "showLegend": true,
+        "weekStart": "monday",
+        "monthLabelMode": "custom",
+        "monthLabelCustom": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",
+        "weekLabelMode": "custom",
+        "weekLabelCustom": "日,一,二,三,四,五,六",
+        "aggregation": "sum",
+        "conversionUnit": "",
+        "useTimeRangeOfData": false,
+        "showTooltip": true,
+        "enableDataLinks": false
+      },
+      "id": 16,
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      }
+    },
+    {
+      "type": "row",
+      "id": 17,
+      "title": "访问",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "请求",
+      "description": "所选时段内的请求数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_access_requests_total[$__range]))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 18,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 48
+      }
+    },
+    {
+      "type": "stat",
+      "title": "流量",
+      "description": "所选时段内发出的字节数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_access_sent_bytes_total[$__range]))",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B877D9"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 19,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 48
+      }
+    },
+    {
+      "type": "stat",
+      "title": "国家或地区",
+      "description": "有访问的国家或地区数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(sum by (country) (increase(hustsync_access_requests_total[$__range])) > 0) or vector(0)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#8AB8FF"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 20,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 48
+      }
+    },
+    {
+      "type": "stat",
+      "title": "国内省份",
+      "description": "有访问的省份数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "count(sum by (region) (increase(hustsync_access_requests_total{country=\"CN\"}[$__range])) > 0) or vector(0)",
+          "legendFormat": "",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#38BDB0"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "orientation": "auto"
+      },
+      "id": 21,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 48
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "访问来源",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "description": "国内按省、国外按国家或地区；圆越大访问越多；滚轮缩放可看全球",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (country, place) (increase(hustsync_access_requests_total{country!=\"CN\"}[$__range]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "sum by (region, place, lat, lon) (increase(hustsync_access_requests_total{country=\"CN\"}[$__range]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "fields": {},
+            "conversions": [
+              {
+                "targetField": "lat",
+                "destinationType": "number"
+              },
+              {
+                "targetField": "lon",
+                "destinationType": "number"
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "view": {
+          "id": "coords",
+          "lat": 35,
+          "lon": 105,
+          "zoom": 3.9
+        },
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showScale": false
+        },
+        "basemap": {
+          "type": "default",
+          "name": "底图",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "国家或地区",
+            "tooltip": true,
+            "filterData": {
+              "id": "byRefId",
+              "options": "A"
+            },
+            "location": {
+              "mode": "lookup",
+              "lookup": "country",
+              "gazetteer": "public/gazetteer/countries.json"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "field": "Value #A",
+                  "min": 5,
+                  "max": 30,
+                  "fixed": 6
+                },
+                "color": {
+                  "fixed": "#B877D9"
+                },
+                "opacity": 0.55,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                },
+                "symbolAlign": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "place",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 11,
+                  "offsetX": 0,
+                  "offsetY": -16,
+                  "textAlign": "center",
+                  "textBaseline": "middle"
+                }
+              }
+            }
+          },
+          {
+            "type": "markers",
+            "name": "省份",
+            "tooltip": true,
+            "filterData": {
+              "id": "byRefId",
+              "options": "B"
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "lat",
+              "longitude": "lon"
+            },
+            "config": {
+              "showLegend": false,
+              "style": {
+                "size": {
+                  "field": "Value #B",
+                  "min": 5,
+                  "max": 30,
+                  "fixed": 6
+                },
+                "color": {
+                  "fixed": "#5794F2"
+                },
+                "opacity": 0.55,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                },
+                "symbolAlign": {
+                  "horizontal": "center",
+                  "vertical": "center"
+                },
+                "text": {
+                  "mode": "field",
+                  "field": "place",
+                  "fixed": ""
+                },
+                "textConfig": {
+                  "fontSize": 11,
+                  "offsetX": 0,
+                  "offsetY": -16,
+                  "textAlign": "center",
+                  "textBaseline": "middle"
+                }
+              }
+            }
+          }
+        ],
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "id": 22,
+      "gridPos": {
+        "h": 18,
+        "w": 16,
+        "x": 0,
+        "y": 52
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "来源排行",
+      "description": "所选时段内请求最多的地方",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "topk(12, sum by (place) (increase(hustsync_access_requests_total[$__range])))",
+          "legendFormat": "{{place}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 18,
+        "maxVizHeight": 18,
+        "minVizWidth": 8,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "id": 23,
+      "gridPos": {
+        "h": 18,
+        "w": 8,
+        "x": 16,
+        "y": 52
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "请求速率",
+      "description": "请求最多的六个地方",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (place) (rate(hustsync_access_requests_total[$__rate_interval])) and on (place) topk(6, sum by (place) (increase(hustsync_access_requests_total[$__range] @ end())))",
+          "legendFormat": "{{place}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 24,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 70
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "发送速率",
+      "description": "同上六个地方的发送字节速率",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (place) (rate(hustsync_access_sent_bytes_total[$__rate_interval])) and on (place) topk(6, sum by (place) (increase(hustsync_access_requests_total[$__range] @ end())))",
+          "legendFormat": "{{place}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 25,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 70
+      }
+    },
+    {
+      "type": "row",
+      "id": 26,
+      "title": "镜像",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 79
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "需要关注",
+      "description": "不是「成功」的镜像：失败、同步中、暂停等，连续失败多的排在前面",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "(hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} != 2)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "hustsync_mirror_failures and on (mirror, worker) (hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} != 2)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "C",
+          "expr": "(time() - hustsync_mirror_last_success_timestamp_seconds) and on (mirror, worker) (hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} != 2)",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "mirror",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Time 7": true,
+              "Time 8": true,
+              "Time 9": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "__name__ 4": true,
+              "__name__ 5": true,
+              "__name__ 6": true,
+              "__name__ 7": true,
+              "__name__ 8": true,
+              "__name__ 9": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "job 9": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "instance 4": true,
+              "instance 5": true,
+              "instance 6": true,
+              "instance 7": true,
+              "instance 8": true,
+              "instance 9": true,
+              "worker 2": true,
+              "worker 3": true,
+              "worker 4": true,
+              "worker 5": true,
+              "worker 6": true,
+              "worker 7": true,
+              "worker 8": true,
+              "worker 9": true,
+              "Value #H": true
+            },
+            "renameByName": {
+              "mirror": "镜像",
+              "worker 1": "worker",
+              "Value #A": "状态",
+              "Value #B": "连续失败",
+              "Value #C": "上次成功距今"
+            },
+            "indexByName": {
+              "mirror": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "worker 1": 4
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "连续失败",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "状态"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "无",
+                        "color": "#8E8E8E",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "失败",
+                        "color": "#F2495C",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "成功",
+                        "color": "#73BF69",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "同步中",
+                        "color": "#56A64B",
+                        "index": 3
+                      },
+                      "4": {
+                        "text": "准备同步",
+                        "color": "#96D98D",
+                        "index": 4
+                      },
+                      "5": {
+                        "text": "暂停",
+                        "color": "#FADE2A",
+                        "index": 5
+                      },
+                      "6": {
+                        "text": "禁用",
+                        "color": "#3D3D3D",
+                        "index": 6
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "连续失败"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 1
+                    },
+                    {
+                      "color": "#F2495C",
+                      "value": 3
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上次成功距今"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#73BF69",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 86400
+                    },
+                    {
+                      "color": "#F2495C",
+                      "value": 172800
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "镜像"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "id": 27,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 80
+      }
+    },
+    {
+      "type": "table",
+      "title": "镜像一览",
+      "description": "每个镜像的全部字段；点表头排序，表头的漏斗可筛选",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "time() - hustsync_mirror_last_success_timestamp_seconds{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "C",
+          "expr": "hustsync_mirror_last_success_timestamp_seconds{mirror=~\"$mirror\", worker=~\"$worker\"} * 1000",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "D",
+          "expr": "hustsync_mirror_next_sync_timestamp_seconds{mirror=~\"$mirror\", worker=~\"$worker\"} * 1000",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "E",
+          "expr": "hustsync_mirror_sync_duration_seconds{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "F",
+          "expr": "hustsync_mirror_failures{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "G",
+          "expr": "hustsync_mirror_size_bytes{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "H",
+          "expr": "hustsync_mirror_info{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "mirror",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Time 7": true,
+              "Time 8": true,
+              "Time 9": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "__name__ 4": true,
+              "__name__ 5": true,
+              "__name__ 6": true,
+              "__name__ 7": true,
+              "__name__ 8": true,
+              "__name__ 9": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "job 9": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "instance 4": true,
+              "instance 5": true,
+              "instance 6": true,
+              "instance 7": true,
+              "instance 8": true,
+              "instance 9": true,
+              "worker 2": true,
+              "worker 3": true,
+              "worker 4": true,
+              "worker 5": true,
+              "worker 6": true,
+              "worker 7": true,
+              "worker 8": true,
+              "worker 9": true,
+              "Value #H": true
+            },
+            "renameByName": {
+              "mirror": "镜像",
+              "worker 1": "worker",
+              "Value #A": "状态",
+              "Value #B": "上次成功距今",
+              "Value #C": "上次成功",
+              "Value #D": "下次同步",
+              "Value #E": "上次耗时",
+              "Value #F": "连续失败",
+              "Value #G": "体积",
+              "upstream": "上游",
+              "role": "角色"
+            },
+            "indexByName": {
+              "mirror": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "worker 1": 8,
+              "role": 9,
+              "upstream": 10
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "上次成功距今",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "filterable": true
+          },
+          "noValue": "—"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "状态"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "无",
+                        "color": "#8E8E8E",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "失败",
+                        "color": "#F2495C",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "成功",
+                        "color": "#73BF69",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "同步中",
+                        "color": "#56A64B",
+                        "index": 3
+                      },
+                      "4": {
+                        "text": "准备同步",
+                        "color": "#96D98D",
+                        "index": 4
+                      },
+                      "5": {
+                        "text": "暂停",
+                        "color": "#FADE2A",
+                        "index": 5
+                      },
+                      "6": {
+                        "text": "禁用",
+                        "color": "#3D3D3D",
+                        "index": 6
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上次成功距今"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#73BF69",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 86400
+                    },
+                    {
+                      "color": "#F2495C",
+                      "value": 172800
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "连续失败"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "#FF9830",
+                      "value": 1
+                    },
+                    {
+                      "color": "#F2495C",
+                      "value": 3
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "镜像"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上次成功"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              },
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "下次同步"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              },
+              {
+                "id": "custom.width",
+                "value": 170
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上次耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "体积"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "decbytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.width",
+                "value": 200
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#B877D9"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "worker"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "角色"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "id": 28,
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 88
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "最久未成功",
+      "description": "超过一天变橙，超过两天变红",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "topk(15, time() - hustsync_mirror_last_success_timestamp_seconds{mirror=~\"$mirror\", worker=~\"$worker\"})",
+          "legendFormat": "{{mirror}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#73BF69",
+                "value": null
+              },
+              {
+                "color": "#FF9830",
+                "value": 86400
+              },
+              {
+                "color": "#F2495C",
+                "value": 172800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 18,
+        "maxVizHeight": 18,
+        "minVizWidth": 8,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "id": 29,
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 0,
+        "y": 108
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "7 天失败最多",
+      "description": "过去 7 天的失败次数，含重试",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "topk(15, sum by (mirror) (increase(hustsync_syncs_total{result=\"failed\", mirror=~\"$mirror\", worker=~\"$worker\"}[7d])) > 0)",
+          "legendFormat": "{{mirror}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#FF9830",
+                "value": null
+              },
+              {
+                "color": "#F2495C",
+                "value": 10
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 18,
+        "maxVizHeight": 18,
+        "minVizWidth": 8,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "id": 30,
+      "gridPos": {
+        "h": 12,
+        "w": 12,
+        "x": 12,
+        "y": 108
+      }
+    },
+    {
+      "type": "row",
+      "id": 31,
+      "title": "状态",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 120
+      },
+      "panels": []
+    },
+    {
+      "type": "state-timeline",
+      "title": "状态",
+      "description": "灰色是两次同步之间的空闲，绿色是正在同步，红色是一轮同步失败，黄色是暂停；顶部选镜像可只看几个",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "(max by (mirror, worker) (increase(hustsync_syncs_total{result=\"failed\", mirror=~\"$mirror\", worker=~\"$worker\"}[10m])) > 0) * 0 + 1 or max by (mirror, worker) (hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 3 or hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 4) * 0 + 3 or max by (mirror, worker) (hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 5) * 0 + 5 or max by (mirror, worker) (hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"} == 6) * 0 + 6 or max by (mirror, worker) (hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"}) * 0 + 2",
+          "legendFormat": "{{mirror}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "无",
+                  "color": "#3D3D3D",
+                  "index": 0
+                },
+                "1": {
+                  "text": "失败",
+                  "color": "#F2495C",
+                  "index": 1
+                },
+                "2": {
+                  "text": "空闲",
+                  "color": "#8E8E8E",
+                  "index": 2
+                },
+                "3": {
+                  "text": "同步中",
+                  "color": "#73BF69",
+                  "index": 3
+                },
+                "4": {
+                  "text": "准备同步",
+                  "color": "#96D98D",
+                  "index": 4
+                },
+                "5": {
+                  "text": "暂停",
+                  "color": "#FADE2A",
+                  "index": 5
+                },
+                "6": {
+                  "text": "禁用",
+                  "color": "#3D3D3D",
+                  "index": 6
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.8,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "id": 32,
+      "gridPos": {
+        "h": 26,
+        "w": 24,
+        "x": 0,
+        "y": 121
+      }
+    },
+    {
+      "type": "row",
+      "id": 33,
+      "title": "耗时",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 147
+      },
+      "panels": []
+    },
+    {
+      "type": "heatmap",
+      "title": "耗时分布",
+      "description": "各时段结束的同步按耗时分桶",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum by (le) (increase(hustsync_sync_duration_seconds_bucket{worker=~\"$worker\"}[$__rate_interval]))",
+          "legendFormat": "{{le}}",
+          "instant": false,
+          "range": true,
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 2,
+        "cellRadius": 3,
+        "color": {
+          "mode": "scheme",
+          "scheme": "GnBu",
+          "steps": 64,
+          "exponent": 0.5,
+          "fill": "#5794F2",
+          "reverse": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "s"
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": true,
+          "showColorScale": true
+        },
+        "legend": {
+          "show": false
+        },
+        "cellValues": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "filterValues": {
+          "le": 1e-09
+        }
+      },
+      "id": 34,
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 0,
+        "y": 148
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "最慢的 10 个镜像",
+      "description": "上次同步的耗时；点名字看这个镜像",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "topk(10, hustsync_mirror_sync_duration_seconds{mirror=~\"$mirror\", worker=~\"$worker\"})",
+          "legendFormat": "{{mirror}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "min": 0,
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "看这个镜像",
+              "url": "/d/hustsync-mirrors?${__url_time_range}&var-mirror=${__field.labels.mirror}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "namePlacement": "left",
+        "showUnfilled": true,
+        "sizing": "manual",
+        "minVizHeight": 18,
+        "maxVizHeight": 18,
+        "minVizWidth": 8,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "id": 35,
+      "gridPos": {
+        "h": 11,
+        "w": 12,
+        "x": 12,
+        "y": 148
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "耗时最长的 8 个镜像",
+      "description": "时段内平均耗时最长的 8 个镜像，每次同步的耗时；顶部选镜像可看指定的",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "max by (mirror) (hustsync_mirror_sync_duration_seconds{mirror=~\"$mirror\", worker=~\"$worker\"}) and on (mirror) topk(8, max by (mirror) (avg_over_time(hustsync_mirror_sync_duration_seconds{mirror=~\"$mirror\", worker=~\"$worker\"}[$__range] @ end())))",
+          "legendFormat": "{{mirror}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 36,
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 159
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "近 24 小时每小时同步",
+      "description": "按小时统计，含重试",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "sum(increase(hustsync_syncs_total{result=\"success\", mirror=~\"$mirror\", worker=~\"$worker\"}[1h]))",
+          "legendFormat": "成功",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "sum(increase(hustsync_syncs_total{result=\"failed\", mirror=~\"$mirror\", worker=~\"$worker\"}[1h]))",
+          "legendFormat": "失败",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#73BF69"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F2495C"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "1h",
+      "timeFrom": "24h",
+      "id": 37,
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 159
+      }
+    },
+    {
+      "type": "row",
+      "id": 38,
+      "title": "拓扑",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 169
+      },
+      "panels": []
+    },
+    {
+      "type": "volkovlabs-echarts-panel",
+      "title": "manager、worker 与镜像",
+      "description": "内到外：manager、worker、镜像；镜像按状态着色，worker 离线为红；滚轮缩放，点节点收起",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "hustsync_mirror_state{mirror=~\"$mirror\", worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "hustsync_worker_up{worker=~\"$worker\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "renderer": "canvas",
+        "editorMode": "code",
+        "map": "none",
+        "followTheme": true,
+        "getOption": "const theme = context.grafana.theme;\nconst states = [\n  ['无', '#8E8E8E'],\n  ['失败', '#F2495C'],\n  ['成功', '#73BF69'],\n  ['同步中', '#56A64B'],\n  ['准备同步', '#96D98D'],\n  ['暂停', '#FADE2A'],\n  ['禁用', '#3D3D3D'],\n];\n// With several queries the value column is named per query, so take it by type.\nconst table = (ref) => {\n  const frame = context.panel.data.series.find((s) => s.refId === ref);\n  return (name) =>\n    frame?.fields.find((f) => (name === 'Value' ? f.type === 'number' : f.name === name))?.values ?? [];\n};\nconst mirror = table('A');\nconst worker = table('B');\nconst up = {};\nworker('worker').forEach((w, i) => {\n  up[w] = worker('Value')[i] === 1;\n});\n\nconst groups = {};\nconst codes = mirror('Value');\nconst owners = mirror('worker');\nmirror('mirror').forEach((name, i) => {\n  const [state, color] = states[codes[i]] ?? states[0];\n  (groups[owners[i]] ??= []).push({\n    name,\n    value: state,\n    symbolSize: 9,\n    itemStyle: { color, borderColor: color },\n  });\n});\n\nconst workers = Object.entries(groups).map(([name, children]) => ({\n  name,\n  value: up[name] === false ? '离线' : '在线',\n  symbolSize: 16,\n  itemStyle: { color: up[name] === false ? '#F2495C' : '#5794F2', borderColor: theme.colors.background.primary, borderWidth: 2 },\n  label: { fontSize: 13, fontWeight: 600 },\n  children: children.sort((a, b) => a.name.localeCompare(b.name)),\n}));\n\nreturn {\n  tooltip: { formatter: (p) => (p.data.value ? `${p.name}<br/>${p.data.value}` : p.name) },\n  series: [\n    {\n      type: 'tree',\n      layout: 'radial',\n      data: [\n        {\n          name: 'manager',\n          symbolSize: 22,\n          itemStyle: { color: '#B877D9', borderColor: theme.colors.background.primary, borderWidth: 3 },\n          label: { fontSize: 14, fontWeight: 600 },\n          children: workers,\n        },\n      ],\n      top: '15%',\n      bottom: '15%',\n      symbol: 'circle',\n      initialTreeDepth: -1,\n      expandAndCollapse: true,\n      roam: 'scale',\n      label: { color: theme.colors.text.primary, fontSize: 11 },\n      lineStyle: { color: theme.colors.border.medium, width: 1.2, curveness: 0.4 },\n      emphasis: { focus: 'relative' },\n      animationDuration: 600,\n    },\n  ],\n};\n",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "themeEditor": {
+          "name": "default",
+          "config": "{}"
+        }
+      },
+      "id": 39,
+      "gridPos": {
+        "h": 19,
+        "w": 24,
+        "x": 0,
+        "y": 170
+      }
+    },
+    {
+      "type": "row",
+      "id": 40,
+      "title": "worker",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 189
+      },
+      "panels": []
+    },
+    {
+      "type": "status-history",
+      "title": "在线",
+      "description": "manager 能否连上 worker，worker 能否连上 manager；每格五分钟",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "hustsync_worker_up{worker=~\"$worker\"}",
+          "legendFormat": "{{worker}}",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "label_replace(hustsync_worker_manager_up, \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}} → manager",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "interval": "5m",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "离线",
+                  "color": "#F2495C",
+                  "index": 0
+                },
+                "1": {
+                  "text": "在线",
+                  "color": "#73BF69",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "rowHeight": 0.8,
+        "colWidth": 0.9,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "id": 41,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 190
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "运行中",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "label_replace(sum by (instance) (hustsync_worker_jobs_running), \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}}",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "B",
+          "expr": "sum(hustsync_worker_concurrency)",
+          "legendFormat": "并发上限",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "并发上限"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8E8E8E"
+                }
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "mode": "none",
+                  "group": "B"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    4
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 42,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 190
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "排队",
+      "description": "已排期、等下一次同步的镜像数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "label_replace(sum by (instance) (hustsync_worker_jobs_queued), \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 43,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 190
+      }
+    },
+    {
+      "type": "row",
+      "id": 44,
+      "title": "进程",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 198
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU",
+      "description": "占一个核的比例",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "label_replace(rate(process_cpu_seconds_total{job=\"hustsync-process\"}[5m]), \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0,
+            "axisSoftMax": 0.05
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 45,
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 199
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "内存",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "label_replace(process_resident_memory_bytes{job=\"hustsync-process\"}, \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 46,
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 199
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "线程",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "label_replace(process_threads{job=\"hustsync-process\"}, \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 47,
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 199
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "文件句柄",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "label_replace(process_open_fds{job=\"hustsync-process\"}, \"host\", \"$1\", \"instance\", \"([^:]+):.*\")",
+          "legendFormat": "{{host}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 48,
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 199
+      }
+    },
+    {
+      "type": "row",
+      "id": 49,
+      "title": "告警",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 206
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "正在触发的告警",
+      "description": "Prometheus 按 deploy/prometheus/rules.yml 判断",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "ALERTS{alertstate=\"firing\", alertname=~\"Hustsync.*\"}",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "Value": true,
+              "alertstate": true,
+              "job": true,
+              "instance": true
+            },
+            "renameByName": {
+              "alertname": "告警",
+              "severity": "级别",
+              "mirror": "镜像",
+              "worker": "worker"
+            },
+            "indexByName": {
+              "severity": 0,
+              "alertname": 1,
+              "mirror": 2,
+              "worker": 3
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "告警"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "HustsyncManagerDown": {
+                        "text": "manager 抓取失败",
+                        "index": 0
+                      },
+                      "HustsyncWorkerDown": {
+                        "text": "worker 不响应",
+                        "index": 1
+                      },
+                      "HustsyncMirrorFailing": {
+                        "text": "镜像连续失败",
+                        "index": 2
+                      },
+                      "HustsyncMirrorStale": {
+                        "text": "镜像久未成功",
+                        "index": 3
+                      },
+                      "HustsyncMirrorOverdue": {
+                        "text": "过了排期未开始",
+                        "index": 4
+                      },
+                      "HustsyncMirrorStuck": {
+                        "text": "同步超过一天",
+                        "index": 5
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 200
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "级别"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "text": "严重",
+                        "color": "#F2495C",
+                        "index": 0
+                      },
+                      "warning": {
+                        "text": "警告",
+                        "color": "#FF9830",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "id": 50,
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 207
+      }
+    },
+    {
+      "type": "state-timeline",
+      "title": "抓取",
+      "description": "Prometheus 每次抓取是否成功",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${p8s}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${p8s}"
+          },
+          "refId": "A",
+          "expr": "up{job=~\"hustsync-.*\"}",
+          "legendFormat": "{{job}} · {{instance}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "失败",
+                  "color": "#F2495C",
+                  "index": 0
+                },
+                "1": {
+                  "text": "正常",
+                  "color": "#73BF69",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.75,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "id": 51,
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 207
+      }
+    },
+    {
+      "type": "row",
+      "id": 52,
+      "title": "日志",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 216
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "程序日志量",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "refId": "A",
+          "expr": "sum by (level) (count_over_time({source=\"program\"} [$__auto]))",
+          "legendFormat": "{{level}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisBorderShow": false,
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F2495C"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "warn"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FF9830"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "info"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#73BF69"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "debug"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#5794F2"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 53,
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 217
+      }
+    },
+    {
+      "type": "logs",
+      "title": "程序日志",
+      "description": "manager 与 worker 经 serlog 推给 Alloy 的日志",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "refId": "A",
+          "expr": "{source=\"program\"} | mirror=~\"$mirror\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "showLabels": false,
+        "showCommonLabels": false
+      },
+      "id": 54,
+      "gridPos": {
+        "h": 16,
+        "w": 16,
+        "x": 0,
+        "y": 223
+      }
+    },
+    {
+      "type": "logs",
+      "title": "告警事件",
+      "description": "程序发出的告警：镜像连续失败与恢复，worker 连不上 manager 与恢复",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "refId": "A",
+          "expr": "{source=\"program\"} | target=\"hustsync::alert\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "showLabels": true,
+        "showCommonLabels": false
+      },
+      "id": 55,
+      "gridPos": {
+        "h": 16,
+        "w": 8,
+        "x": 16,
+        "y": 223
+      }
+    },
+    {
+      "type": "logs",
+      "title": "同步日志",
+      "description": "各镜像同步时的输出，Alloy 从 log_dir 读取",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "refId": "A",
+          "expr": "{source=\"sync\", mirror=~\"$mirror\"}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "showLabels": true,
+        "showCommonLabels": false
+      },
+      "id": 56,
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 239
+      }
+    }
+  ]
+}
