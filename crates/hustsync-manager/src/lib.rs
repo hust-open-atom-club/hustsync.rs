@@ -4,6 +4,8 @@ mod common;
 mod config;
 pub mod database;
 mod handlers;
+#[cfg(feature = "metrics")]
+mod metrics;
 mod middleware;
 mod server;
 
@@ -14,6 +16,8 @@ use crate::database::AdapterError;
 
 pub use common::init_tracing;
 pub use config::load_config;
+#[cfg(feature = "metrics")]
+pub use metrics::{Group, Metrics};
 pub use server::Manager;
 
 /// Unified error type for the manager service.
@@ -37,6 +41,9 @@ pub enum ManagerError {
 
     #[error("tls error: {0}")]
     Tls(String),
+
+    #[error("metrics error: {0}")]
+    Metrics(String),
 }
 
 impl IntoResponse for ManagerError {
@@ -47,7 +54,8 @@ impl IntoResponse for ManagerError {
             ManagerError::Adapter(_)
             | ManagerError::Http(_)
             | ManagerError::Bind(_)
-            | ManagerError::Tls(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ManagerError::Tls(_)
+            | ManagerError::Metrics(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
         let body = Json(serde_json::json!({ "error": self.to_string() }));
