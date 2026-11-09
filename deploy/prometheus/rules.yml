@@ -1,0 +1,47 @@
+groups:
+  - name: hustsync
+    rules:
+      - alert: HustsyncManagerDown
+        expr: up{job="hustsync-mirrors"} == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "manager {{ $labels.instance }} 抓取失败"
+
+      - alert: HustsyncWorkerDown
+        expr: hustsync_worker_up == 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "worker {{ $labels.worker }} 不响应"
+
+      - alert: HustsyncMirrorFailing
+        expr: hustsync_mirror_failures >= 3
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.mirror }} 连续失败 {{ $value }} 次"
+
+      - alert: HustsyncMirrorStale
+        expr: >
+          time() - hustsync_mirror_last_success_timestamp_seconds > 2 * 86400
+          unless on (mirror, worker) hustsync_mirror_state >= 5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.mirror }} 已 {{ $value | humanizeDuration }} 未同步成功"
+
+      - alert: HustsyncMirrorOverdue
+        expr: >
+          time() - hustsync_mirror_next_sync_timestamp_seconds > 3600
+          unless on (mirror, worker) hustsync_mirror_state >= 3
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.mirror }} 过了排期 {{ $value | humanizeDuration }} 仍未开始"
+
+      - alert: HustsyncMirrorStuck
+        expr: hustsync_mirror_state == 3
+        for: 24h
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.mirror }} 同步已超过一天"
