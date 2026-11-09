@@ -3,15 +3,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use tokio::fs::{File, create_dir_all};
-use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use hustsync_internal::util::translate_rsync_exit_status;
 
 use super::{
-    BASE_RSYNC_ARGS, CommonProviderConfig, MirrorProvider, ProviderError, ProviderType,
-    RunContext, impl_provider_getters, inject_provider_env, log_provider_failure,
-    resolve_log_file, run_child_with_cancellation, store_rsync_data_size,
+    BASE_RSYNC_ARGS, CommonProviderConfig, MirrorProvider, ProviderError, ProviderType, RunContext,
+    impl_provider_getters, log_provider_failure, resolve_log_file, rsync_env,
+    run_child_with_cancellation, store_rsync_data_size,
 };
 
 pub struct RsyncProviderConfig {
@@ -138,26 +137,21 @@ impl MirrorProvider for RsyncProvider {
         let std_out_log = log_file.try_clone().await?.into_std().await;
         let std_err_log = log_file.try_clone().await?.into_std().await;
 
-        let mut cmd = Command::new(&self.config.command);
-        cmd.args(self.build_args());
-
-        cmd.current_dir(&self.config.common.working_dir)
-            .stdout(Stdio::from(std_out_log))
+        let common = &self.config.common;
+        let env = rsync_env(
+            common,
+            self.config.username.as_ref(),
+            self.config.password.as_ref(),
+            &effective_log_file,
+            &ctx.env,
+        );
+        let mut cmd = common.runner.command(
+            &self.config.command,
+            &self.build_args(),
+            common.job(&effective_log_file, &env),
+        );
+        cmd.stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
-
-        #[cfg(unix)]
-        {
-            cmd.process_group(0);
-        }
-
-        if let Some(user) = &self.config.username {
-            cmd.env("USER", user);
-        }
-        if let Some(password) = &self.config.password {
-            cmd.env("RSYNC_PASSWORD", password);
-        }
-
-        inject_provider_env(&mut cmd, &self.config.common, &effective_log_file, &ctx.env);
 
         tracing::info!("Starting rsync provider for {}", self.config.common.name);
 
@@ -184,7 +178,7 @@ impl MirrorProvider for RsyncProvider {
             self.config.common.timeout,
             &ctx.cancel,
             &self.running_pgid,
-            &self.config.common.name,
+            &self.config.common,
         )
         .await
         {
@@ -233,16 +227,10 @@ impl MirrorProvider for RsyncProvider {
     }
 
     async fn terminate(&self) -> Result<(), ProviderError> {
-        #[cfg(unix)]
-        {
-            if self.running_pgid.load(Ordering::Acquire) != 0 {
-                tracing::warn!(
-                    "Terminating rsync provider for {}",
-                    self.config.common.name
-                );
-            }
-            super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
+        if self.running_pgid.load(Ordering::Acquire) != 0 {
+            tracing::warn!("Terminating rsync provider for {}", self.config.common.name);
         }
+        self.config.common.stop(&self.running_pgid).await;
         Ok(())
     }
 
@@ -322,6 +310,7 @@ mod tests {
                 env: HashMap::new(),
                 is_master: true,
                 success_exit_codes,
+                runner: Default::default(),
             },
             command: command.to_string(),
             username: None,
