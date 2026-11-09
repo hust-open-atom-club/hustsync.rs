@@ -1,0 +1,40 @@
+[global]
+name = "worker"
+log_dir = "/var/log/hustsync/{{.Name}}"
+mirror_dir = "/srv/mirror"
+concurrent = 4
+interval = 1
+retry = 1
+
+[manager]
+api_base = "http://manager:14242"
+heartbeat = 60
+
+[server]
+hostname = "worker"
+listen_addr = "0.0.0.0"
+listen_port = 6000
+
+# Program logs go to Alloy when the monitoring profile runs, and are dropped quietly when it does not.
+[log]
+sinks = [
+  { kind = "loki", url = "http://alloy:3100/loki/api/v1/push", labels = { service = "worker" }, on_fail = "ignore" },
+]
+
+[[mirrors]]
+name = "demo-ok"
+provider = "command"
+upstream = "https://example.org/ok/"
+command = "true"
+
+[[mirrors]]
+name = "demo-failed"
+provider = "command"
+upstream = "https://example.org/failed/"
+command = "false"
+
+[[mirrors]]
+name = "demo-slow"
+provider = "command"
+upstream = "https://example.org/slow/"
+command = "sleep 600"
