@@ -32,6 +32,9 @@ async fn spawn_manager_listening() -> (std::net::SocketAddr, tokio::task::JoinHa
     let db_path = dir.path().join("manager.db");
     let cfg = Arc::new(hustsync_config_parser::ManagerConfig {
         debug: false,
+        alert: None,
+        log: None,
+        metrics: None,
         server: hustsync_config_parser::ManagerServerConfig {
             addr: "127.0.0.1".into(),
             port: 0,
@@ -87,8 +90,10 @@ fn worker_config(
             api_base_list: None,
             token: None,
             ca_cert: None,
+            heartbeat: None,
         }),
         cgroup: None,
+        docker: None,
         server: Some(WorkerServerConfig {
             hostname: Some("127.0.0.1".into()),
             // Bind worker on a fixed port — no ephemeral here because
@@ -130,11 +135,16 @@ fn worker_config(
             rsync_override_only: None,
             stage1_profile: None,
             memory_limit: None,
+            docker_image: None,
+            docker_volumes: None,
+            docker_options: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
         }]),
         include: None,
+        log: None,
+        metrics: None,
     }
 }
 
@@ -190,7 +200,7 @@ async fn full_cmd_sync_round_trip() {
 
     // Spawn worker in its own task — it registers, opens its own HTTP
     // server, then falls into the dispatch loop.
-    let worker = Worker::new(cfg);
+    let worker = Worker::new(cfg).expect("worker");
     let worker_task = tokio::spawn(async move {
         worker.run().await;
     });
