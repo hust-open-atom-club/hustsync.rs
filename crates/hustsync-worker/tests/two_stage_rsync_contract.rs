@@ -56,6 +56,7 @@ fn make_config(
             env,
             is_master: true,
             success_exit_codes: vec![],
+            runner: Default::default(),
         },
         command: fake_rsync_path(),
         stage1_profile: "debian".to_string(),
