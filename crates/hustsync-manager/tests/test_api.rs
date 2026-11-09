@@ -16,6 +16,9 @@ fn create_test_app(db_name: &str) -> axum::Router {
 
     let config = Arc::new(ManagerConfig {
         debug: true,
+        alert: None,
+        log: None,
+        metrics: None,
         server: hustsync_config_parser::ManagerServerConfig {
             addr: "127.0.0.1".to_string(),
             port: 0,
