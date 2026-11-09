@@ -323,7 +323,15 @@ impl Worker {
         // 2. Built-in: rotate and stamp the log file before the provider
         //    runs, so the new path is what the exec hook env and the
         //    provider itself see.
-        chain.push(Arc::new(hooks::LogLimitHook::new()));
+        let keep = m_cfg
+            .log_retention
+            .or_else(|| g_cfg.global.as_ref()?.log_retention)
+            .unwrap_or(hooks::loglimit::RETENTION);
+        let gzip = m_cfg
+            .log_gzip
+            .or_else(|| g_cfg.global.as_ref()?.log_gzip)
+            .unwrap_or_default();
+        chain.push(Arc::new(hooks::LogLimitHook::retaining(keep).gzip(gzip)));
         // 3. User-configured exec_on_{success,failure}. `exec_on_status_extra`
         //    (mirror-level additions to global defaults) is appended after
         //    the base list, matching Go's "append extra to the end".

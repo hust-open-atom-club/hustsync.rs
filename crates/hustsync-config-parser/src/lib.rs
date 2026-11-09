@@ -149,6 +149,8 @@ pub struct WorkerGlobalConfig {
     pub log_dir: Option<String>,
     pub mirror_dir: Option<String>,
     pub concurrent: Option<u32>,
+    pub log_retention: Option<usize>,
+    pub log_gzip: Option<bool>,
     pub rsync_options: Option<Vec<String>>,
     pub dangerous_global_success_exit_codes: Option<Vec<i32>>,
     pub dangerous_global_rsync_success_exit_codes: Option<Vec<i32>>,
@@ -170,6 +172,8 @@ impl Default for WorkerGlobalConfig {
             log_dir: Some("/var/log/hustsync/{{.Name}}".into()),
             mirror_dir: Some("/srv/mirror".into()),
             concurrent: Some(10),
+            log_retention: None,
+            log_gzip: None,
             rsync_options: None,
             dangerous_global_success_exit_codes: None,
             dangerous_global_rsync_success_exit_codes: None,
@@ -259,6 +263,8 @@ pub struct MirrorConfig {
     pub mirror_subdir: Option<String>,
     pub mirror_type: Option<String>,
     pub log_dir: Option<String>,
+    pub log_retention: Option<usize>,
+    pub log_gzip: Option<bool>,
     pub env: Option<HashMap<String, String>>,
     pub role: Option<String>,
     pub command: Option<String>,
@@ -308,6 +314,8 @@ impl Default for MirrorConfig {
             mirror_subdir: None,
             mirror_type: None,
             log_dir: None,
+            log_retention: None,
+            log_gzip: None,
             env: None,
             role: None,
             command: None,
@@ -395,6 +403,8 @@ struct LenientMirrorConfig {
     mirror_subdir: Option<String>,
     mirror_type: Option<String>,
     log_dir: Option<String>,
+    log_retention: Option<usize>,
+    log_gzip: Option<bool>,
     env: Option<HashMap<String, String>>,
     role: Option<String>,
     command: Option<String>,
@@ -431,6 +441,8 @@ impl From<LenientMirrorConfig> for MirrorConfig {
             mirror_subdir: l.mirror_subdir,
             mirror_type: l.mirror_type,
             log_dir: l.log_dir,
+            log_retention: l.log_retention,
+            log_gzip: l.log_gzip,
             env: l.env,
             role: l.role,
             command: l.command,
@@ -704,6 +716,8 @@ fn merge_from_parent(child: &mut MirrorConfig, parent: &MirrorConfig) {
         mirror_subdir,
         mirror_type,
         log_dir,
+        log_retention,
+        log_gzip,
         env,
         role,
         command,
@@ -797,6 +811,13 @@ pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
         });
     }
 
+    if cfg.global.as_ref().and_then(|g| g.log_retention) == Some(0) {
+        return Err(ConfigError::InvalidValue {
+            field: "global.log_retention".into(),
+            reason: "keep at least one log file".into(),
+        });
+    }
+
     let Some(mirrors) = cfg.mirrors.as_deref() else {
         return Ok(());
     };
@@ -811,6 +832,13 @@ pub fn validate_worker_config(cfg: &WorkerConfig) -> Result<(), ConfigError> {
 }
 
 fn validate_mirror(mirror: &MirrorConfig, label: &str) -> Result<(), ConfigError> {
+    if mirror.log_retention == Some(0) {
+        return Err(ConfigError::InvalidValue {
+            field: format!("mirrors.{label}.log_retention"),
+            reason: "keep at least one log file".into(),
+        });
+    }
+
     let provider = mirror.provider.as_deref().unwrap_or("rsync");
     let is_rsync_family = matches!(provider, "rsync" | "two-stage-rsync");
 
