@@ -23,10 +23,14 @@ pub use crate::error::{HookError, HookErrorKind};
 pub mod exec;
 pub mod loglimit;
 pub mod working_dir;
+#[cfg(target_os = "linux")]
+pub mod zfs;
 
 pub use exec::ExecPostHook;
 pub use loglimit::LogLimitHook;
 pub use working_dir::WorkingDirHook;
+#[cfg(target_os = "linux")]
+pub use zfs::ZfsHook;
 
 /// Context passed through the hook pipeline.
 ///

@@ -237,7 +237,13 @@ async fn start_worker(worker_args: WorkerArgs) -> Result<()> {
 
     info!("Initializing HustSync Worker...");
 
-    let worker = Arc::new(Worker::new(config));
+    let worker = match Worker::new(config) {
+        Ok(w) => Arc::new(w),
+        Err(err) => {
+            warn!("Error initializing worker: {err}.");
+            std::process::exit(1);
+        }
+    };
 
     // SIGTERM/SIGINT → cancel exit token → Worker::shutdown().
     // Signal delivery is decoupled from the worker's exit_token so the

@@ -11,6 +11,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
+pub mod cgroup;
 pub mod error;
 pub mod hooks;
 pub mod job;
@@ -185,6 +186,7 @@ pub struct Worker {
     pub manager_tx: mpsc::Sender<JobMessage>,
     pub manager_rx: Mutex<Option<mpsc::Receiver<JobMessage>>>,
     pub semaphore: Arc<Semaphore>,
+    cgroups: Option<Arc<cgroup::Cgroups>>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
 
@@ -192,7 +194,8 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(mut cfg: WorkerConfig) -> Self {
+    /// Builds the worker; fails when `[cgroup]` is enabled but unusable.
+    pub fn new(mut cfg: WorkerConfig) -> std::io::Result<Self> {
         // Ignore SIGPIPE process-wide: a broken pipe from an rsync (or other)
         // child must not terminate the worker. Providers already observe
         // child exit status and surface errors through ProviderError.
@@ -212,7 +215,22 @@ impl Worker {
             retry.retry = Some(2); // defaultMaxRetry
         }
 
+        if !cfg!(target_os = "linux") && cfg.zpool().is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "[zfs] works on Linux only",
+            ));
+        }
+
         let cfg = Arc::new(cfg);
+
+        let cgroups = cfg
+            .cgroup
+            .as_ref()
+            .filter(|c| c.enable == Some(true))
+            .map(cgroup::Cgroups::init)
+            .transpose()?
+            .map(Arc::new);
 
         let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
 
@@ -228,7 +246,8 @@ impl Worker {
         if let Some(mirrors) = &cfg.mirrors {
             for m_cfg in mirrors {
                 if let Some(name) = &m_cfg.name {
-                    let provider = match Self::create_provider(name, m_cfg, &cfg) {
+                    let provider = match Self::create_provider(name, m_cfg, &cfg, cgroups.as_ref())
+                    {
                         Ok(p) => p,
                         Err(e) => {
                             tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -259,6 +278,7 @@ impl Worker {
             manager_tx,
             manager_rx: Mutex::new(Some(manager_rx)),
             semaphore,
+            cgroups,
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
             http_client: None,
@@ -274,7 +294,7 @@ impl Worker {
             Err(e) => tracing::error!("Error initializing HTTP client: {}", e),
         }
 
-        worker
+        Ok(worker)
     }
 
     async fn fetch_job_status(&self) -> Vec<hustsync_internal::msg::MirrorStatus> {
@@ -307,8 +327,9 @@ impl Worker {
         name: &str,
         m_cfg: &hustsync_config_parser::MirrorConfig,
         g_cfg: &WorkerConfig,
+        cg: Option<&Arc<cgroup::Cgroups>>,
     ) -> Result<Box<dyn MirrorProvider>, provider::ProviderError> {
-        provider::build_provider(name, m_cfg, g_cfg)
+        provider::build_provider(name, m_cfg, g_cfg, cg)
     }
 
     /// Assemble the hook chain for one mirror. Order matters — `pre_*`
@@ -318,6 +339,11 @@ impl Worker {
         g_cfg: &WorkerConfig,
     ) -> Vec<Arc<dyn hooks::JobHook>> {
         let mut chain: Vec<Arc<dyn hooks::JobHook>> = Vec::new();
+        // Before working_dir, which would turn a missing dataset into a plain directory.
+        #[cfg(target_os = "linux")]
+        if let Some(pool) = g_cfg.zpool() {
+            chain.push(Arc::new(hooks::ZfsHook::new(pool)));
+        }
         // 1. Built-in: ensure working_dir exists before anything else.
         chain.push(Arc::new(hooks::WorkingDirHook::new()));
         // 2. Built-in: rotate and stamp the log file before the provider
@@ -769,7 +795,7 @@ impl Worker {
         m_cfg: &hustsync_config_parser::MirrorConfig,
         initial_state: u32,
     ) -> bool {
-        let provider = match Self::create_provider(name, m_cfg, &self.cfg) {
+        let provider = match Self::create_provider(name, m_cfg, &self.cfg, self.cgroups.as_ref()) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -1114,7 +1140,7 @@ mod tests {
     #[tokio::test]
     async fn reload_unchanged_mirror_keeps_existing_job() {
         let mirror = command_mirror("archlinux", "true");
-        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()]));
+        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()])).unwrap();
         let before_state = {
             let jobs = worker.jobs.read().await;
             Arc::clone(&jobs.get("archlinux").unwrap().state)
@@ -1134,7 +1160,7 @@ mod tests {
     #[tokio::test]
     async fn reload_changed_mirror_rebuilds_existing_job() {
         let mirror = command_mirror("archlinux", "true");
-        let worker = Worker::new(worker_with_mirrors(vec![mirror]));
+        let worker = Worker::new(worker_with_mirrors(vec![mirror])).unwrap();
         let before_state = {
             let jobs = worker.jobs.read().await;
             Arc::clone(&jobs.get("archlinux").unwrap().state)
@@ -1157,7 +1183,7 @@ mod tests {
     async fn register_worker_broadcasts_to_all_manager_bases() {
         let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
         let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
-        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b])).unwrap();
 
         worker.register_worker().await;
 
@@ -1172,7 +1198,7 @@ mod tests {
     async fn relay_broadcasts_status_and_schedule_to_all_manager_bases() {
         let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
         let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
-        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b])).unwrap();
 
         let (job, _rx) = make_mirror_job("archlinux");
         worker
