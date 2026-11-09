@@ -89,6 +89,7 @@ fn worker_config(
             ca_cert: None,
         }),
         cgroup: None,
+        docker: None,
         server: Some(WorkerServerConfig {
             hostname: Some("127.0.0.1".into()),
             // Bind worker on a fixed port — no ephemeral here because
@@ -130,6 +131,9 @@ fn worker_config(
             rsync_override_only: None,
             stage1_profile: None,
             memory_limit: None,
+            docker_image: None,
+            docker_volumes: None,
+            docker_options: None,
             success_exit_codes: None,
             rsync_success_exit_codes: None,
             mirrors: None,
@@ -190,7 +194,7 @@ async fn full_cmd_sync_round_trip() {
 
     // Spawn worker in its own task — it registers, opens its own HTTP
     // server, then falls into the dispatch loop.
-    let worker = Worker::new(cfg);
+    let worker = Worker::new(cfg).expect("worker");
     let worker_task = tokio::spawn(async move {
         worker.run().await;
     });
