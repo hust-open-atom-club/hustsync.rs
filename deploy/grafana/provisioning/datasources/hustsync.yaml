@@ -1,0 +1,24 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: hustsync-p8s
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+
+  - name: Loki
+    uid: hustsync-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+
+  - name: hustsync manager
+    uid: hustsync-jobs
+    type: yesoreyeram-infinity-datasource
+    url: http://manager:14242
+    jsonData:
+      allowedHosts: ["http://manager:14242"]
