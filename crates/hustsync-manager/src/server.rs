@@ -12,6 +12,8 @@ use tower_http::timeout::TimeoutLayer;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 use crate::ManagerError;
+#[cfg(feature = "metrics")]
+use crate::Metrics;
 use crate::database::{DbAdapterTrait, make_db_adapter};
 use crate::handlers;
 
@@ -22,15 +24,25 @@ pub struct Manager {
     pub config: Arc<ManagerConfig>,
     pub adapter: Option<Arc<dyn DbAdapterTrait>>,
     pub http_client: Option<Client>,
+    #[cfg(feature = "metrics")]
+    pub metrics: Metrics,
 }
 
 impl Manager {
     #[allow(clippy::cognitive_complexity)]
     pub fn new(config: Arc<ManagerConfig>) -> Result<Self, ManagerError> {
+        #[cfg(not(feature = "metrics"))]
+        if config.metrics.is_some() {
+            return Err(ManagerError::Metrics(
+                "[metrics]: built without any metrics feature".into(),
+            ));
+        }
         let mut manager = Manager {
             config: Arc::clone(&config),
             adapter: None,
             http_client: None,
+            #[cfg(feature = "metrics")]
+            metrics: Metrics::new(config.metrics.as_ref()).map_err(ManagerError::Metrics)?,
         };
 
         if !config.files.ca_cert.is_empty() {
@@ -96,6 +108,14 @@ impl Manager {
             ));
 
         router = router.nest("/workers", worker_validate_group);
+
+        #[cfg(feature = "p8s")]
+        {
+            use crate::metrics::serve;
+            router = router
+                .route("/metrics", get(serve::all))
+                .route("/metrics/{group}", get(serve::one));
+        }
 
         router = router
             .layer(middleware::from_fn(crate::middleware::context_error_logger))

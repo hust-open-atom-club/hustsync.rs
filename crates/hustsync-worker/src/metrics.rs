@@ -1,0 +1,144 @@
+//! The worker's metrics in groups: jobs, queue and concurrency, and the process itself.
+
+#[cfg(feature = "metrics")]
+use hustsync_internal::metrics::{self, Board, Families, Res, prometheus::proto::MetricFamily};
+
+#[cfg(feature = "metrics")]
+use crate::server::AppState;
+
+#[cfg(feature = "metrics")]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Group {
+    Jobs,
+    Process,
+}
+
+#[cfg(feature = "metrics")]
+impl metrics::Group for Group {
+    const ALL: &'static [Self] = &[Self::Jobs, Self::Process];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Jobs => "jobs",
+            Self::Process => "process",
+        }
+    }
+}
+
+/// Group caches; empty when the worker is built without metrics.
+#[derive(Default)]
+pub struct Metrics {
+    #[cfg(feature = "metrics")]
+    board: Board<Group>,
+}
+
+impl Metrics {
+    pub fn new(table: Option<&toml::Table>) -> Result<Self, String> {
+        #[cfg(not(feature = "metrics"))]
+        if table.is_some() {
+            return Err("[metrics]: built without any metrics feature".into());
+        }
+        #[cfg(feature = "metrics")]
+        let cfg = table.map(metrics::MetricsConfig::parse).transpose()?;
+        #[cfg(feature = "metrics")]
+        let cfg = cfg.as_ref();
+        Ok(Self {
+            #[cfg(feature = "metrics")]
+            board: Board::new(cfg)?,
+        })
+    }
+}
+
+/// The group, from the cache when it is fresh.
+#[cfg(feature = "metrics")]
+pub async fn gather(s: &AppState, g: Group) -> Res<Families> {
+    s.metrics
+        .board
+        .get(g, || async move {
+            match g {
+                Group::Jobs => jobs(s).await,
+                Group::Process => metrics::process(),
+            }
+        })
+        .await
+}
+
+#[cfg(feature = "metrics")]
+async fn jobs(s: &AppState) -> Res<Vec<MetricFamily>> {
+    use hustsync_internal::metrics::prometheus::{IntGauge, core::Collector};
+
+    let jobs = s.jobs.read().await.len();
+    let queued = s.schedule_queue.lock().await.len();
+    let running = s.concurrent.saturating_sub(s.semaphore.available_permits());
+    let gauges = [
+        ("hustsync_worker_jobs", "Configured mirror jobs.", jobs),
+        (
+            "hustsync_worker_jobs_running",
+            "Jobs holding a concurrency slot.",
+            running,
+        ),
+        (
+            "hustsync_worker_jobs_queued",
+            "Jobs scheduled for a later run.",
+            queued,
+        ),
+        (
+            "hustsync_worker_concurrency",
+            "Maximum concurrent jobs.",
+            s.concurrent,
+        ),
+    ];
+    let mut out = Vec::with_capacity(gauges.len());
+    for (name, help, v) in gauges {
+        let g = IntGauge::new(name, help)?;
+        g.set(i64::try_from(v)?);
+        out.extend(g.collect());
+    }
+    Ok(out)
+}
+
+#[cfg(feature = "p8s")]
+pub mod serve {
+    //! `GET /metrics`, `/metrics/all` and `/metrics/<group>` in the p8s text format.
+
+    use std::sync::Arc;
+
+    use axum::{
+        extract::{Path, State},
+        http::{StatusCode, header},
+        response::{IntoResponse, Response},
+    };
+    use hustsync_internal::metrics::{self, Families, Group as _, Res};
+
+    use super::{Group, gather};
+    use crate::server::AppState;
+
+    pub async fn all(State(s): State<Arc<AppState>>) -> Response {
+        reply(gather_all(&s).await)
+    }
+
+    pub async fn one(State(s): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
+        if name == "all" {
+            return reply(gather_all(&s).await);
+        }
+        let Some(g) = Group::parse(&name) else {
+            return (StatusCode::NOT_FOUND, metrics::unknown::<Group>(&name)).into_response();
+        };
+        reply(gather(&s, g).await.map(|f| vec![f]))
+    }
+
+    async fn gather_all(s: &AppState) -> Res<Vec<Families>> {
+        let mut out = Vec::new();
+        for &g in Group::ALL {
+            out.push(gather(s, g).await?);
+        }
+        Ok(out)
+    }
+
+    fn reply(groups: Res<Vec<Families>>) -> Response {
+        match groups.and_then(|g| metrics::text(&g)) {
+            Ok(body) => ([(header::CONTENT_TYPE, metrics::TEXT)], body).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
+    }
+}
