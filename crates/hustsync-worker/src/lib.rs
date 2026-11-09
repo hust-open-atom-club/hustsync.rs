@@ -11,6 +11,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
+pub mod cgroup;
 pub mod error;
 pub mod hooks;
 pub mod job;
@@ -185,14 +186,19 @@ pub struct Worker {
     pub manager_tx: mpsc::Sender<JobMessage>,
     pub manager_rx: Mutex<Option<mpsc::Receiver<JobMessage>>>,
     pub semaphore: Arc<Semaphore>,
+    cgroups: Option<Arc<cgroup::Cgroups>>,
     pub schedule_queue: Arc<Mutex<ScheduleQueue>>,
     pub exit_token: CancellationToken,
+    /// Tells the status relay to send what is queued and stop.
+    drain: CancellationToken,
+    relay: Mutex<Option<tokio::task::JoinHandle<()>>>,
 
     pub http_client: Option<Client>,
 }
 
 impl Worker {
-    pub fn new(mut cfg: WorkerConfig) -> Self {
+    /// Builds the worker; fails when `[cgroup]` is enabled but unusable.
+    pub fn new(mut cfg: WorkerConfig) -> std::io::Result<Self> {
         // Ignore SIGPIPE process-wide: a broken pipe from an rsync (or other)
         // child must not terminate the worker. Providers already observe
         // child exit status and surface errors through ProviderError.
@@ -214,6 +220,14 @@ impl Worker {
 
         let cfg = Arc::new(cfg);
 
+        let cgroups = cfg
+            .cgroup
+            .as_ref()
+            .filter(|c| c.enable == Some(true))
+            .map(cgroup::Cgroups::init)
+            .transpose()?
+            .map(Arc::new);
+
         let concurrent = cfg.global.as_ref().and_then(|g| g.concurrent).unwrap_or(10) as usize;
 
         let (manager_tx, manager_rx) = mpsc::channel(32);
@@ -228,7 +242,8 @@ impl Worker {
         if let Some(mirrors) = &cfg.mirrors {
             for m_cfg in mirrors {
                 if let Some(name) = &m_cfg.name {
-                    let provider = match Self::create_provider(name, m_cfg, &cfg) {
+                    let provider = match Self::create_provider(name, m_cfg, &cfg, cgroups.as_ref())
+                    {
                         Ok(p) => p,
                         Err(e) => {
                             tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -259,8 +274,11 @@ impl Worker {
             manager_tx,
             manager_rx: Mutex::new(Some(manager_rx)),
             semaphore,
+            cgroups,
             schedule_queue: Arc::new(Mutex::new(ScheduleQueue::new())),
             exit_token,
+            drain: CancellationToken::new(),
+            relay: Mutex::new(None),
             http_client: None,
         };
 
@@ -274,7 +292,7 @@ impl Worker {
             Err(e) => tracing::error!("Error initializing HTTP client: {}", e),
         }
 
-        worker
+        Ok(worker)
     }
 
     async fn fetch_job_status(&self) -> Vec<hustsync_internal::msg::MirrorStatus> {
@@ -307,8 +325,9 @@ impl Worker {
         name: &str,
         m_cfg: &hustsync_config_parser::MirrorConfig,
         g_cfg: &WorkerConfig,
+        cg: Option<&Arc<cgroup::Cgroups>>,
     ) -> Result<Box<dyn MirrorProvider>, provider::ProviderError> {
-        provider::build_provider(name, m_cfg, g_cfg)
+        provider::build_provider(name, m_cfg, g_cfg, cg)
     }
 
     /// Assemble the hook chain for one mirror. Order matters — `pre_*`
@@ -590,30 +609,32 @@ impl Worker {
         let worker_name = self.name();
         let schedule_queue = Arc::clone(&self.schedule_queue);
         let jobs_handle = Arc::clone(&self.jobs);
+        let drain = self.drain.clone();
 
-        tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
+        let relay = tokio::spawn(async move {
+            loop {
+                let msg = tokio::select! {
+                    biased;
+                    m = rx.recv() => m,
+                    () = drain.cancelled() => rx.try_recv().ok(),
+                };
+                let Some(msg) = msg else { break };
                 let (Some(client), Some(manager_cfg)) = (&http_client, &cfg.manager) else {
                     continue;
                 };
 
-                // Skip Failed reports for paused/disabled jobs (mirrors Go behaviour).
-                {
-                    let jobs = jobs_handle.read().await;
-                    if let Some(job) = jobs.get(&msg.name) {
-                        let state = job.state();
-                        if msg.status == hustsync_internal::status::SyncStatus::Failed
-                            && (state == crate::job::STATE_PAUSED
-                                || state == crate::job::STATE_DISABLED)
-                        {
-                            tracing::info!(
-                                "Job {} state is {}, skip reporting Failed status",
-                                msg.name,
-                                state
-                            );
-                            continue;
-                        }
-                    }
+                let state = jobs_handle
+                    .read()
+                    .await
+                    .get(&msg.name)
+                    .map(MirrorJob::state);
+                if matches!(state, Some(job::STATE_PAUSED | job::STATE_DISABLED)) {
+                    tracing::info!(
+                        "Job {} is stopped, skip reporting {:?}",
+                        msg.name,
+                        msg.status
+                    );
+                    continue;
                 }
 
                 let smsg = hustsync_internal::msg::MirrorStatus {
@@ -697,6 +718,7 @@ impl Worker {
                 }
             }
         });
+        *self.relay.lock().await = Some(relay);
     }
 
     /// Spawn the dispatch ticker that fires ready jobs every 5 seconds.
@@ -726,7 +748,8 @@ impl Worker {
         });
     }
 
-    /// Send Halt to all job actors and join them. There is no overall deadline here.
+    /// Send Halt to all job actors and join them, with no overall deadline, then give
+    /// the relay up to 10 s to send what is queued.
     // The complexity lint over-counts here because it accumulates closure complexity
     // from `start_message_relay`'s spawned async block into this function's score.
     #[allow(clippy::cognitive_complexity)]
@@ -745,6 +768,15 @@ impl Worker {
             if let Err(e) = res {
                 tracing::error!("Job actor panicked or cancelled: {}", e);
             }
+        }
+        self.drain.cancel();
+        let relay = self.relay.lock().await.take();
+        if let Some(relay) = relay
+            && tokio::time::timeout(Duration::from_secs(10), relay)
+                .await
+                .is_err()
+        {
+            tracing::warn!("Gave up telling the manager the last job states");
         }
         tracing::info!("Worker fully stopped.");
     }
@@ -769,7 +801,7 @@ impl Worker {
         m_cfg: &hustsync_config_parser::MirrorConfig,
         initial_state: u32,
     ) -> bool {
-        let provider = match Self::create_provider(name, m_cfg, &self.cfg) {
+        let provider = match Self::create_provider(name, m_cfg, &self.cfg, self.cgroups.as_ref()) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("Failed to create provider for {}: {}", name, e);
@@ -1114,7 +1146,7 @@ mod tests {
     #[tokio::test]
     async fn reload_unchanged_mirror_keeps_existing_job() {
         let mirror = command_mirror("archlinux", "true");
-        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()]));
+        let worker = Worker::new(worker_with_mirrors(vec![mirror.clone()])).unwrap();
         let before_state = {
             let jobs = worker.jobs.read().await;
             Arc::clone(&jobs.get("archlinux").unwrap().state)
@@ -1134,7 +1166,7 @@ mod tests {
     #[tokio::test]
     async fn reload_changed_mirror_rebuilds_existing_job() {
         let mirror = command_mirror("archlinux", "true");
-        let worker = Worker::new(worker_with_mirrors(vec![mirror]));
+        let worker = Worker::new(worker_with_mirrors(vec![mirror])).unwrap();
         let before_state = {
             let jobs = worker.jobs.read().await;
             Arc::clone(&jobs.get("archlinux").unwrap().state)
@@ -1157,7 +1189,7 @@ mod tests {
     async fn register_worker_broadcasts_to_all_manager_bases() {
         let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
         let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
-        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b])).unwrap();
 
         worker.register_worker().await;
 
@@ -1172,7 +1204,7 @@ mod tests {
     async fn relay_broadcasts_status_and_schedule_to_all_manager_bases() {
         let (manager_a, log_a, handle_a) = spawn_recording_manager().await;
         let (manager_b, log_b, handle_b) = spawn_recording_manager().await;
-        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b]));
+        let worker = Worker::new(worker_config_with_managers(vec![manager_a, manager_b])).unwrap();
 
         let (job, _rx) = make_mirror_job("archlinux");
         worker
@@ -1205,6 +1237,73 @@ mod tests {
 
         handle_a.abort();
         handle_b.abort();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_reports_interrupted_jobs_before_exit()
+    -> Result<(), Box<dyn std::error::Error>> {
+        type Bodies = Arc<Mutex<Vec<(String, serde_json::Value)>>>;
+
+        async fn record(State(log): State<Bodies>, uri: Uri, body: String) -> StatusCode {
+            let json = serde_json::from_str(&body).unwrap_or_default();
+            log.lock().await.push((uri.path().to_string(), json));
+            StatusCode::OK
+        }
+
+        async fn last(log: &Bodies, path: &str) -> Option<serde_json::Value> {
+            let log = log.lock().await;
+            log.iter()
+                .rev()
+                .find(|(p, _)| p == path)
+                .map(|(_, v)| v.clone())
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let log = Bodies::default();
+        let app = axum::Router::new()
+            .fallback(any(record))
+            .with_state(Arc::clone(&log));
+        let manager = tokio::spawn(axum::serve(listener, app).into_future());
+
+        let tmp = tempfile::tempdir()?;
+        let dir = |d: &str| Some(tmp.path().join(d).to_string_lossy().into_owned());
+        let mut cfg = worker_config_with_managers(vec![url]);
+        cfg.global = Some(WorkerGlobalConfig {
+            mirror_dir: dir("data"),
+            log_dir: dir("log"),
+            ..cfg.global.unwrap_or_default()
+        });
+        cfg.server = Some(WorkerServerConfig {
+            listen_port: Some(0),
+            ..cfg.server.unwrap_or_default()
+        });
+        cfg.mirrors = Some(vec![command_mirror("slow", "sleep 30")]);
+        let worker = Arc::new(Worker::new(cfg)?);
+        let run = tokio::spawn({
+            let w = Arc::clone(&worker);
+            async move { w.run().await }
+        });
+
+        let path = "/workers/broadcast-worker/jobs/slow";
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while last(&log, path)
+                .await
+                .is_none_or(|v| v["status"] != "syncing")
+            {
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await?;
+
+        worker.exit_token.cancel();
+        tokio::time::timeout(Duration::from_secs(8), run).await??;
+        let status = last(&log, path).await.ok_or("no status")?;
+        assert_eq!(status["status"], "failed", "{status}");
+        assert_eq!(status["error_msg"], "worker stopped", "{status}");
+        manager.abort();
+        Ok(())
     }
 
     fn strings(items: &[&str]) -> Vec<String> {
