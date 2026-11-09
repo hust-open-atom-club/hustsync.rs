@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::fs::{File, OpenOptions, create_dir_all};
-use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
@@ -12,8 +11,8 @@ use hustsync_internal::util::translate_rsync_exit_status;
 
 use super::{
     BASE_RSYNC_ARGS, BASE_RSYNC_STAGE1_ARGS, CommonProviderConfig, MirrorProvider, ProviderError,
-    ProviderType, RunContext, impl_provider_getters, inject_provider_env, log_provider_failure,
-    resolve_log_file, run_child_with_cancellation, store_rsync_data_size,
+    ProviderType, RunContext, impl_provider_getters, log_provider_failure, resolve_log_file,
+    rsync_env, run_child_with_cancellation, store_rsync_data_size,
 };
 
 /// Stage-1 filter rules for the `debian` profile.
@@ -135,8 +134,10 @@ impl TwoStageRsyncProvider {
         let mut options: Vec<String> = match stage {
             1 => {
                 // Stage-1 base — subset without --delete/--delete-after/--delay-updates
-                let mut opts: Vec<String> =
-                    BASE_RSYNC_STAGE1_ARGS.iter().map(|s| s.to_string()).collect();
+                let mut opts: Vec<String> = BASE_RSYNC_STAGE1_ARGS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
                 // Append profile filter rules
                 let profile_opts = stage1_profile_options(self.config.stage1_profile.as_str())
                     .ok_or_else(|| {
@@ -150,8 +151,7 @@ impl TwoStageRsyncProvider {
             }
             2 => {
                 // Stage-2 base — full sync including --delete and --delay-updates
-                let mut opts: Vec<String> =
-                    BASE_RSYNC_ARGS.iter().map(|s| s.to_string()).collect();
+                let mut opts: Vec<String> = BASE_RSYNC_ARGS.iter().map(|s| s.to_string()).collect();
                 // Stage 2 appends extra_options (Go's p.extraOptions)
                 opts.extend(self.config.extra_options.iter().cloned());
                 opts
@@ -203,25 +203,21 @@ impl TwoStageRsyncProvider {
         let std_out_log = log_file.try_clone().await?.into_std().await;
         let std_err_log = log_file.try_clone().await?.into_std().await;
 
-        let mut cmd = Command::new(&self.config.command);
-        cmd.args(&args)
-            .current_dir(&self.config.common.working_dir)
-            .stdout(Stdio::from(std_out_log))
+        let common = &self.config.common;
+        let env = rsync_env(
+            common,
+            self.config.username.as_ref(),
+            self.config.password.as_ref(),
+            effective_log_file,
+            &ctx.env,
+        );
+        let mut cmd = common.runner.command(
+            &self.config.command,
+            &args,
+            common.job(effective_log_file, &env),
+        );
+        cmd.stdout(Stdio::from(std_out_log))
             .stderr(Stdio::from(std_err_log));
-
-        #[cfg(unix)]
-        {
-            cmd.process_group(0);
-        }
-
-        if let Some(user) = &self.config.username {
-            cmd.env("USER", user);
-        }
-        if let Some(password) = &self.config.password {
-            cmd.env("RSYNC_PASSWORD", password);
-        }
-
-        inject_provider_env(&mut cmd, &self.config.common, effective_log_file, &ctx.env);
 
         tracing::info!(
             "Starting two-stage-rsync provider for {} (stage {})",
@@ -253,7 +249,7 @@ impl TwoStageRsyncProvider {
             std::time::Duration::ZERO,
             &ctx.cancel,
             &self.running_pgid,
-            &self.config.common.name,
+            &self.config.common,
         )
         .await
         {
@@ -374,17 +370,14 @@ impl MirrorProvider for TwoStageRsyncProvider {
     }
 
     async fn terminate(&self) -> Result<(), ProviderError> {
-        #[cfg(unix)]
-        {
-            let raw = self.running_pgid.load(Ordering::Acquire);
-            if raw != 0 && raw != u32::MAX {
-                tracing::warn!(
-                    "Terminating two-stage-rsync provider for {}",
-                    self.config.common.name
-                );
-            }
-            super::terminate_pgid(&self.running_pgid, &self.config.common.name).await;
+        let raw = self.running_pgid.load(Ordering::Acquire);
+        if raw != 0 && raw != u32::MAX {
+            tracing::warn!(
+                "Terminating two-stage-rsync provider for {}",
+                self.config.common.name
+            );
         }
+        self.config.common.stop(&self.running_pgid).await;
         Ok(())
     }
 
