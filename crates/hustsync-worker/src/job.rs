@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local, Utc};
 use hustsync_internal::status::SyncStatus;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -46,9 +47,21 @@ pub struct MirrorJob {
     pub state: Arc<AtomicU32>,
     pub disabled: Arc<tokio::sync::Notify>,
     pub interval: Duration,
+    pub cron: Option<hustsync_config_parser::Cron>,
 }
 
 impl MirrorJob {
+    /// When the job runs next after `after`: the cron schedule if set, else `after + interval`.
+    pub fn next_run(&self, after: DateTime<Utc>) -> DateTime<Utc> {
+        self.cron
+            .as_ref()
+            .and_then(|c| {
+                c.find_next_occurrence(&after.with_timezone(&Local), false)
+                    .ok()
+            })
+            .map_or(after + self.interval, |t| t.to_utc())
+    }
+
     pub fn state(&self) -> u32 {
         self.state.load(Ordering::Acquire)
     }
@@ -101,6 +114,7 @@ impl JobActor {
             state: Arc::clone(&state),
             disabled: Arc::clone(&disabled),
             interval,
+            cron: None,
         };
 
         let actor = JobActor {
@@ -455,5 +469,34 @@ impl JobActor {
             }
         }
         tracing::debug!("Job actor {} exited", self.name);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Timelike;
+
+    use super::*;
+
+    fn job(cron: Option<&str>) -> Result<MirrorJob, Box<dyn std::error::Error>> {
+        let (tx, _) = mpsc::channel(1);
+        Ok(MirrorJob {
+            name: "m".into(),
+            tx,
+            state: Arc::new(AtomicU32::new(STATE_NONE)),
+            disabled: Arc::new(tokio::sync::Notify::new()),
+            interval: Duration::from_secs(3600),
+            cron: cron.map(str::parse).transpose()?,
+        })
+    }
+
+    #[test]
+    fn next_run_follows_cron_when_set() -> Result<(), Box<dyn std::error::Error>> {
+        let now = Utc::now();
+        assert_eq!(job(None)?.next_run(now), now + Duration::from_secs(3600));
+        let at = job(Some("*/30 * * * *"))?.next_run(now);
+        assert!(at > now && at <= now + Duration::from_secs(1800));
+        assert_eq!((at.minute() % 30, at.second()), (0, 0));
+        Ok(())
     }
 }

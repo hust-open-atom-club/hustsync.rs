@@ -46,6 +46,7 @@ mod contract_cmd {
             state: Arc::new(AtomicU32::new(hustsync_worker::job::STATE_NONE)),
             disabled: Arc::new(tokio::sync::Notify::new()),
             interval: tokio::time::Duration::from_secs(3600),
+            cron: None,
         };
         (job, rx)
     }
