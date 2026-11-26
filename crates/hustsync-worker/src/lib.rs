@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 pub mod error;
 pub mod hooks;
 pub mod job;
+pub mod metrics;
 pub mod provider;
 pub mod schedule;
 pub mod server;

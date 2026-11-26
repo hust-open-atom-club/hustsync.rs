@@ -134,6 +134,16 @@ impl ScheduleQueue {
         // Lazy delete: just remove from the map, the heap will discard it on pop
         self.jobs_time.remove(name).is_some()
     }
+
+    /// Return the number of jobs currently scheduled (valid entries only).
+    pub fn len(&self) -> usize {
+        self.jobs_time.len()
+    }
+
+    /// Return true if no jobs are scheduled.
+    pub fn is_empty(&self) -> bool {
+        self.jobs_time.is_empty()
+    }
 }
 
 #[cfg(test)]
