@@ -10,9 +10,8 @@
 //! On `post_fail`: rename the current file to `<...>.log.fail` and
 //! re-point the `latest` symlink.
 //!
-//! Retention is hard-coded at 9 kept-before-create + 1 fresh = 10 total
-//! on disk after each rotation pass. Operator-tunable retention and
-//! compressed `.log.gz` rotation are future extensions.
+//! `log_retention` files stay on disk after each rotation: the fresh one
+//! plus `log_retention - 1` older ones. The default of 10 matches Go.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -27,19 +26,24 @@ use super::{HookCtx, HookError, JobHook};
 /// precision, no seconds; hour and minute joined by `_`, not `-`.
 const TIMESTAMP_FMT: &str = "%Y-%m-%d_%H_%M";
 
-/// Go keeps 9 old files and creates the new one on top, so after
-/// `pre_exec` there are 10 on disk. Matching this fencepost keeps the
-/// Go test suite's `len(files) == 10` assertion happy.
-const RETENTION: usize = 9;
+/// Files per mirror after rotation, as Go keeps 9 old ones plus the new one.
+pub const RETENTION: usize = 10;
 
 const HOOK_NAME: &str = "loglimit";
 const LATEST_LINK: &str = "latest";
 
-pub struct LogLimitHook;
+pub struct LogLimitHook {
+    keep: usize,
+}
 
 impl LogLimitHook {
     pub fn new() -> Self {
-        Self
+        Self::retaining(RETENTION)
+    }
+
+    /// Keeps `keep` log files per mirror, at least one.
+    pub fn retaining(keep: usize) -> Self {
+        Self { keep: keep.max(1) }
     }
 
     fn latest_symlink(&self, ctx: &HookCtx) -> PathBuf {
@@ -91,7 +95,7 @@ impl LogLimitHook {
 
     async fn rotate(&self, ctx: &HookCtx) -> Result<(), HookError> {
         let files = self.mirror_logs(ctx).await?;
-        for (path, _) in files.into_iter().skip(RETENTION) {
+        for (path, _) in files.into_iter().skip(self.keep - 1) {
             if let Err(e) = fs::remove_file(&path).await {
                 // Don't fail the sync on a rotation glitch; logged and
                 // continue so the fresh log file still gets created.
