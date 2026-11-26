@@ -5,6 +5,7 @@
 - [Contribution guide](../CONTRIBUTING.md): selecting validation, reporting results, and splitting commits.
 - [Agent entry point](../AGENTS.md) and [review workflow](../.agents/REVIEW.md): task-specific reading and the correction cycle.
 - [Repository skills](SKILLS.md): discovery, invocation boundaries, and behavioral validation cases.
+- [User guides](guide/get_started.md): getting started, deployment, configuration and each feature.
 - [Configuration examples](example/): check paths, mirror sources, and the runtime environment before use; these are not deployment certification.
 
 ## How to Read These Specifications
